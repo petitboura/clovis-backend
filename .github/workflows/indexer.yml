@@ -1,0 +1,36 @@
+name: Indexation Notion vers Supabase
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+jobs:
+  indexer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Installer Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Installer les dependances
+        # google-genai (pas openai) : core/embeddings.py utilise
+        # gemini-embedding-001 depuis la migration Gemini, indexers/index_notion.py
+        # en dépend indirectement via decouper_texte/vectoriser.
+        run: pip install requests supabase google-genai python-dotenv
+
+      - name: Lancer l'indexation
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET: ${{ secrets.SUPABASE_SECRET }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          # NOTION_PAGE_ID retiré : n'est plus un secret global depuis le
+          # passage multi-agent (indexers/index_notion.py lit désormais
+          # agents.notion_page_id pour CHAQUE agent, directement dans Supabase).
+          # OPENROUTER_API_KEY retiré : plus utilisé depuis la migration Gemini.
+        run: python indexers/index_notion.py
+
