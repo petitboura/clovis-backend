@@ -16,6 +16,7 @@ from comportements_etudiants import (
     lister_comportements as lister_comportements_etudiant,
     choisir_comportements_pertinents,
 )
+from programme_llm import lister_mes_programmes_legers
 from mcp_tools import lister_tous_les_outils, lister_outils_autorises_pour_agent, appeler_outil
 from registre_outils import OUTILS_SENSIBLES, OUTILS_AUTONOMES
 from fournisseurs_llm import generer_reponse_premium
@@ -1281,6 +1282,32 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
             "de la description seule."
         )
 
+    # Programmes de l'étudiant (13/08, chantier "connexion IA <-> structure
+    # programme", demande Bourama). Contrairement aux comportements
+    # ci-dessus, pas besoin d'un routeur : la liste est déjà minuscule
+    # (juste id/niveau/nom, jamais la structure matières/chapitres), donc
+    # injectée telle quelle plutôt que filtrée. Coût quasi nul, aucun appel
+    # LLM supplémentaire (voir core/programme_llm.py). La structure
+    # complète reste sur demande via l'outil consulter_programme (voir
+    # core/serveur_mcp_generation.py), pour ne pas alourdir chaque message
+    # avec le détail matières/chapitres/limites d'un programme qui peut
+    # être long.
+    mes_programmes = lister_mes_programmes_legers(user_id) if user_id else []
+    if mes_programmes:
+        liste_programmes = "\n".join(
+            f"- id={p['id']} — {p['niveau']}" + (f" ({p['nom']})" if p.get("nom") else "")
+            for p in mes_programmes
+        )
+        system_final += (
+            "\n\nPROGRAMMES DE CET ÉTUDIANT (structure classe/matière/chapitre qu'il a créée dans la "
+            "section Programme de son espace) :\n"
+            f"{liste_programmes}\n"
+            "Tu peux t'appuyer dessus pour personnaliser ta réponse (proposer d'y accéder, situer une "
+            "question par rapport à sa matière/son niveau). Si tu as besoin de voir le détail "
+            "matières/chapitres/limites, appelle l'outil consulter_programme avec l'id ci-dessus -- ne "
+            "devine jamais son contenu."
+        )
+
     system_final += INSTRUCTIONS_LONGUEUR_REPONSE.get(longueur_reponse, "")
 
     if recherche_forcee:
@@ -1327,6 +1354,7 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     logging.info(
         f"Prompt système construit -> base_notion:{len(system_final or '')} caractères, "
         f"comportements_etudiant:{'oui' if comportements_etudiant else 'NON'}, "
+        f"programmes_etudiant:{len(mes_programmes)}, "
         f"longueur_reponse:{longueur_reponse}, "
         f"recherche_forcee:{'oui' if recherche_forcee else 'NON'}"
     )

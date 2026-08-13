@@ -58,6 +58,7 @@ from api.roles import (
     _inserer_message,
 )
 from core.comportements_etudiants import obtenir_comportement_texte as _obtenir_comportement_texte
+from core.programme_llm import obtenir_structure_programme as _obtenir_structure_programme
 from core.generation_site import (
     deployer_site as _deployer_site,
     site_deploiement_disponible,
@@ -441,6 +442,31 @@ def consulter_comportement(comportement_id: str, ctx: Context) -> str:
     except Exception as e:
         logging.error(f"ERREUR outil consulter_comportement : {e}")
         return "Erreur : impossible de consulter ce comportement, réessaie."
+
+
+@mcp_generation.tool()
+def consulter_programme(programme_id: str, ctx: Context) -> str:
+    """
+    Lit la structure complète (matières -> chapitres, avec leurs limites
+    de cadre officiel si renseignées) d'un programme que cet étudiant a
+    créé lui-même (section "Programme" de son espace), à partir de son
+    id. Le message système t'a déjà donné la liste légère (id/niveau/nom)
+    des programmes de cet étudiant -- utilise cet outil quand tu as
+    besoin du détail matières/chapitres pour aider l'étudiant ou situer
+    une question par rapport à son programme, plutôt que de deviner.
+    """
+    try:
+        requete = ctx.request_context.request
+        user_id = requete.query_params.get("user_id")
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        structure = _obtenir_structure_programme(user_id, programme_id)
+        if structure is None:
+            return "Ce programme est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return structure
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_programme : {e}")
+        return "Erreur : impossible de consulter ce programme, réessaie."
 
 
 @mcp_generation.tool()
