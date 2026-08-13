@@ -16,6 +16,7 @@ Génération d'image (generer_image) est TOUJOURS active maintenant
 optionnelle -- voir generation_images.py, mis à jour le 21/07/2026).
 """
 
+import os
 import logging
 
 from mcp.server.mcpserver import MCPServer as FastMCP, Context
@@ -62,6 +63,20 @@ from core.generation_site import (
 )
 from core.bibliotheque_fichiers import chercher_fichiers as _chercher_fichiers
 from core.bibliotheque_rag import chercher_bibliotheque as _chercher_bibliotheque
+
+# Clovis (12/08) : memoire/profil/RAG/matiere ne sont plus pre-fetches et
+# injectes systematiquement dans le system prompt (voir core/main.py,
+# _construire_system_prompt) -- ce sont maintenant des outils que le
+# modele appelle lui-meme s'il juge pertinent, au meme titre que les
+# outils generation/bibliotheque ci-dessus.
+import json
+from supabase import create_client
+from retriever import chercher_candidats as _chercher_candidats
+from contenu_dynamique_matiere import resoudre_system_prompt as _resoudre_system_prompt_matiere
+
+_SUPABASE_URL = os.environ.get("SUPABASE_URL")
+_SUPABASE_SECRET = os.environ.get("SUPABASE_SECRET")
+_supabase_memoire = create_client(_SUPABASE_URL, _SUPABASE_SECRET)
 
 mcp_generation = FastMCP(name="generation")
 
@@ -289,6 +304,207 @@ def consulter_bibliotheque(question: str, user_id: str = None) -> str:
         return "Rien de pertinent trouvé dans la bibliothèque pour cette question."
 
     return "\n\n---\n\n".join(r["contenu"] for r in resultats)
+
+
+@mcp_generation.tool()
+def consulter_memoire_utilisateur(ctx: Context) -> str:
+    """
+    Consulte ce que tu sais déjà de CET utilisateur d'une conversation à
+    l'autre (mémoire long-terme structurée -- préférences, matières
+    suivies, difficultés récurrentes, projets en cours, etc.).
+    À utiliser au début d'une conversation si ça peut aider à mieux
+    répondre, ou dès que tu sens qu'un élément de contexte passé serait
+    utile. Renvoie un JSON (peut être vide si rien n'a encore été noté).
+    """
+    try:
+        requete = ctx.request_context.request
+        user_id = requete.query_params.get("user_id")
+        if not user_id:
+            return "Aucune mémoire disponible : utilisateur non connecté."
+        res = (
+            _supabase_memoire.table("conversation_summaries")
+            .select("donnees")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        donnees = (res.data or {}).get("donnees") or {}
+        if not donnees:
+            return "Rien en mémoire pour cet utilisateur pour l'instant."
+        return json.dumps(donnees, ensure_ascii=False)
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_memoire_utilisateur : {e}")
+        return "Erreur : impossible de consulter la mémoire, réessaie."
+
+
+@mcp_generation.tool()
+def mettre_a_jour_memoire_utilisateur(champs_json: str, ctx: Context) -> str:
+    """
+    Note ou met à jour un ou plusieurs éléments dans la mémoire
+    long-terme de CET utilisateur, à utiliser dès que tu apprends
+    quelque chose d'utile à retenir pour les prochaines conversations
+    (préférence, difficulté récurrente, projet en cours...). Le schéma
+    est libre : garde les clés déjà utilisées si elles collent (ex.
+    "profil_personnel", "preferences_pedagogiques",
+    "matieres_ou_sujets", "objectifs_et_projets",
+    "points_de_continuite"), ou crée-en de nouvelles si aucune ne
+    convient. `champs_json` est un objet JSON, ex.
+    '{"preferences_pedagogiques": {"style_explication": "avec des exemples concrets"}}'
+    -- fusionné avec la mémoire existante (les clés de premier niveau
+    fournies remplacent leur ancienne valeur, le reste est conservé tel
+    quel). N'écris ici que ce qui a une vraie valeur à long terme, pas
+    le contenu d'un seul message.
+    """
+    try:
+        requete = ctx.request_context.request
+        user_id = requete.query_params.get("user_id")
+        if not user_id:
+            return "Erreur : impossible d'identifier l'utilisateur pour mettre à jour la mémoire."
+        try:
+            patch = json.loads(champs_json)
+        except Exception:
+            return "Erreur : champs_json doit être un objet JSON valide."
+        if not isinstance(patch, dict):
+            return "Erreur : champs_json doit être un objet JSON (pas une liste ou une valeur simple)."
+
+        res = (
+            _supabase_memoire.table("conversation_summaries")
+            .select("donnees")
+            .eq("user_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        actuel = (res.data or {}).get("donnees") or {}
+        actuel.update(patch)
+
+        _supabase_memoire.table("conversation_summaries").upsert(
+            {"user_id": user_id, "donnees": actuel}, on_conflict="user_id"
+        ).execute()
+        return "Mémoire mise à jour."
+    except Exception as e:
+        logging.error(f"ERREUR outil mettre_a_jour_memoire_utilisateur : {e}")
+        return "Erreur : la mise à jour de la mémoire a échoué, réessaie."
+
+
+@mcp_generation.tool()
+def consulter_profil_utilisateur(ctx: Context) -> str:
+    """
+    Consulte le profil connu de CET utilisateur pour Clovis (données
+    déjà extraites au fil des conversations : qui il est, son contexte
+    scolaire, etc.). À utiliser si ça peut aider à personnaliser ta
+    réponse. Renvoie un JSON (peut être vide).
+    """
+    try:
+        requete = ctx.request_context.request
+        user_id = requete.query_params.get("user_id")
+        agent_id = requete.query_params.get("agent_id")
+        if not user_id or not agent_id:
+            return "Aucun profil disponible."
+        res = (
+            _supabase_memoire.table("agent_user_profiles")
+            .select("donnees")
+            .eq("user_id", user_id)
+            .eq("agent_id", agent_id)
+            .maybe_single()
+            .execute()
+        )
+        donnees = (res.data or {}).get("donnees") or {}
+        if not donnees:
+            return "Rien dans le profil de cet utilisateur pour l'instant."
+        return json.dumps(donnees, ensure_ascii=False)
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_profil_utilisateur : {e}")
+        return "Erreur : impossible de consulter le profil, réessaie."
+
+
+@mcp_generation.tool()
+def mettre_a_jour_profil_utilisateur(champs_json: str, ctx: Context) -> str:
+    """
+    Met à jour le profil de CET utilisateur dès que tu apprends une
+    information utile à retenir sur qui il est (pas sur ce qu'il sait
+    ou apprend -- ça, c'est la mémoire, voir mettre_a_jour_memoire_utilisateur).
+    Schéma libre, mêmes règles que pour la mémoire : `champs_json` est
+    un objet JSON fusionné avec le profil existant.
+    """
+    try:
+        requete = ctx.request_context.request
+        user_id = requete.query_params.get("user_id")
+        agent_id = requete.query_params.get("agent_id")
+        if not user_id or not agent_id:
+            return "Erreur : impossible d'identifier l'utilisateur pour mettre à jour le profil."
+        try:
+            patch = json.loads(champs_json)
+        except Exception:
+            return "Erreur : champs_json doit être un objet JSON valide."
+        if not isinstance(patch, dict):
+            return "Erreur : champs_json doit être un objet JSON (pas une liste ou une valeur simple)."
+
+        res = (
+            _supabase_memoire.table("agent_user_profiles")
+            .select("donnees")
+            .eq("user_id", user_id)
+            .eq("agent_id", agent_id)
+            .maybe_single()
+            .execute()
+        )
+        actuel = (res.data or {}).get("donnees") or {}
+        actuel.update(patch)
+
+        _supabase_memoire.table("agent_user_profiles").upsert(
+            {"user_id": user_id, "agent_id": agent_id, "donnees": actuel}, on_conflict="agent_id,user_id"
+        ).execute()
+        return "Profil mis à jour."
+    except Exception as e:
+        logging.error(f"ERREUR outil mettre_a_jour_profil_utilisateur : {e}")
+        return "Erreur : la mise à jour du profil a échoué, réessaie."
+
+
+@mcp_generation.tool()
+def chercher_dans_base_connaissances(question: str, ctx: Context) -> str:
+    """
+    Cherche dans la base de connaissances de l'agent (documents et
+    instructions spécifiques ajoutés par l'équipe Clovis) les passages
+    pertinents pour répondre à `question`. À utiliser quand la question
+    touche un sujet précis où un contenu de référence a pu être préparé
+    à l'avance -- pas systématique, seulement si pertinent. Renvoie les
+    extraits trouvés ou un message si rien de pertinent.
+    """
+    try:
+        requete = ctx.request_context.request
+        agent_id = requete.query_params.get("agent_id")
+        candidats = _chercher_candidats(question, agent_id=agent_id)
+        morceaux = [c["contenu"] for c in candidats.get("prompts", [])] + [
+            c["contenu"] for c in candidats.get("documents", [])
+        ]
+        if not morceaux:
+            return "Rien de pertinent trouvé dans la base de connaissances pour cette question."
+        return "\n\n---\n\n".join(morceaux)
+    except Exception as e:
+        logging.error(f"ERREUR outil chercher_dans_base_connaissances : {e}")
+        return "Erreur : la recherche a échoué, réessaie."
+
+
+@mcp_generation.tool()
+def consulter_matiere_active(message_utilisateur: str, ctx: Context) -> str:
+    """
+    Consulte le contenu pédagogique spécifique (cours, consignes d'un
+    enseignant) débloqué par CET utilisateur pour la matière la plus
+    pertinente par rapport à `message_utilisateur` (le message en cours
+    de l'utilisateur, tel quel). À utiliser si la question ressemble à
+    une question de cours et que l'utilisateur a pu débloquer une
+    matière avec un code. Ce contenu est un COMPLÉMENT à tes
+    instructions habituelles, pas un remplacement -- utilise-le comme
+    référence, pas comme un bloc à recopier tel quel. Peut renvoyer un
+    message générique si aucune matière n'est débloquée.
+    """
+    try:
+        requete = ctx.request_context.request
+        agent_id = requete.query_params.get("agent_id")
+        user_id = requete.query_params.get("user_id")
+        return _resoudre_system_prompt_matiere(message_utilisateur, agent_id, user_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_matiere_active : {e}")
+        return "Erreur : impossible de consulter le contenu de la matière, réessaie."
 
 
 @mcp_generation.tool()

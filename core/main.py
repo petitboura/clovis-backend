@@ -12,9 +12,7 @@ from google import genai
 from google.genai import types
 from supabase import create_client
 from configuration import get_system_prompt
-from contenu_dynamique_matiere import agent_a_contenu_dynamique, resoudre_system_prompt as resoudre_system_prompt_matiere
 from comportements_etudiants import lister_comportements as lister_comportements_etudiant
-from retriever import chercher_candidats
 from mcp_tools import lister_tous_les_outils, lister_outils_autorises_pour_agent, appeler_outil
 from registre_outils import OUTILS_SENSIBLES, OUTILS_AUTONOMES
 from fournisseurs_llm import generer_reponse_premium
@@ -1343,53 +1341,18 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
 
 
 def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longueur_reponse="moyenne", fuseau_horaire=None, recherche_forcee=False, outil_force=None, sans_enseignant=False):
-    # Agents à "contenu dynamique par matière" (voir
-    # core/contenu_dynamique_matiere.py, 2026-08-06) : le system_prompt
-    # dépend de l'étudiant et du message, jamais de get_system_prompt()
-    # (qui suppose un prompt fixe et cacheable par agent).
-    #
-    # Sinon, agents "partagés" (Stirux, Lirinus...) : si un prompt
-    # personnalisé existe pour cet utilisateur sur cet agent (table
-    # agents_prompts_utilisateur), il remplace entièrement le
-    # system_prompt de base -- pas de fusion des deux. Ne casse pas le
-    # cache Groq pour les autres agents (aucune ligne dans la table =
-    # comportement inchangé, un seul appel de plus, "best effort").
-    #
-    # Tous les autres agents de la plateforme passent par
-    # get_system_prompt() comme avant, aucune régression.
-    # Perf (10/08, demande Bourama : "l'assemblage du system prompt") :
-    # system_prompt (ligne suivante) ne dépend d'AUCUNE des 4 lectures
-    # ci-dessous (candidats/resume_memoire/profil_utilisateur/
-    # comportements_etudiant) -- pourtant elle partait avant elles, en
-    # séquence. Pour Nitrux (agent_a_contenu_dynamique=True),
-    # resoudre_system_prompt_matiere peut en plus déclencher un SECOND
-    # appel LLM séparé (_choisir_matiere, routeur de matière -- même
-    # coût qu'un appel LLM complet, voir core/contenu_dynamique_matiere.py),
-    # en plus du routeur d'outils déjà parallélisé côté chat(). Intégrée
-    # ici au même ThreadPoolExecutor que les 4 autres lectures : sa
-    # latence est maintenant absorbée avec elles au lieu de s'ajouter
-    # avant. Même valeur retournée qu'avant, juste calculée en même
-    # temps.
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        f_system_prompt = (
-            executor.submit(resoudre_system_prompt_matiere, message_utilisateur, agent_id, user_id, sans_enseignant)
-            if agent_a_contenu_dynamique(agent_id)
-            else executor.submit(lambda: _charger_prompt_personnalise(agent_id, user_id) or get_system_prompt(agent_id))
-        )
-        f_candidats = executor.submit(chercher_candidats, message_utilisateur, agent_id=agent_id)
-        f_resume = executor.submit(_charger_resume_memoire, user_id)
-        f_profil = executor.submit(_charger_profil_utilisateur, agent_id, user_id)
-        f_comportements = (
-            executor.submit(lister_comportements_etudiant, agent_id, user_id) if user_id else None
-        )
-    system_prompt = f_system_prompt.result()
-    candidats = f_candidats.result()
-    resume_memoire = f_resume.result()
-    profil_utilisateur = f_profil.result()
-    comportements_etudiant = f_comportements.result() if f_comportements else []
-
-    instructions = "".join(f"\n{c['contenu']}\n" for c in candidats.get("prompts", []))
-    contexte_docs = "".join(f"\n{c['contenu']}\n" for c in candidats.get("documents", []))
+    # Clovis (12/08) : plus de branche "contenu dynamique par matière"
+    # exclusive ni de pré-fetch RAG/mémoire/profil systématique -- ces 4
+    # lectures (matière, RAG, mémoire, profil) sont devenues des outils
+    # que le modèle appelle lui-même s'il juge pertinent (voir
+    # consulter_matiere_active/chercher_dans_base_connaissances/
+    # consulter_memoire_utilisateur/consulter_profil_utilisateur dans
+    # core/serveur_mcp_generation.py), au lieu d'être injectées à chaque
+    # message que ce soit utile ou non. Seul le prompt de base (Notion,
+    # get_system_prompt, caché 24h) reste chargé systématiquement -- lui
+    # ne dépend ni du message ni de l'utilisateur.
+    system_prompt = _charger_prompt_personnalise(agent_id, user_id) or get_system_prompt(agent_id)
+    comportements_etudiant = lister_comportements_etudiant(agent_id, user_id) if user_id else []
 
     # ORDRE DU PROMPT (2026-07-29, optimisation cache Groq) : du plus stable
     # au plus volatil, pour maximiser la longueur du prefixe identique
@@ -1447,23 +1410,28 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
             f"tout ce qui précède, jamais à la place) :\n{liste_comportements}"
         )
 
-    if resume_memoire:
-        system_final += (
-            "\n\nCONTEXTE DES SESSIONS PRÉCÉDENTES AVEC CETTE PERSONNE (résumé, à utiliser "
-            "pour personnaliser ta réponse -- son projet, ses préférences, ce qu'elle a déjà "
-            "expliqué -- MAIS ne jamais le réciter tel quel, et ne JAMAIS t'en servir comme "
-            "source de vérité pour un fait que tu peux vérifier maintenant avec un outil "
-            "(structure d'un dépôt, contenu d'un fichier, état actuel de quoi que ce soit). "
-            "Ce résumé peut décrire une situation ancienne, déjà changée depuis -- si un outil "
-            "existe pour vérifier l'état actuel d'une chose mentionnée ici, appelle-le, ne "
-            f"réponds jamais depuis ce résumé seul) :\n{resume_memoire}"
-        )
-    if profil_utilisateur:
-        system_final += (
-            "\n\nPROFIL CONNU DE CET UTILISATEUR (rempli automatiquement au fil des "
-            "conversations, à utiliser pour personnaliser ta réponse, ne jamais le "
-            f"réciter tel quel) :\n{json.dumps(profil_utilisateur, ensure_ascii=False)}"
-        )
+    # Clovis (12/08) : mémoire/profil/base de connaissances/matière ne
+    # sont plus injectés systématiquement -- annoncés ici comme outils
+    # disponibles, c'est au modèle de décider s'il les appelle (lecture
+    # ET écriture pour mémoire/profil). Bloc quasi-fixe (change seulement
+    # si user_id absent), reste donc bien placé côté "stable" du prompt.
+    system_final += (
+        "\n\nOUTILS DE CONTEXTE DISPONIBLES (à appeler toi-même si pertinent, jamais "
+        "systématiquement) :\n"
+        "- consulter_memoire_utilisateur / mettre_a_jour_memoire_utilisateur : ce que tu "
+        "sais de cette personne d'une conversation à l'autre (préférences, matières, "
+        "difficultés, projets...). Consulte en début de conversation si utile, et "
+        "mets à jour dès que tu apprends quelque chose qui vaut la peine d'être retenu.\n"
+        "- consulter_profil_utilisateur / mettre_a_jour_profil_utilisateur : qui est "
+        "cette personne (contexte scolaire, etc.), même logique lecture/écriture.\n"
+        "- chercher_dans_base_connaissances : documents/instructions de référence "
+        "préparés à l'avance, si la question touche un sujet précis.\n"
+        "- consulter_matiere_active : contenu de cours débloqué par cette personne "
+        "avec un code enseignant, si la question ressemble à une question de cours. "
+        "Complément à tes instructions, jamais un remplacement ni à recopier tel quel.\n"
+        f"Aucun paramètre user_id/agent_id à fournir toi-même pour ces outils, ils sont "
+        f"résolus automatiquement côté serveur."
+    )
 
     # Bouton Outils (2026-07-25, multi-sélection depuis le 26/07 --
     # outil_force est maintenant une LISTE, plus une simple chaîne, voir
@@ -1547,10 +1515,6 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
         )
     system_final += INSTRUCTIONS_LONGUEUR_REPONSE.get(longueur_reponse, "")
 
-    if instructions:
-        system_final += f"\n\n{instructions}"
-    if contexte_docs:
-        system_final += f"\n\n{contexte_docs}"
     if recherche_forcee:
         # Icône de recherche dans la barre de saisie (djiguigne-frontend) --
         # forçage manuel pour CE message précis (voir docstring de
