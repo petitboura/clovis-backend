@@ -57,6 +57,7 @@ from api.roles import (
     resoudre_destinataire_autorise as _resoudre_destinataire_autorise,
     _inserer_message,
 )
+from core.comportements_etudiants import obtenir_comportement_texte as _obtenir_comportement_texte
 from core.generation_site import (
     deployer_site as _deployer_site,
     site_deploiement_disponible,
@@ -415,6 +416,31 @@ def consulter_profil_utilisateur(ctx: Context) -> str:
     except Exception as e:
         logging.error(f"ERREUR outil consulter_profil_utilisateur : {e}")
         return "Erreur : impossible de consulter le profil, réessaie."
+
+
+@mcp_generation.tool()
+def consulter_comportement(comportement_id: str, ctx: Context) -> str:
+    """
+    Lit le texte COMPLET d'une instruction personnelle que cet étudiant
+    a écrite lui-même (section "Mes comportements"), à partir de son id.
+    Le message système t'a déjà donné une courte description de ceux
+    qui semblent pertinents pour ce message -- utilise cet outil quand
+    l'un d'eux semble s'appliquer, AVANT de répondre, pour lire son
+    contenu réel plutôt que de deviner à partir de la description seule.
+    """
+    try:
+        requete = ctx.request_context.request
+        user_id = requete.query_params.get("user_id")
+        agent_id = requete.query_params.get("agent_id")
+        if not user_id or not agent_id:
+            return "Erreur : impossible d'identifier l'étudiant ou l'agent."
+        texte = _obtenir_comportement_texte(agent_id, user_id, comportement_id)
+        if texte is None:
+            return "Ce comportement est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return texte
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_comportement : {e}")
+        return "Erreur : impossible de consulter ce comportement, réessaie."
 
 
 @mcp_generation.tool()

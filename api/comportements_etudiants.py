@@ -5,9 +5,13 @@ fourre-tout ("on peut en mettre plusieurs hein, pas juste un"). Chacune
 s'ajoute EN PLUS du system_prompt déjà résolu pour le message -- que ce
 soit le généraliste de base, celui d'un enseignant (matière débloquée
 via core/contenu_dynamique_matiere.py), ou le prompt forcé via "Sans
-enseignant" -- jamais un remplacement. Voir l'injection dans
-core/main.py::_construire_system_prompt (logique de lecture/écriture
-partagée dans core/comportements_etudiants.py).
+enseignant" -- jamais un remplacement.
+
+Mécanisme "à la skill" (13/08/2026) : l'étudiant saisit uniquement le
+texte long (`texte`) -- la `description` courte est générée
+automatiquement côté serveur (core/comportements_etudiants.py), jamais
+par l'étudiant. Voir l'injection dans core/main.py::_construire_system_prompt
+et l'outil consulter_comportement dans core/serveur_mcp_generation.py.
 
 Affichage de la section côté frontend piloté par
 agents.section_mes_comportements (comme agents.bouton_sans_enseignant) --
@@ -37,6 +41,7 @@ router = APIRouter(prefix="/api/agents/{agent_id}/mes-comportements", tags=["com
 class Comportement(BaseModel):
     id: str
     texte: str
+    description: str
 
 
 class ComportementPayload(BaseModel):

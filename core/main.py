@@ -12,7 +12,10 @@ from google import genai
 from google.genai import types
 from supabase import create_client
 from configuration import get_system_prompt
-from comportements_etudiants import lister_comportements as lister_comportements_etudiant
+from comportements_etudiants import (
+    lister_comportements as lister_comportements_etudiant,
+    choisir_comportements_pertinents,
+)
 from mcp_tools import lister_tous_les_outils, lister_outils_autorises_pour_agent, appeler_outil
 from registre_outils import OUTILS_SENSIBLES, OUTILS_AUTONOMES
 from fournisseurs_llm import generer_reponse_premium
@@ -1358,7 +1361,10 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     # get_system_prompt, caché 24h) reste chargé systématiquement -- lui
     # ne dépend ni du message ni de l'utilisateur.
     system_prompt = _charger_prompt_personnalise(agent_id, user_id) or get_system_prompt(agent_id)
-    comportements_etudiant = lister_comportements_etudiant(agent_id, user_id) if user_id else []
+    comportements_etudiant = (
+        choisir_comportements_pertinents(message_utilisateur, lister_comportements_etudiant(agent_id, user_id))
+        if user_id else []
+    )
 
     # ORDRE DU PROMPT (2026-07-29, optimisation cache Groq) : du plus stable
     # au plus volatil, pour maximiser la longueur du prefixe identique
@@ -1401,19 +1407,25 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
         system_final += f"\n\n{system_prompt}"
 
     # Section "Mes comportements" (06/08/2026, demande Bourama : "on peut
-    # en mettre plusieurs hein, pas juste un") : instructions écrites par
-    # l'étudiant lui-même, EN PLUS du system_prompt résolu ci-dessus
-    # (généraliste, matière d'un enseignant, ou "sans enseignant") --
-    # jamais un remplacement. Liste vide si rien d'enregistré pour cet
-    # (agent, utilisateur), aucun bruit ajouté dans ce cas.
-    # comportements_etudiant déjà chargé plus haut, en parallèle avec
-    # candidats/resume_memoire/profil_utilisateur (voir ThreadPoolExecutor
-    # ci-dessus, perf 10/08).
+    # en mettre plusieurs hein, pas juste un"), mécanisme "à la skill"
+    # (13/08/2026) : le texte long n'est PLUS injecté d'office. Le petit
+    # routeur (choisir_comportements_pertinents, appelé plus haut) a déjà
+    # réduit la liste complète de l'étudiant aux candidats plausibles pour
+    # CE message -- on n'annonce ici que leur id + description, jamais le
+    # texte. C'est le grand modèle qui décide s'il appelle l'outil
+    # consulter_comportement pour lire le texte complet d'un candidat
+    # (voir core/serveur_mcp_generation.py), même logique que les autres
+    # "OUTILS DE CONTEXTE DISPONIBLES" plus bas. Rien injecté si le
+    # routeur n'a retenu aucun candidat.
     if comportements_etudiant:
-        liste_comportements = "\n".join(f"- {c['texte']}" for c in comportements_etudiant)
+        candidats = "\n".join(f"- id={c['id']} : {c['description']}" for c in comportements_etudiant)
         system_final += (
-            "\n\nINSTRUCTIONS PERSONNELLES ÉCRITES PAR CET ÉTUDIANT LUI-MÊME (à respecter EN PLUS de "
-            f"tout ce qui précède, jamais à la place) :\n{liste_comportements}"
+            "\n\nINSTRUCTIONS PERSONNELLES DE CET ÉTUDIANT POTENTIELLEMENT PERTINENTES POUR CE MESSAGE "
+            "(il les a écrites lui-même) :\n"
+            f"{candidats}\n"
+            "Si l'une d'elles semble s'appliquer, appelle l'outil consulter_comportement avec son id "
+            "pour lire son contenu complet AVANT de répondre -- ne devine jamais son contenu à partir "
+            "de la description seule."
         )
 
     # Clovis (12/08) : mémoire/profil/base de connaissances/matière ne
