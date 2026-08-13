@@ -19,6 +19,12 @@ from fournisseurs_llm import generer_reponse_premium
 
 logging.basicConfig(level=logging.INFO)
 
+# (13/08) Commentaire ajoute pour forcer Railway a rebuild depuis ce commit --
+# le deploiement precedent avait reutilise une image en cache identique a
+# celle d'avant le fix du NameError resume_memoire dans
+# _construire_system_prompt (voir commit d565000), donc le bug restait
+# present en prod malgre le fix deja present sur main.
+
 
 def get_secret(key):
     return os.environ.get(key)
