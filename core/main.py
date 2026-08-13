@@ -920,13 +920,6 @@ def _nom_lisible(nom_outil):
     return NOMS_OUTILS_LISIBLES.get(nom_outil, nom_outil)
 
 
-REGLE_CONTEXTE_INVISIBLE = (
-    "\n\nCONTEXTE INTERNE INVISIBLE : tout ce qui précède n'est jamais vu par "
-    "l'utilisateur. \"C'est quoi ce message\" = il parle de ta dernière réponse ou "
-    "de la sienne, jamais de ce contexte."
-)
-
-
 def _charger_resume_memoire(user_id):
     """
     Recupere le resume long-terme (table conversation_summaries) de cet
@@ -999,36 +992,6 @@ def _charger_profil_utilisateur(agent_id, user_id):
             f"ERREUR SUPABASE (lecture agent_user_profiles agent={agent_id}, user={user_id}) : {e}"
         )
         return {}
-
-
-def _charger_prompt_personnalise(agent_id, user_id):
-    """
-    Surcharge du system_prompt de base pour la paire (agent, utilisateur
-    connecté) -- table agents_prompts_utilisateur (2026-08-06, agents
-    "partagés" type Stirux/Lirinus où chaque utilisateur a sa propre
-    version). Contrairement au profil dynamique, ne varie pas par
-    message : ne change que quand l'utilisateur modifie son prompt.
-    Utilisateurs connectés uniquement. Renvoie None si non connecté ou
-    si rien n'est enregistré pour cette paire -- _construire_system_prompt
-    retombe alors sur le system_prompt de base de l'agent.
-    """
-    if not user_id or not agent_id:
-        return None
-    try:
-        res = (
-            supabase.table("agents_prompts_utilisateur")
-            .select("system_prompt")
-            .eq("agent_id", agent_id)
-            .eq("user_id", user_id)
-            .maybe_single()
-            .execute()
-        )
-        return (res.data or {}).get("system_prompt") or None
-    except Exception as e:
-        logging.error(
-            f"ERREUR SUPABASE (lecture agents_prompts_utilisateur agent={agent_id}, user={user_id}) : {e}"
-        )
-        return None
 
 
 def _mettre_a_jour_profil_utilisateur_si_besoin(user_id, agent_id):
@@ -1167,77 +1130,6 @@ INSTRUCTIONS_LONGUEUR_REPONSE = {
 #      le frontend (djiguigne-frontend) sait déjà rendre ces trois blocs
 #      nativement (voir CarteMessage.tsx, GraphiqueDonnees.tsx,
 #      WidgetSandbox.tsx), il manquait juste la convention ici.
-INSTRUCTIONS_FORMATS_AFFICHAGE = (
-    "\n\nFORMATS ENRICHIS : utilise ces blocs quand ils apportent une vraie valeur "
-    "(jamais pour décorer) :\n"
-    "- ```mermaid``` : diagramme flowchart/séquence/état. Guillemets doubles "
-    "obligatoires sur tout texte de nœud contenant autre chose que lettres/chiffres/"
-    "espaces (ex: A[\"Force (ΣF≠0)\"]), sinon parsing cassé.\n"
-    "- ```chart``` : JSON {\"type\": \"line\"|\"bar\"|\"pie\", \"data\": [...], "
-    "\"titre\"?: \"...\"}. \"data\" = tableau d'objets plats, 1ère clé = axe X, "
-    "suivantes = séries.\n"
-    "- ```carte``` : JSON {\"lat\": ..., \"lng\": ..., \"label\"?: \"...\"} pour "
-    "localiser un lieu. Jamais de lien texte brut Maps/OSM à la place.\n"
-    "- ```widget```/```html``` : mini-outil interactif autonome. Fond sombre par "
-    "défaut -- si tu le changes, adapte aussi la couleur du texte.\n"
-    "- ```geometrie``` : JSON {\"titre\"?, \"repere\"?: bool, \"points\": "
-    "[{\"id\", \"x\", \"y\", \"label\"?}], \"elements\": [...]} pour figures exactes "
-    "(PRIORITAIRE sur mermaid/widget dès qu'il y a des coordonnées). Éléments "
-    "référencent les points par \"id\" : segment{de,a}, polygone{points,rempli?}, "
-    "cercle{centre,rayon}, vecteur{de,a,label?}, angle{sommet,point1,point2,label?}. "
-    "Bornes auto-calculées.\n"
-    "\n"
-    "Bloc léger (ci-dessus) = aperçu immédiat sans fichier. Outil de génération = "
-    "livrable réel téléchargeable. Choisis selon le besoin réel, pas par défaut.\n"
-    "LIENS : n'écris JAMAIS une URL non obtenue réellement (ni via outil, ni donnée "
-    "par l'utilisateur), même plausible. N'invente jamais de source. Si demandé et "
-    "aucun outil dispo, dis-le. Si un outil de génération renvoie une URL réelle, "
-    "NE LA RÉÉCRIS PAS (l'interface l'affiche automatiquement en carte) -- confirme "
-    "juste en langage naturel.\n"
-    "OUTILS DE GÉNÉRATION/ACTION (document, image, code, site, audio, rappel...) : "
-    "ton texte est affiché AVANT que l'exécution soit terminée -- tu ne sauras "
-    "jamais, au moment où tu écris, si ça a réussi. ANNONCE ce que tu fais "
-    "(\"Je génère ton document sur...\"), n'AFFIRME JAMAIS que c'est fait ou réussi "
-    "(pas de \"Voici\", \"C'est prêt\", \"J'ai créé\"). Si ça échoue, un message "
-    "d'erreur s'affichera automatiquement après coup -- tu n'as rien à faire de plus, "
-    "pas de second message, pas de round-trip.\n"
-    "FAITS VÉRIFIABLES : pour toute question sur un état réel (structure dépôt, "
-    "contenu fichier, liste, nombre...), appelle TOUJOURS l'outil correspondant et "
-    "rapporte EXACTEMENT son résultat (y compris troncatures), jamais de complément "
-    "par supposition. Structure/arborescence d'un dépôt GitHub -> toujours "
-    "explorer_depot_github, jamais un README (peut être obsolète).\n"
-    "Ne décris JAMAIS un appel d'outil (pas de \"Appel de X avec...\", pas de JSON "
-    "de requête/résultat) -- l'interface l'affiche déjà. Réponds en langage naturel "
-    "comme si tu savais déjà."
-)
-
-
-# Ajouté 2026-08-01 (demande Bourama, suite a l'ajout de calculer_symbolique) :
-# les deux outils se chevauchent en pratique -- WolframLanguageEvaluator (un
-# des 3 outils fixes exposes par le serveur MCP Wolfram, voir
-# registre_outils.py) sait aussi resoudre/deriver/integrer/simplifier, sa
-# description (fixee par Wolfram, pas modifiable ici) ne l'exclut nulle part.
-# La description de calculer_symbolique (voir serveur_mcp_generation.py) dit
-# deja "utilise wolfram pour le factuel", mais rien cote Wolfram ne dit
-# l'inverse -- cette regle vit donc dans le prompt systeme general (au-dessus
-# des descriptions d'outils individuelles) pour trancher des que les DEUX
-# sont disponibles pour un agent. Suit le meme principe que le correctif du
-# 31/07 sur _router_outils : un exemple concret par cas vaut mieux qu'un
-# principe abstrait pour un petit modele.
-INSTRUCTIONS_ARBITRAGE_CALCUL = (
-    "\n\nARBITRAGE calculer_symbolique / wolfram (si les deux sont disponibles) : "
-    "calcul formel EXACT (simplifier, developper, factoriser, deriver, integrer, "
-    "resoudre une equation, limite) -> TOUJOURS calculer_symbolique, jamais "
-    "wolfram, meme via WolframLanguageEvaluator qui sait techniquement le faire "
-    "aussi. wolfram reste reserve aux questions de connaissance factuelle du "
-    "monde reel non calculables par un moteur symbolique seul (constante "
-    "physique, donnee chimique, donnee geographique/demographique...). "
-    "Exemples : \"derive x^2*sin(x)\" -> calculer_symbolique. \"masse du "
-    "proton\" -> wolfram. \"resous 2x+3=7\" -> calculer_symbolique, pas "
-    "wolfram meme si ca semble plus rapide."
-)
-
-
 def _router_outils(message_utilisateur, outils_disponibles, historique=None):
     """
     Bouton Outils, couche de suggestion automatique (2026-07-28, demande
@@ -1350,73 +1242,34 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
 
 
 def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longueur_reponse="moyenne", fuseau_horaire=None, recherche_forcee=False, outil_force=None, sans_enseignant=False):
-    # Clovis (12/08) : plus de branche "contenu dynamique par matière"
-    # exclusive ni de pré-fetch RAG/mémoire/profil systématique -- ces 4
-    # lectures (matière, RAG, mémoire, profil) sont devenues des outils
-    # que le modèle appelle lui-même s'il juge pertinent (voir
-    # consulter_matiere_active/chercher_dans_base_connaissances/
-    # consulter_memoire_utilisateur/consulter_profil_utilisateur dans
-    # core/serveur_mcp_generation.py), au lieu d'être injectées à chaque
-    # message que ce soit utile ou non. Seul le prompt de base (Notion,
-    # get_system_prompt, caché 24h) reste chargé systématiquement -- lui
-    # ne dépend ni du message ni de l'utilisateur.
-    system_prompt = _charger_prompt_personnalise(agent_id, user_id) or get_system_prompt(agent_id)
+    # Clovis (12/08) : plus d'assemblage. get_system_prompt(agent_id) est
+    # DÉJÀ le bloc complet (comportement, outils disponibles, formats
+    # enrichis, arbitrage calcul, contexte invisible -- tout est écrit
+    # une fois dans la page Notion de l'agent, voir core/configuration.py),
+    # mis en cache 24h, rechargeable de force via forcer_rechargement().
+    # Rien ici ne dépend plus du message ni ne fusionne plusieurs sources.
+    #
+    # Seuls 3 éléments restent ajoutés ici, PAR NATURE impossibles à
+    # figer dans un cache partagé par tout le monde :
+    #   - comportements_etudiant : écrit par CET étudiant, propre à lui
+    #     (13/08 : mécanisme "à la skill", voir juste en dessous)
+    #   - longueur_reponse : choisi par le sélecteur pour CE message
+    #   - date/heure : change chaque minute
+    # + recherche_forcee, activée seulement sur CE message (icône recherche).
+    system_final = get_system_prompt(agent_id) or ""
+
+    # Mécanisme "à la skill" (13/08/2026) : le texte long n'est plus
+    # injecté d'office. Le petit routeur (choisir_comportements_pertinents)
+    # réduit la liste complète de l'étudiant aux candidats plausibles pour
+    # CE message -- seuls id + description sont annoncés plus bas, jamais
+    # le texte. C'est le grand modèle qui décide s'il appelle l'outil
+    # consulter_comportement pour lire le texte complet d'un candidat
+    # (voir core/serveur_mcp_generation.py).
     comportements_etudiant = (
         choisir_comportements_pertinents(message_utilisateur, lister_comportements_etudiant(agent_id, user_id))
         if user_id else []
     )
 
-    # ORDRE DU PROMPT (2026-07-29, optimisation cache Groq) : du plus stable
-    # au plus volatil, pour maximiser la longueur du prefixe identique
-    # entre appels successifs. Groq met en cache automatiquement le
-    # prefixe commun a une requete recente (jusqu'a 2h) : cette portion
-    # coute moitie prix ET NE COMPTE PLUS dans le quota TPM. Des qu'un
-    # seul caractere differe plus tot dans le texte, tout ce qui suit
-    # perd le benefice du cache -- d'ou l'ordre choisi ici :
-    #   1. Blocs 100% fixes, identiques pour TOUTE la plateforme
-    #      (FORMATS_AFFICHAGE, CONTEXTE_INVISIBLE) -> cache hit sur
-    #      quasi 100% des appels, tous agents/utilisateurs confondus.
-    #   2. Prompt de l'agent (base_notion) -> stable pour TOUS les
-    #      utilisateurs de CET agent, change seulement si le createur
-    #      l'edite.
-    #   3. Memoire + profil utilisateur -> stables pour UN utilisateur
-    #      sur plusieurs messages (ne changent que tous les 10-20
-    #      messages, voir SEUIL_RESUME_MESSAGES/SEUIL_PROFIL_MESSAGES).
-    #   4. Blocs outils (bibliotheque/outils actifs/github) + consigne
-    #      de longueur -> stables tant que la selection de la barre de
-    #      saisie ne change pas d'un message a l'autre (plus volatil que
-    #      3, moins que le RAG).
-    #   5. RAG (instructions/contexte_docs) + recherche forcee -> change
-    #      quasi a chaque message (dependant du texte exact de la
-    #      question).
-    #   6. Date/heure -> LE plus volatil, change chaque minute : doit
-    #      absolument rester en tout dernier pour ne jamais casser le
-    #      prefixe cachable de tout ce qui precede.
-    system_final = (
-        INSTRUCTIONS_FORMATS_AFFICHAGE.lstrip("\n")
-        + INSTRUCTIONS_ARBITRAGE_CALCUL
-        + REGLE_CONTEXTE_INVISIBLE
-    )
-
-    # get_system_prompt peut renvoyer None (agent sans notion_page_id ni
-    # system_prompt renseigné ET aucun prompt jamais mis en cache avec
-    # succès) -- repli sur "" pour ne pas planter les += qui suivent,
-    # certains inconditionnels (bug repéré le 2026-07-21, jamais déclenché
-    # en pratique jusqu'ici mais bien réel pour un agent mal configuré).
-    if system_prompt:
-        system_final += f"\n\n{system_prompt}"
-
-    # Section "Mes comportements" (06/08/2026, demande Bourama : "on peut
-    # en mettre plusieurs hein, pas juste un"), mécanisme "à la skill"
-    # (13/08/2026) : le texte long n'est PLUS injecté d'office. Le petit
-    # routeur (choisir_comportements_pertinents, appelé plus haut) a déjà
-    # réduit la liste complète de l'étudiant aux candidats plausibles pour
-    # CE message -- on n'annonce ici que leur id + description, jamais le
-    # texte. C'est le grand modèle qui décide s'il appelle l'outil
-    # consulter_comportement pour lire le texte complet d'un candidat
-    # (voir core/serveur_mcp_generation.py), même logique que les autres
-    # "OUTILS DE CONTEXTE DISPONIBLES" plus bas. Rien injecté si le
-    # routeur n'a retenu aucun candidat.
     if comportements_etudiant:
         candidats = "\n".join(f"- id={c['id']} : {c['description']}" for c in comportements_etudiant)
         system_final += (
@@ -1428,117 +1281,14 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
             "de la description seule."
         )
 
-    # Clovis (12/08) : mémoire/profil/base de connaissances/matière ne
-    # sont plus injectés systématiquement -- annoncés ici comme outils
-    # disponibles, c'est au modèle de décider s'il les appelle (lecture
-    # ET écriture pour mémoire/profil). Bloc quasi-fixe (change seulement
-    # si user_id absent), reste donc bien placé côté "stable" du prompt.
-    system_final += (
-        "\n\nOUTILS DE CONTEXTE DISPONIBLES (à appeler toi-même si pertinent, jamais "
-        "systématiquement) :\n"
-        "- consulter_memoire_utilisateur / mettre_a_jour_memoire_utilisateur : ce que tu "
-        "sais de cette personne d'une conversation à l'autre (préférences, matières, "
-        "difficultés, projets...). Consulte en début de conversation si utile, et "
-        "mets à jour dès que tu apprends quelque chose qui vaut la peine d'être retenu.\n"
-        "- consulter_profil_utilisateur / mettre_a_jour_profil_utilisateur : qui est "
-        "cette personne (contexte scolaire, etc.), même logique lecture/écriture.\n"
-        "- chercher_dans_base_connaissances : documents/instructions de référence "
-        "préparés à l'avance, si la question touche un sujet précis.\n"
-        "- consulter_matiere_active : contenu de cours débloqué par cette personne "
-        "avec un code enseignant, si la question ressemble à une question de cours. "
-        "Complément à tes instructions, jamais un remplacement ni à recopier tel quel.\n"
-        f"Aucun paramètre user_id/agent_id à fournir toi-même pour ces outils, ils sont "
-        f"résolus automatiquement côté serveur."
-    )
-
-    # Bouton Outils (2026-07-25, multi-sélection depuis le 26/07 --
-    # outil_force est maintenant une LISTE, plus une simple chaîne, voir
-    # demande Bourama). Ces deux blocs décrivaient ces capacités de façon
-    # inconditionnelle, même quand aucun outil n'est réellement envoyé au
-    # modèle -- confirmé en test réel le 25/07 (l'IA "récitait" ces
-    # capacités alors que le log backend montrait `Outils envoyés au LLM
-    # ce tour-ci : []`). Désormais gated sur outil_force : le bloc
-    # n'apparaît que si l'outil concerné fait partie de la sélection pour
-    # ce message précis.
-    outils_forces = outil_force or []
-    if "chercher_fichier" in outils_forces:
-        system_final += (
-            "\n\nBIBLIOTHÈQUE DE FICHIERS : outil chercher_fichier pour retrouver un "
-            "fichier déjà uploadé (plateforme, créateur de l'agent, ou cet utilisateur "
-            f"dans une conversation passée). agent_id=\"{agent_id}\", "
-            f"user_id={f'"{user_id}"' if user_id else 'absent (non connectée)'}, à passer "
-            "exactement tels quels. Si on te redemande un fichier envoyé plus tôt dans "
-            "la conversation (tu l'as vu mais tu n'as pas son URL réelle), appelle "
-            "TOUJOURS chercher_fichier au lieu d'inventer un lien."
-        )
-    if "consulter_bibliotheque" in outils_forces:
-        # 2026-08-01, demande Bourama : bibliothèque personnelle de
-        # documents PDF (voir "Mon espace" côté app), consultable par le
-        # contenu (contrairement à chercher_fichier ci-dessus qui ne
-        # matche que nom/description) -- outil disponible même si cet
-        # agent n'a rien coché en catégorie 1, voir mcp_tools.py.
-        system_final += (
-            "\n\nBIBLIOTHÈQUE PERSONNELLE : outil consulter_bibliotheque pour chercher "
-            "dans les documents PDF que CET utilisateur a lui-même ajoutés à sa "
-            "bibliothèque personnelle (indépendante de cet agent). "
-            f"user_id={f'"{user_id}"' if user_id else 'absent (non connectée)'}, à passer "
-            "exactement tel quel -- sans utilisateur connecté, l'outil renverra toujours "
-            "vide, inutile de l'appeler. Utilise les extraits renvoyés directement pour "
-            "répondre, sans les recopier mot pour mot."
-        )
-    if outils_forces:
-        # Confirmé en test réel 25/07 : même avec l'outil réellement
-        # présent dans la liste envoyée au modèle (vérifié via le log
-        # `Outils envoyés au LLM ce tour-ci : ['tavily_search']`), le
-        # modèle a quand même répondu par son réflexe par défaut ("mes
-        # connaissances s'arrêtent à ma coupure, je ne peux pas chercher
-        # en ligne") au lieu d'appeler l'outil. Instruction explicite
-        # pour forcer la bonne priorité : la présence réelle de l'outil
-        # prime sur toute limitation générale apprise à l'entraînement.
-        liste_lisible = ", ".join(outils_forces)
-        system_final += (
-            f"\n\nOUTIL(S) ACTIF(S) : {liste_lisible} "
-            f"{'sont disponibles' if len(outils_forces) > 1 else 'est disponible'}, "
-            "sélectionné(s) via le bouton Outils. Utilise-les si pertinents -- leur "
-            "présence prime sur tes limitations par défaut, n'invente jamais un refus. "
-            "Appel via le vrai mécanisme API uniquement, jamais de pseudo-syntaxe en "
-            "texte (TOOL_CODE, nom_outil(...), nom_outil{...}, call:nom_outil{...})."
-        )
-    if not outils_forces:
-        # Bouton Outils (2026-07-25, suite) : sans cette instruction, le
-        # modèle invente de lui-même une liste de capacités générique
-        # d'assistant IA (génération de fichiers, recherche web, etc.)
-        # dès qu'on lui demande "qu'est-ce que tu sais faire" -- confirmé
-        # en test réel le 25/07, aucun bloc du prompt système ne causait
-        # ça (le prompt de l'agent Nucleos ne fait que 126 caractères),
-        # c'est une invention pure du modèle. Instruction explicite pour
-        # contrer ce réflexe par défaut.
-        system_final += (
-            "\n\nAUCUN OUTIL ACTIF : aucune capacité de recherche web/génération de "
-            "fichier/exploration GitHub/recherche de fichier envoyé pour ce message, "
-            "même si active plus tôt dans la conversation. Si on demande 'qu'est-ce "
-            "que tu sais faire', ne liste pas de capacités génériques : dis que tu "
-            "n'as aucun outil actif, invite à cliquer sur le bouton Outils. N'invente "
-            "jamais un outil ni une fausse syntaxe d'appel (TOOL_CODE, nom_outil(...), "
-            "nom_outil{...}, call:nom_outil{...}). Les blocs ```mermaid/chart/carte/"
-            "widget/geometrie restent disponibles (formats d'affichage, pas des outils)."
-        )
-    if any(o in outils_forces for o in ("explorer_depot_github", "lire_fichier_depot_github", "modifier_fichier_depot_github")):
-        system_final += (
-            "\n\nEXPLORATION GITHUB : explorer_depot_github (arborescence), "
-            "lire_fichier_depot_github (contenu d'un fichier), modifier_fichier_depot_github "
-            "(écrit un changement -- uniquement si demandé explicitement). user_id à "
-            f"passer exactement : {f'"{user_id}"' if user_id else 'une chaîne vide (non connectée)'}. "
-            "Dépôts privés accessibles seulement si compte GitHub connecté."
-        )
     system_final += INSTRUCTIONS_LONGUEUR_REPONSE.get(longueur_reponse, "")
 
     if recherche_forcee:
-        # Icône de recherche dans la barre de saisie (djiguigne-frontend) --
-        # forçage manuel pour CE message précis (voir docstring de
-        # chat()). Le modèle peut de toute façon décider seul d'utiliser
-        # Tavily sans ce flag (tool-calling normal) ; ceci garantit que
-        # ça arrive quand l'étudiant veut être sûr.
+        # Icône de recherche dans la barre de saisie -- forçage manuel
+        # pour CE message précis (voir docstring de chat()). Le modèle
+        # peut de toute façon décider seul d'utiliser Tavily sans ce
+        # flag (tool-calling normal) ; ceci garantit que ça arrive
+        # quand l'étudiant veut être sûr.
         system_final += (
             "\n\nCONSIGNE DE RECHERCHE : pour ce message précis, utilise "
             "systématiquement un outil de recherche web (tavily_search) avant de "
@@ -1575,9 +1325,9 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     system_final += f"\n\nNous sommes le {date_fr} (fuseau : {fuseau.key if hasattr(fuseau, 'key') else 'UTC'})."
 
     logging.info(
-        f"Prompt système construit -> base_notion:{len(system_prompt or '')} caractères, "
+        f"Prompt système construit -> base_notion:{len(system_final or '')} caractères, "
         f"comportements_etudiant:{'oui' if comportements_etudiant else 'NON'}, "
-        f"outils_forces:{outils_forces or 'aucun'}, "
+        f"longueur_reponse:{longueur_reponse}, "
         f"recherche_forcee:{'oui' if recherche_forcee else 'NON'}"
     )
     return system_final
@@ -2004,9 +1754,9 @@ def _traiter_appels(appels, messages_agent, table_routage):
                 }
                 # Garanti indépendamment de ce que le modèle écrira ensuite
                 # dans sa propre réponse -- voir _extraire_fichiers_generes
-                # et INSTRUCTIONS_FORMATS_AFFICHAGE (le modèle est instruit
-                # de ne plus réécrire ce lien lui-même, pour éviter le
-                # doublon).
+                # et le bloc "LIENS" de la page Notion Clovis (le modèle est
+                # instruit de ne plus réécrire ce lien lui-même, pour éviter
+                # le doublon).
                 fichiers_generes = _extraire_fichiers_generes(resultat)
                 if fichiers_generes:
                     yield {
@@ -3022,7 +2772,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             # ligne system_instruction=system_gemini_sans_outils par
             # system_instruction=system_final -- reappliquee le 25/07
             # apres reapparition confirmee du bug) -- la regle generale
-            # anti-hallucination du prompt (voir INSTRUCTIONS_FORMATS_AFFICHAGE)
+            # anti-hallucination du prompt (voir la page Notion Clovis, bloc
             # n'a PAS suffi ici : Gemini a quand meme invente un faux appel
             # d'outil (default_api.get_exchange_rate(...),
             # default_api.search_news(...), noms qui n'existent nulle part
