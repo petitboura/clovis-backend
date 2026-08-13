@@ -1558,10 +1558,9 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
 
     logging.info(
         f"Prompt système construit -> base_notion:{len(system_prompt or '')} caractères, "
-        f"memoire:{'oui' if resume_memoire else 'NON'}, "
-        f"profil_utilisateur:{'oui' if profil_utilisateur else 'NON'}, "
-        f"instructions:{'oui' if instructions else 'NON'}, "
-        f"contexte_docs:{'oui' if contexte_docs else 'NON'}"
+        f"comportements_etudiant:{'oui' if comportements_etudiant else 'NON'}, "
+        f"outils_forces:{outils_forces or 'aucun'}, "
+        f"recherche_forcee:{'oui' if recherche_forcee else 'NON'}"
     )
     return system_final
 
