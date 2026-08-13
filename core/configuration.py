@@ -30,7 +30,7 @@ NOTION_TOKEN = get_secret("NOTION_TOKEN")
 # get_system_prompt()/forcer_rechargement() sont appelés sans agent_id
 # (ex: script/test lancé isolément). Défaut "tutorat-maths" pour rester
 # rétrocompatible avec d'anciens appels sans paramètre.
-AGENT_ID = get_secret("AGENT_ID") or "tutorat-maths"
+AGENT_ID = get_secret("AGENT_ID") or "clovis"  # 12/08 : ce depot isole ne sert plus que Clovis
 
 SUPABASE_URL = get_secret("SUPABASE_URL")
 SUPABASE_SECRET = get_secret("SUPABASE_SECRET")
@@ -50,7 +50,7 @@ def _get_supabase():
 # dans une seule app).
 _cache = {}
 
-CACHE_DUREE = 300  # 5 minutes
+CACHE_DUREE = 86400  # 24h (Clovis, 12/08 -- demande Bourama : prompt de base rechargé une fois par jour ou sur forçage explicite via forcer_rechargement(), plus à chaque expiration de 5 min comme avant)
 BACKOFF_ECHEC = 30  # secondes : pause avant de retenter après un échec de chargement
 
 

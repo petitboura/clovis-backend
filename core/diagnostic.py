@@ -24,7 +24,7 @@ OK = "✅"
 KO = "❌"
 WARN = "⚠️ "
 
-AGENT_ID_PAR_DEFAUT = "tutorat-maths"
+AGENT_ID_PAR_DEFAUT = "clovis"  # 12/08 : ce depot isole ne sert plus que Clovis
 
 
 def check_env_vars():

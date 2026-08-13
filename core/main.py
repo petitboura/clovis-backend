@@ -95,7 +95,7 @@ MESSAGE_CONTENU_BLOQUE = "Je ne peux pas répondre à ce message. Reformule ta q
 
 # Valeur de repli si le secret AGENT_ID n'est pas defini pour ce deploiement
 # (doit rester alignee avec AGENT_ID_PAR_DEFAUT dans retriever.py).
-AGENT_ID_PAR_DEFAUT = "tutorat-maths"
+AGENT_ID_PAR_DEFAUT = "clovis"  # 12/08 : ce depot isole ne sert plus que Clovis
 
 # Au-dela de ce nombre de messages non resumes (table conversations), on
 # redemande un resume condense au modele plutot que d'empiler indefiniment

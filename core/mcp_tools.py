@@ -46,6 +46,42 @@ def _get_secret_local(key):
 _supabase = create_client(_get_secret_local("SUPABASE_URL"), _get_secret_local("SUPABASE_SECRET"))
 
 
+_AGENT_ID_CLOVIS = "clovis"
+
+# Clovis (12/08, demande Bourama) : une seule IA, plus de createur tiers a
+# gerer -- inutile de filtrer par agents_serveurs/agents_outils_generation
+# (systeme concu pour un marketplace multi-agents/multi-createurs). Cet
+# agent recoit directement tout ce qui est disponible cote plateforme
+# (registre_outils_plateforme.disponible=True), mis en cache en memoire de
+# process -- donc valable indefiniment jusqu'au prochain redeploy (le
+# process redemarre => cache vide => rechargement), ou un appel explicite
+# a forcer_rechargement_droits_clovis().
+_cache_droits_clovis = {"serveurs": None, "outils_generation": None}
+
+
+def forcer_rechargement_droits_clovis():
+    _cache_droits_clovis["serveurs"] = None
+    _cache_droits_clovis["outils_generation"] = None
+
+
+def _tous_les_serveurs_disponibles():
+    try:
+        res = _supabase.table("registre_outils_plateforme").select("nom_serveur").eq("disponible", True).execute()
+        return list({ligne["nom_serveur"] for ligne in (res.data or []) if ligne.get("nom_serveur")})
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture registre_outils_plateforme pour Clovis, serveurs) : {e}")
+        return []
+
+
+def _tous_les_outils_generation_disponibles():
+    try:
+        res = _supabase.table("registre_outils_plateforme").select("nom_outil").eq("disponible", True).execute()
+        return [ligne["nom_outil"] for ligne in (res.data or []) if ligne.get("nom_outil")]
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture registre_outils_plateforme pour Clovis, outils génération) : {e}")
+        return []
+
+
 def _outils_actives_pour_agent(agent_id):
     """
     Retourne la liste des noms de serveurs (ex: ["wolfram", "notion"])
@@ -62,6 +98,10 @@ def _outils_actives_pour_agent(agent_id):
     if not agent_id:
         logging.error("_outils_actives_pour_agent appelé sans agent_id : aucun outil activé.")
         return []
+    if agent_id == _AGENT_ID_CLOVIS:
+        if _cache_droits_clovis["serveurs"] is None:
+            _cache_droits_clovis["serveurs"] = _tous_les_serveurs_disponibles()
+        return _cache_droits_clovis["serveurs"]
     try:
         res = (
             _supabase.table("agents_serveurs")
@@ -96,6 +136,10 @@ def _outils_generation_actifs_pour_agent(agent_id):
     """
     if not agent_id:
         return []
+    if agent_id == _AGENT_ID_CLOVIS:
+        if _cache_droits_clovis["outils_generation"] is None:
+            _cache_droits_clovis["outils_generation"] = _tous_les_outils_generation_disponibles()
+        return _cache_droits_clovis["outils_generation"]
     try:
         coches_res = (
             _supabase.table("agents_outils_generation")

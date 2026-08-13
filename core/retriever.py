@@ -27,7 +27,7 @@ logging.basicConfig(level=logging.INFO)
 # agent_id explicite à chercher_candidats() depuis la généralisation
 # multi-agent. Ce défaut ne sert que si ce module est appelé isolément
 # (ex: script/test), pas dans le chemin normal de chat().
-AGENT_ID_PAR_DEFAUT = "tutorat-maths"
+AGENT_ID_PAR_DEFAUT = "clovis"  # 12/08 : ce depot isole ne sert plus que Clovis
 
 
 def get_secret(key):
