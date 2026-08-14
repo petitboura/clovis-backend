@@ -283,42 +283,49 @@ def publier_plugin(
 
 @router.get("", response_model=List[PluginReponse])
 def rechercher_plugins(
-    niveau: Optional[str] = Query(default=None),
-    auteur: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None),
 ):
     """
-    Recherche par niveau (correspondance exacte) et/ou par nom du
-    créateur (recherche approchante sur profiles.nom_affiche). Au moins
-    un des deux filtres doit être fourni.
-    """
-    if not (niveau or "").strip() and not (auteur or "").strip():
-        raise erreur_api(400, "DONNE_AU_MOINS_UNE_DESCRIPTION_OU")
+    Liste unique de tous les plugins publiés (fusion de l'ancienne
+    recherche niveau/auteur et de l'ancien classement -- décision du
+    2026-08-14 : plus de section "recherche" séparée côté front, une
+    seule liste avec un champ de recherche libre intégré).
 
+    Toujours triée par nombre de téléchargements décroissant, avec ou
+    sans recherche -- c'est ce même tri qui sert à repérer le plugin
+    gagnant de la mécanique de lancement (voir docstring en tête de
+    fichier et GET /api/plugins/classement, conservé pour compatibilité
+    mais désormais redondant avec cet endpoint sans `q`).
+
+    Si `q` est fourni, filtre en "OU" sur : le nom du plugin, le niveau,
+    et le nom affiché de l'auteur (recherche approchante sur chacun).
+    """
     requete = supabase.table("plugins_programme").select("*")
 
-    if niveau and niveau.strip():
-        requete = requete.eq("niveau", niveau.strip())
-
-    if auteur and auteur.strip():
+    mot_cle = (q or "").strip()
+    if mot_cle:
+        ids_auteurs: List[str] = []
         try:
             profils = (
                 supabase.table("profiles")
                 .select("user_id, nom_affiche")
-                .ilike("nom_affiche", f"%{auteur.strip()}%")
+                .ilike("nom_affiche", f"%{mot_cle}%")
                 .execute()
             )
+            ids_auteurs = [p["user_id"] for p in (profils.data or [])]
         except Exception as e:
-            logging.error(f"ERREUR SUPABASE (recherche auteur '{auteur}') : {e}")
+            logging.error(f"ERREUR SUPABASE (recherche auteurs '{mot_cle}') : {e}")
             raise erreur_api(500, "RECHERCHE_INDISPONIBLE")
-        ids_auteurs = [p["user_id"] for p in (profils.data or [])]
-        if not ids_auteurs:
-            return []
-        requete = requete.in_("auteur_id", ids_auteurs)
+
+        conditions = [f"nom.ilike.%{mot_cle}%", f"niveau.ilike.%{mot_cle}%"]
+        if ids_auteurs:
+            conditions.append(f"auteur_id.in.({','.join(ids_auteurs)})")
+        requete = requete.or_(",".join(conditions))
 
     try:
-        res = requete.order("created_at", desc=True).limit(100).execute()
+        res = requete.order("telechargements_count", desc=True).limit(100).execute()
     except Exception as e:
-        logging.error(f"ERREUR SUPABASE (recherche plugins niveau={niveau} auteur={auteur}) : {e}")
+        logging.error(f"ERREUR SUPABASE (recherche plugins q={mot_cle}) : {e}")
         raise erreur_api(500, "RECHERCHE_INDISPONIBLE")
 
     lignes = res.data or []
