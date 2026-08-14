@@ -44,6 +44,13 @@ router_programmes = APIRouter(prefix="/api/programmes", tags=["plugins"])
 
 class PublierPluginPayload(BaseModel):
     nom: str
+    examens_transverses_inclus: List[str] = []
+
+
+class ExamenTransverseReponse(BaseModel):
+    id: str
+    titre: str
+    type: str
 
 
 class PluginReponse(BaseModel):
@@ -95,22 +102,113 @@ def _plugin_vers_reponse(ligne: dict, noms_par_auteur: dict) -> PluginReponse:
     )
 
 
-def _cloner_programme(programme_source_id: str, nouveau_proprietaire_id: str, nom_copie: str) -> str:
+def _chapitre_ids_du_programme(programme_id: str) -> List[str]:
+    try:
+        matieres = supabase.table("matieres").select("id").eq("programme_id", programme_id).execute()
+        matiere_ids = [m["id"] for m in (matieres.data or [])]
+        if not matiere_ids:
+            return []
+        chapitres = supabase.table("chapitres").select("id").in_("matiere_id", matiere_ids).execute()
+        return [c["id"] for c in (chapitres.data or [])]
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (chapitres du programme {programme_id}) : {e}")
+        raise erreur_api(500, "ERREUR_INCONNUE")
+
+
+def _examens_transverses_du_programme(programme_id: str, utilisateur_id: str) -> list[dict]:
     """
-    Clone un programme complet (matières, chapitres, documents, exercices)
-    en une copie indépendante appartenant à `nouveau_proprietaire_id`.
-    Ne touche jamais au programme source. Retourne l'id du nouveau
-    programme.
+    Examens qui touchent CE programme mais aussi au moins un chapitre d'un
+    AUTRE programme -- un examen n'est pas contraint à un seul programme
+    (voir api/contenu_programme.py::_verifier_chapitres_pour_examen).
+    Utilisée à la publication d'un plugin (endpoint GET .../examens-
+    transverses) pour proposer à l'auteur d'inclure ou non chacun de ces
+    examens dans la copie -- voir migrations/2026_08_14_plugin_examens_
+    transverses.sql et PublierPluginPayload.examens_transverses_inclus.
+    """
+    chapitre_ids_programme = set(_chapitre_ids_du_programme(programme_id))
+    if not chapitre_ids_programme:
+        return []
+    try:
+        liens = (
+            supabase.table("examen_chapitres")
+            .select("examen_id")
+            .in_("chapitre_id", list(chapitre_ids_programme))
+            .execute()
+        )
+        examen_ids = sorted({l["examen_id"] for l in (liens.data or [])})
+        if not examen_ids:
+            return []
+
+        tous_liens = (
+            supabase.table("examen_chapitres")
+            .select("examen_id, chapitre_id")
+            .in_("examen_id", examen_ids)
+            .execute()
+        )
+        chapitres_par_examen: dict[str, set] = {}
+        for l in (tous_liens.data or []):
+            chapitres_par_examen.setdefault(l["examen_id"], set()).add(l["chapitre_id"])
+
+        ids_transverses = [
+            eid for eid, chs in chapitres_par_examen.items() if not chs.issubset(chapitre_ids_programme)
+        ]
+        if not ids_transverses:
+            return []
+
+        examens = (
+            supabase.table("examens_programme")
+            .select("id, titre, type")
+            .in_("id", ids_transverses)
+            .eq("proprietaire_id", utilisateur_id)
+            .execute()
+        )
+        return examens.data or []
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (examens transverses du programme {programme_id}) : {e}")
+        raise erreur_api(500, "ERREUR_INCONNUE")
+
+
+def _cloner_programme(
+    programme_source_id: str,
+    nouveau_proprietaire_id: str,
+    nom_copie: str,
+    examens_transverses_inclus: Optional[List[str]] = None,
+) -> str:
+    """
+    Clone un programme complet (matières, chapitres, documents, exercices,
+    examens, classements transversaux) en une copie indépendante
+    appartenant à `nouveau_proprietaire_id`. Ne touche jamais au programme
+    source. Retourne l'id du nouveau programme.
+
+    Examens (14/08/2026, décision Bourama) : un examen peut couvrir des
+    chapitres de plusieurs programmes différents. Les examens dont TOUS
+    les chapitres appartiennent à ce programme sont toujours clonés. Les
+    examens "transverses" (qui touchent aussi un autre programme) ne sont
+    clonés que si leur id figure dans `examens_transverses_inclus` (choix
+    fait par l'auteur à la publication du plugin, voir
+    _examens_transverses_du_programme) -- et dans ce cas, seuls les
+    chapitres appartenant à CE programme sont repris dans la copie, les
+    liens vers l'autre programme sont perdus.
+
+    Classements transversaux (14/08/2026, décision Bourama) : un
+    classement (ex. "Semestre 1") peut lui aussi contenir des éléments de
+    plusieurs programmes. Même principe : le classement est cloné mais ne
+    garde que les éléments (matière/chapitre/document/exercice/examen)
+    qui appartiennent à CE programme -- les éléments d'autres programmes
+    sont perdus dans la copie. Un classement sans aucun élément clonable
+    n'est pas recréé.
 
     Les tables `documents_programme`/`exercices_programme` sont du lot 2 :
     si elles n'existent pas encore côté base au moment où cette fonction
     tourne, leur lecture échoue proprement (liste vide, jamais une
     exception qui casse le clone du programme/matières/chapitres).
     """
+    examens_transverses_inclus = set(examens_transverses_inclus or [])
+
     try:
         programme_source = (
             supabase.table("programmes")
-            .select("id, niveau, nom")
+            .select("id, niveau, nom, proprietaire_id")
             .eq("id", programme_source_id)
             .maybe_single()
             .execute()
@@ -123,6 +221,7 @@ def _cloner_programme(programme_source_id: str, nouveau_proprietaire_id: str, no
         raise erreur_api(404, "PROGRAMME_INTROUVABLE")
 
     niveau_source = programme_source.data["niveau"]
+    auteur_source_id = programme_source.data["proprietaire_id"]
 
     try:
         nouveau_programme = (
@@ -179,6 +278,9 @@ def _cloner_programme(programme_source_id: str, nouveau_proprietaire_id: str, no
             )
             correspondance_chapitres[chapitre["id"]] = nouveau_chapitre.data[0]["id"]
 
+        correspondance_documents: dict[str, str] = {}
+        correspondance_exercices: dict[str, str] = {}
+
         if correspondance_chapitres:
             # Documents et exercices (lot 2) : lecture best-effort, une
             # table encore absente ne doit jamais faire échouer le clone
@@ -186,33 +288,163 @@ def _cloner_programme(programme_source_id: str, nouveau_proprietaire_id: str, no
             try:
                 documents = (
                     supabase.table("documents_programme")
-                    .select("chapitre_id, titre, url_ou_contenu")
+                    .select("id, chapitre_id, titre, url_ou_contenu")
                     .in_("chapitre_id", list(correspondance_chapitres.keys()))
                     .execute()
                 )
                 for doc in (documents.data or []):
-                    supabase.table("documents_programme").insert({
-                        "chapitre_id": correspondance_chapitres[doc["chapitre_id"]],
-                        "titre": doc["titre"],
-                        "url_ou_contenu": doc["url_ou_contenu"],
-                    }).execute()
+                    nouveau_doc = (
+                        supabase.table("documents_programme")
+                        .insert({
+                            "chapitre_id": correspondance_chapitres[doc["chapitre_id"]],
+                            "titre": doc["titre"],
+                            "url_ou_contenu": doc["url_ou_contenu"],
+                        })
+                        .execute()
+                    )
+                    correspondance_documents[doc["id"]] = nouveau_doc.data[0]["id"]
             except Exception as e:
                 logging.error(f"ERREUR clone documents_programme (source {programme_source_id}) : {e}")
 
             try:
                 exercices = (
                     supabase.table("exercices_programme")
-                    .select("chapitre_id, enonce")
+                    .select("id, chapitre_id, enonce")
                     .in_("chapitre_id", list(correspondance_chapitres.keys()))
                     .execute()
                 )
                 for ex in (exercices.data or []):
-                    supabase.table("exercices_programme").insert({
-                        "chapitre_id": correspondance_chapitres[ex["chapitre_id"]],
-                        "enonce": ex["enonce"],
-                    }).execute()
+                    nouvel_exercice = (
+                        supabase.table("exercices_programme")
+                        .insert({
+                            "chapitre_id": correspondance_chapitres[ex["chapitre_id"]],
+                            "enonce": ex["enonce"],
+                        })
+                        .execute()
+                    )
+                    correspondance_exercices[ex["id"]] = nouvel_exercice.data[0]["id"]
             except Exception as e:
                 logging.error(f"ERREUR clone exercices_programme (source {programme_source_id}) : {e}")
+
+        # -------------------- Examens (14/08/2026) --------------------
+        correspondance_examens: dict[str, str] = {}
+        if correspondance_chapitres:
+            try:
+                liens = (
+                    supabase.table("examen_chapitres")
+                    .select("examen_id, chapitre_id")
+                    .in_("chapitre_id", list(correspondance_chapitres.keys()))
+                    .execute()
+                )
+                examen_ids_source = sorted({l["examen_id"] for l in (liens.data or [])})
+
+                if examen_ids_source:
+                    tous_liens = (
+                        supabase.table("examen_chapitres")
+                        .select("examen_id, chapitre_id")
+                        .in_("examen_id", examen_ids_source)
+                        .execute()
+                    )
+                    chapitres_par_examen: dict[str, set] = {}
+                    for l in (tous_liens.data or []):
+                        chapitres_par_examen.setdefault(l["examen_id"], set()).add(l["chapitre_id"])
+
+                    chapitre_ids_programme = set(correspondance_chapitres.keys())
+                    examens_source = (
+                        supabase.table("examens_programme")
+                        .select("id, titre, type")
+                        .in_("id", examen_ids_source)
+                        .execute()
+                    )
+                    for examen in (examens_source.data or []):
+                        chs_examen = chapitres_par_examen.get(examen["id"], set())
+                        est_transverse = not chs_examen.issubset(chapitre_ids_programme)
+                        if est_transverse and examen["id"] not in examens_transverses_inclus:
+                            continue
+
+                        nouvel_examen = (
+                            supabase.table("examens_programme")
+                            .insert({
+                                "proprietaire_id": nouveau_proprietaire_id,
+                                "titre": examen["titre"],
+                                "type": examen["type"],
+                            })
+                            .execute()
+                        )
+                        nouvel_examen_id = nouvel_examen.data[0]["id"]
+                        correspondance_examens[examen["id"]] = nouvel_examen_id
+
+                        chapitres_a_lier = [
+                            correspondance_chapitres[cid] for cid in chs_examen if cid in correspondance_chapitres
+                        ]
+                        for nouveau_chapitre_id in chapitres_a_lier:
+                            supabase.table("examen_chapitres").insert({
+                                "examen_id": nouvel_examen_id,
+                                "chapitre_id": nouveau_chapitre_id,
+                            }).execute()
+            except Exception as e:
+                logging.error(f"ERREUR clone examens_programme (source {programme_source_id}) : {e}")
+
+        # ------------- Classements transversaux (14/08/2026) -------------
+        try:
+            cibles_clonables: dict[str, dict[str, str]] = {
+                "matiere": correspondance_matieres,
+                "chapitre": correspondance_chapitres,
+                "document": correspondance_documents,
+                "exercice": correspondance_exercices,
+                "examen": correspondance_examens,
+            }
+            tous_ids_clonables: List[str] = [
+                cid for correspondance in cibles_clonables.values() for cid in correspondance.keys()
+            ]
+            if tous_ids_clonables:
+                items = (
+                    supabase.table("classement_transversal_items")
+                    .select("classement_id, cible_type, cible_id")
+                    .in_("cible_id", tous_ids_clonables)
+                    .execute()
+                )
+                classements_ids_concernes = sorted({i["classement_id"] for i in (items.data or [])})
+                if classements_ids_concernes:
+                    classements_source = (
+                        supabase.table("classements_transversaux")
+                        .select("id, type, label")
+                        .in_("id", classements_ids_concernes)
+                        .eq("proprietaire_id", auteur_source_id)
+                        .execute()
+                    )
+                    items_par_classement: dict[str, list] = {}
+                    for i in (items.data or []):
+                        items_par_classement.setdefault(i["classement_id"], []).append(i)
+
+                    for classement in (classements_source.data or []):
+                        items_a_cloner = [
+                            i
+                            for i in items_par_classement.get(classement["id"], [])
+                            if i["cible_id"] in cibles_clonables.get(i["cible_type"], {})
+                        ]
+                        if not items_a_cloner:
+                            continue
+
+                        nouveau_classement = (
+                            supabase.table("classements_transversaux")
+                            .insert({
+                                "proprietaire_id": nouveau_proprietaire_id,
+                                "type": classement["type"],
+                                "label": classement["label"],
+                            })
+                            .execute()
+                        )
+                        nouveau_classement_id = nouveau_classement.data[0]["id"]
+                        for item in items_a_cloner:
+                            nouvelle_cible_id = cibles_clonables[item["cible_type"]][item["cible_id"]]
+                            supabase.table("classement_transversal_items").insert({
+                                "classement_id": nouveau_classement_id,
+                                "cible_type": item["cible_type"],
+                                "cible_id": nouvelle_cible_id,
+                            }).execute()
+        except Exception as e:
+            logging.error(f"ERREUR clone classements_transversaux (source {programme_source_id}) : {e}")
 
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (clone programme {programme_source_id}) : {e}")
@@ -224,6 +456,34 @@ def _cloner_programme(programme_source_id: str, nouveau_proprietaire_id: str, no
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+@router_programmes.get("/{programme_id}/examens-transverses", response_model=List[ExamenTransverseReponse])
+def examens_transverses_du_programme(programme_id: str, utilisateur=Depends(utilisateur_courant)):
+    """
+    Examens de ce programme qui touchent AUSSI au moins un chapitre d'un
+    autre programme -- appelé par le frontend avant de publier un plugin,
+    pour proposer à l'auteur de les inclure ou non dans la copie (voir
+    _examens_transverses_du_programme et PublierPluginPayload.
+    examens_transverses_inclus). Liste vide si aucun cas de ce genre.
+    """
+    try:
+        programme = (
+            supabase.table("programmes")
+            .select("id, proprietaire_id")
+            .eq("id", programme_id)
+            .maybe_single()
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture programme {programme_id}) : {e}")
+        raise erreur_api(500, "ERREUR_INCONNUE")
+    if not programme or not programme.data:
+        raise erreur_api(404, "PROGRAMME_INTROUVABLE")
+    if programme.data["proprietaire_id"] != utilisateur.id:
+        raise erreur_api(403, "PAS_LE_DROIT_SUR_CE_PROGRAMME")
+
+    return _examens_transverses_du_programme(programme_id, utilisateur.id)
+
 
 @router_programmes.post("/{programme_id}/publier-plugin", response_model=PluginReponse, status_code=201)
 def publier_plugin(
@@ -252,6 +512,16 @@ def publier_plugin(
     if programme.data["proprietaire_id"] != utilisateur.id:
         raise erreur_api(403, "PAS_LE_DROIT_SUR_CE_PROGRAMME")
 
+    # Le choix de l'auteur (examensTransversesInclus) ne peut porter que sur
+    # des examens réellement transverses de CE programme -- jamais un id
+    # arbitraire fourni par le client (voir _examens_transverses_du_programme).
+    examens_transverses_choisis = [eid.strip() for eid in payload.examens_transverses_inclus if eid.strip()]
+    if examens_transverses_choisis:
+        ids_eligibles = {e["id"] for e in _examens_transverses_du_programme(programme_id, utilisateur.id)}
+        ids_invalides = set(examens_transverses_choisis) - ids_eligibles
+        if ids_invalides:
+            raise erreur_api(400, "EXAMEN_TRANSVERSE_INVALIDE_POUR_CE")
+
     try:
         nouveau = (
             supabase.table("plugins_programme")
@@ -260,6 +530,7 @@ def publier_plugin(
                 "auteur_id": utilisateur.id,
                 "niveau": programme.data["niveau"],
                 "nom": payload.nom.strip(),
+                "examens_transverses_inclus": examens_transverses_choisis,
             })
             .execute()
         )
@@ -363,7 +634,7 @@ def telecharger_plugin(plugin_id: str, request: Request, utilisateur=Depends(uti
     try:
         plugin = (
             supabase.table("plugins_programme")
-            .select("id, programme_source_id, nom")
+            .select("id, programme_source_id, nom, examens_transverses_inclus")
             .eq("id", plugin_id)
             .maybe_single()
             .execute()
@@ -397,6 +668,7 @@ def telecharger_plugin(plugin_id: str, request: Request, utilisateur=Depends(uti
         programme_source_id=plugin.data["programme_source_id"],
         nouveau_proprietaire_id=utilisateur.id,
         nom_copie=plugin.data["nom"],
+        examens_transverses_inclus=plugin.data.get("examens_transverses_inclus") or [],
     )
 
     try:
