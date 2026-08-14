@@ -1,18 +1,15 @@
-# djiguigne-backend — Djiguignè AI
+# clovis-backend — Clovis
 
-Plateforme multi-agents : n'importe qui peut créer son propre assistant IA
-sans coder (documents PDF, prompt Notion, outils externes) et obtenir un
-lien de chat prêt à partager.
+Backend FastAPI de **Clovis**, IA autonome pour établissements scolaires
+(élève arrive directement sur un chat, aucune landing marketing, aucune
+mention d'"établissement"/"école"). Dépôt séparé de `djiguigne-backend`
+(dont il a hérité une partie de la structure de code initiale) et de son
+frontend `classgpt-frontend` — isolation totale, pas une variante d'un
+produit plus grand : le lien avec l'écosystème Djiguignè ne doit jamais
+transparaître pour l'utilisateur final.
 
-Le projet a effectué son **pivot vers une plateforme sociale** (feed de
-découverte, pages agent publiques, profils créateurs, notes, commentaires,
-follow, notifications, mises à jour d'agent, Article/Réflexion/Histoire —
-détail dans la section dédiée plus bas). Voir `api/PLAN.md` pour la
-migration Streamlit → API qui sous-tend ce pivot.
-
-**Ce README décrit l'état réel du code.** En cas de doute, le code et
-`api/PLAN.md` font foi — pas d'anciennes conversations ou de documentation
-externe.
+**Ce README décrit l'état réel du code.** En cas de doute, le code fait
+foi — pas d'anciennes conversations ou de documentation externe.
 
 ---
 
@@ -20,75 +17,64 @@ externe.
 
 ```
 core/
-  auth.py              authentification étudiant (email/mdp + Google via Supabase Auth), connexion optionnelle
-  configuration.py     system prompt central chargé depuis Notion par agent, cache 5 min
-  creation_agent.py    logique pure de création d'agent (génération d'id, prompt) — partagée Streamlit/API
-  diagnostic.py        script de diagnostic, teste chaque maillon de la chaîne indépendamment
-  embeddings.py        vectorisation partagée (gemini-embedding-001)
-  main.py              chat() — cascade Groq → Gemini → Groq de secours, assemblage du prompt, outils
-  mcp_tools.py         moteur MCP générique (appel d'outils externes)
-  registre_outils.py   liste des outils MCP actifs (seul fichier à modifier pour en ajouter un)
-  retriever.py         recherche vectorielle parallèle, scopée par agent (prompts, documents)
-  themes.py            constantes de thème partagées entre formulaires et rendu
+  main.py                 chat() — cascade Groq → Gemini → Groq de secours, assemblage du prompt, outils
+  mcp_tools.py             moteur MCP générique (catalogue d'outils en cache 24h, appel d'outils externes)
+  registre_outils.py       liste des serveurs MCP actifs (seul fichier à modifier pour en ajouter un)
+  configuration.py         system prompt central de Clovis, cache 5 min
+  proactivite.py           planificateur de relance des utilisateurs inactifs (boucle en tâche de fond, voir api/main.py)
+  comportements_etudiants.py  système de "comportements" : routeur léger (llama-3.1-8b-instant) qui sélectionne les
+                               candidats présentés au grand modèle, qui décide lui-même de lire le texte complet
+  programme_llm.py         logique du programme d'études adaptatif
+  bibliotheque_rag.py       bibliothèque personnelle de l'utilisateur (RAG), scopée par user_id
+  retriever.py              recherche vectorielle parallèle (prompts, documents)
+  embeddings.py             vectorisation partagée (gemini-embedding-001)
+  generation_*.py           outils de génération (images, documents, audio, vidéo, 3D, code, site, LaTeX, signature, archives, données)
+  serveur_mcp_generation.py serveur MCP interne exposant les outils de génération ci-dessus
+  serveur_mcp_github.py     serveur MCP interne pour le connecteur GitHub
+  diagnostic.py             script de diagnostic, teste chaque maillon de la chaîne indépendamment
 
 connexions/
-  notion.py            connexion Notion par étudiant (OAuth 2.1 + PKCE + Dynamic Client Registration)
-
-faces/
-  app_etudiant.py       point d'entrée Streamlit, routage entre les vues ci-dessous
-  vues/
-    chat.py             interface de chat (étudiant), limite de messages pour visiteur non connecté
-    creer_agent.py      formulaire de création d'agent (côté créateur)
-    mes_agents.py       liste/édition/désactivation des agents d'un créateur
-    recuperation_mdp.py récupération de mot de passe, partagée entre les 3 vues créateur/étudiant
-    theme_djiguigne.py  identité visuelle partagée (couleurs, polices, logo)
-    vitrine.py          page d'accueil publique côté créateur, aucune logique métier
+  notion.py                connexion Notion par utilisateur (OAuth 2.1 + PKCE + Dynamic Client Registration)
+  oauth_generique.py        connexion générique pour les autres services OAuth
 
 indexers/
-  index_notion.py       indexation récursive Notion → Supabase
-  index_documents.py    indexation PDF → Supabase (RAG documentaire)
-  reembed_gemini.py     ré-indexation vers l'embedding Gemini
-  storage.py            upload/liste/suppression de documents dans Supabase Storage
+  index_notion.py           indexation récursive Notion → Supabase
+  index_documents.py        indexation PDF → Supabase (RAG documentaire)
+  reembed_gemini.py         ré-indexation vers l'embedding Gemini
+  storage.py                 upload/liste/suppression de documents dans Supabase Storage
 
 api/
-  main.py               app FastAPI (backend en construction, voir api/PLAN.md)
-  auth.py               vérification du JWT Supabase envoyé par le frontend
-  agents.py             endpoints agents (création, feed, détail, vitrine, notes, commentaires, suppression)
-  agent_updates.py      endpoints mises à jour d'agent (publier, lister, liker, commenter)
-  posts.py               endpoints Article/Réflexion/Histoire
-  creators.py            endpoints follow/unfollow créateur
-  profiles.py            endpoints portfolio créateur (+ suppression de compte)
-  notifications.py       endpoints notifications (follow, commentaire, note, mise à jour d'agent)
-  search.py              endpoint de recherche (agents + créateurs)
-  PLAN.md                suivi détaillé de la migration Streamlit → API
+  main.py                   app FastAPI, montage des routers, boucle de planificateur de proactivité
+  auth.py                   vérification du JWT Supabase envoyé par le frontend
+  chat.py                   endpoint de chat (streaming)
+  agents.py                 configuration/édition de l'agent Clovis (system prompt, documents, bibliothèque,
+                             administrateurs, notes, commentaires) — plus de création/suppression/vitrine
+                             publique/profil par agent (retirés le 14/08, système multi-agents/multi-créateurs
+                             sans usage pour Clovis, une seule IA fixe)
+  roles.py                  hiérarchie de rôles (nous/établissement/enseignant/étudiant), rattachement à l'inscription
+  permissions_hierarchie.py point de vérité "qui a le droit de toucher à l'agent de qui", réutilisé par agents.py
+  invitations_clovis.py     invitation d'autres personnes par message/code
+  comportements_etudiants.py endpoints du système de comportements (voir core/comportements_etudiants.py)
+  programmes.py, contenu_programme.py, plugins_programme.py, contenu_dynamique_matiere.py, audits_programme.py
+                             programme d'études adaptatif
+  bibliotheque_utilisateur.py endpoints bibliothèque personnelle (niveau="utilisateur", pas d'agent_id)
+  historique.py, memoire.py  historique de conversation, mémoire
+  profiles.py                profil utilisateur (+ suppression de compte)
+  notifications_push.py      notifications push
+  feedback.py, uploads.py, journal.py  divers
+
+migrations/                 schéma SQL, un fichier par changement, daté
+scripts/                    scripts ponctuels (ex: génération de clés VAPID)
 ```
 
-## Fonctionnalités sociales (pivot terminé)
+## Ce qui tourne en production
 
-- **Feed public** (`/`, `GET /api/feed`) : agents publiés récemment, 5
-  onglets (Agents / Créateurs / Article / Réflexion / Histoire).
-- **Pages agent publiques** (`/agent/[id]`) : note, commentaires, mises à
-  jour (avec like/commentaire/partage), bouton "Utiliser" vers le chat
-  Streamlit.
-- **Profils créateurs** (`/u/[id]`) : agents publiés, follow, et les 3
-  mêmes sections Article/Réflexion/Histoire filtrées sur ce créateur.
-- **Mises à jour d'agent** (`api/agent_updates.py`) : un créateur publie
-  ce qu'il a changé sur un agent (depuis "Modifier agent") ; toute
-  personne ayant déjà utilisé cet agent (même une fois) reçoit une
-  notification.
-- **Article / Réflexion / Histoire** (`api/posts.py`, table `posts`) :
-  3 formats de publication créateur, publiables depuis "Mon espace".
-- **Notifications** (`api/notifications.py`) : follow, commentaire, note,
-  mise à jour d'agent — lignes créées uniquement par des triggers
-  Postgres, jamais insérées directement par l'API.
-- **Zone de danger** ("Modifier le profil" côté frontend) : déconnexion,
-  suppression de compte / d'un agent / d'une histoire.
-
-## Ce qui tourne en production aujourd'hui
-
-- **L'app Streamlit (`faces/`) est l'unique interface utilisateur actuellement déployée**, hébergée sur Railway.
-- **Le chat restera en Streamlit indéfiniment**, même après le pivot social. Seules les autres vues créateur (`creer_agent.py`, `mes_agents.py`, `vitrine.py`) seront progressivement remplacées par un frontend Next.js séparé.
-- **`api/` existe dans le dépôt mais n'est pas encore déployé** : Railway fait toujours tourner Streamlit, pas ce backend FastAPI (bascule prévue à l'Étape 6 de `api/PLAN.md`, pas avant que tout soit validé en conditions réelles).
+- Backend FastAPI (`api/main.py`), déployé sur Railway.
+- Frontend séparé : `classgpt-frontend` (Next.js, sur Vercel).
+- Une seule IA (Clovis) — pas de multi-agents, pas de marketplace de
+  créateurs. Certaines tables (`agents`, `agents_administrateurs`...)
+  et endpoints de `api/agents.py` restent nommés "agent" par héritage du
+  code d'origine, mais ne servent qu'à Clovis lui-même.
 
 ## Variables d'environnement / secrets nécessaires
 
@@ -100,21 +86,16 @@ api/
 | `GOOGLE_API_KEY` | `core/embeddings.py`, `core/main.py` (secours Gemini) |
 | `NOTION_TOKEN` | `indexers/index_notion.py`, `connexions/notion.py` |
 | `TAVILY_API_KEY` | `core/registre_outils.py` (outil de recherche web) |
-| `GITHUB_TOKEN` (optionnel) | `core/main.py` (connecteur GitHub, lecture publique) -- sans lui, l'API GitHub non authentifiée est plafonnée à 60 requêtes/heure PAR IP, partagées entre tous les étudiants ; un classic token `public_repo` (lecture seule, repos publics) fait passer la limite à 5000/heure |
+| `GITHUB_TOKEN` (optionnel) | `core/serveur_mcp_github.py` (connecteur GitHub, lecture publique) -- sans lui, l'API GitHub non authentifiée est plafonnée à 60 requêtes/heure PAR IP, partagées entre tous les utilisateurs ; un classic token `public_repo` (lecture seule, repos publics) fait passer la limite à 5000/heure |
 | `URL_RETOUR_APP` | URL publique du déploiement, utilisée pour le retour OAuth Notion — à recalculer à chaque changement de domaine, pas à copier telle quelle d'un environnement à l'autre |
 
-Variables **obsolètes**, ignorées par le code actuel : `OPENROUTER_API_KEY`
-(remplacée par `GOOGLE_API_KEY`), `NOTION_PAGE_ID` (remplacée par la colonne
-`agents.notion_page_id`, multi-agent). Détail complet et checklist Railway :
-voir `RAILWAY_DEPLOY.md`.
+Détail complet et checklist Railway : voir `RAILWAY_DEPLOY.md`.
 
 ## Lancer l'app
 
 ```
-streamlit run faces/app_etudiant.py
+uvicorn api.main:app --reload
 ```
-
-Un agent précis se sélectionne via `?agent=<id>` dans l'URL.
 
 ## Indexer un nouveau document PDF
 
@@ -123,8 +104,3 @@ python indexers/index_documents.py mon_document.pdf
 ```
 
 (le fichier doit déjà être présent dans le bucket Supabase Storage configuré)
-
-## Pour aller plus loin
-
-- **`api/PLAN.md`** — plan et avancement de la migration Streamlit → API FastAPI
-- **`RAILWAY_DEPLOY.md`** — checklist des secrets à configurer sur Railway

@@ -118,8 +118,11 @@ def _decider_relance(
 
     propager_erreurs=False (par défaut, utilisé par le planificateur en
     tâche de fond) : fail-silent, une relance ratée n'est jamais grave.
-    propager_erreurs=True (utilisé par l'endpoint de test, voir
-    api/agents.py:tester_proactivite) : les erreurs remontent au lieu
+    propager_erreurs=True : n'est plus appelé nulle part depuis la
+    suppression de l'ancien endpoint de test (api/agents.py:
+    tester_proactivite, retiré le 14/08) -- code mort, laissé en l'état
+    pour ne pas toucher à la logique live du planificateur sans demande
+    explicite. Les erreurs remontent au lieu
     d'être avalées -- sinon un échec technique (ex: quota Groq dépassé,
     constaté le 25/07) est indiscernable d'une vraie décision "je ne
     relance pas" côté interface.

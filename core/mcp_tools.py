@@ -27,6 +27,7 @@ coche, sans rien modifier cote agent.
 """
 
 import os
+import time
 import asyncio
 import logging
 
@@ -46,122 +47,91 @@ def _get_secret_local(key):
 _supabase = create_client(_get_secret_local("SUPABASE_URL"), _get_secret_local("SUPABASE_SECRET"))
 
 
-_AGENT_ID_CLOVIS = "clovis"
+# Clovis (12/08, demande Bourama) : une seule IA -- plus de systeme
+# multi-agents/multi-createurs pour les outils (l'ancien filtrage par
+# agents_serveurs/agents_outils_generation a ete retire le 14/08, ces
+# tables n'ont plus d'usage ici). Tout ce qui est disponible cote
+# plateforme (registre_outils_plateforme.disponible=True) est actif pour
+# Clovis, sans notion d'agent_id.
+#
+# `agent_id` reste un parametre des fonctions plus bas (transmis a
+# certains url_builder/headers_builder qui en ont besoin, ex:
+# _url_generation pour planifier_rappel) -- il ne sert plus a filtrer quoi
+# que ce soit ici, uniquement a construire l'URL/les headers.
 
-# Clovis (12/08, demande Bourama) : une seule IA, plus de createur tiers a
-# gerer -- inutile de filtrer par agents_serveurs/agents_outils_generation
-# (systeme concu pour un marketplace multi-agents/multi-createurs). Cet
-# agent recoit directement tout ce qui est disponible cote plateforme
-# (registre_outils_plateforme.disponible=True), mis en cache en memoire de
-# process -- donc valable indefiniment jusqu'au prochain redeploy (le
-# process redemarre => cache vide => rechargement), ou un appel explicite
-# a forcer_rechargement_droits_clovis().
-_cache_droits_clovis = {"serveurs": None, "outils_generation": None}
+_DUREE_CACHE_SECONDES = 24 * 60 * 60  # 24h (demande Bourama 14/08 : ne plus
+# relire ca a chaque message, ca ralentit l'IA pour rien -- le catalogue
+# d'outils ne change pas d'un message a l'autre)
+
+_cache_serveurs_disponibles = {"valeur": None, "expire_a": 0}
+_cache_outils_generation_disponibles = {"valeur": None, "expire_a": 0}
+_cache_catalogue_outils = {}  # nom_serveur -> {"outils": [...], "expire_a": ts}
 
 
-def forcer_rechargement_droits_clovis():
-    _cache_droits_clovis["serveurs"] = None
-    _cache_droits_clovis["outils_generation"] = None
+def forcer_rechargement_catalogue_outils():
+    """
+    Vide tout le cache (droits ET catalogue d'outils MCP), pour forcer un
+    rechargement complet au prochain message. A appeler manuellement apres
+    un changement cote registre_outils_plateforme (nouvel outil active/
+    desactive) ou un ajout d'outil MCP, sans attendre les 24h.
+    """
+    _cache_serveurs_disponibles["valeur"] = None
+    _cache_serveurs_disponibles["expire_a"] = 0
+    _cache_outils_generation_disponibles["valeur"] = None
+    _cache_outils_generation_disponibles["expire_a"] = 0
+    _cache_catalogue_outils.clear()
 
 
-def _tous_les_serveurs_disponibles():
+def _serveurs_disponibles():
+    """Noms des serveurs actives cote plateforme, cache 24h."""
+    maintenant = time.time()
+    if _cache_serveurs_disponibles["valeur"] is not None and _cache_serveurs_disponibles["expire_a"] > maintenant:
+        return _cache_serveurs_disponibles["valeur"]
     try:
         res = _supabase.table("registre_outils_plateforme").select("nom_serveur").eq("disponible", True).execute()
-        return list({ligne["nom_serveur"] for ligne in (res.data or []) if ligne.get("nom_serveur")})
+        valeur = list({ligne["nom_serveur"] for ligne in (res.data or []) if ligne.get("nom_serveur")})
     except Exception as e:
-        logging.error(f"ERREUR SUPABASE (lecture registre_outils_plateforme pour Clovis, serveurs) : {e}")
-        return []
+        logging.error(f"ERREUR SUPABASE (lecture registre_outils_plateforme, serveurs) : {e}")
+        valeur = _cache_serveurs_disponibles["valeur"] or []
+    _cache_serveurs_disponibles["valeur"] = valeur
+    _cache_serveurs_disponibles["expire_a"] = maintenant + _DUREE_CACHE_SECONDES
+    return valeur
 
 
-def _tous_les_outils_generation_disponibles():
+def _outils_generation_disponibles():
+    """Noms des outils de generation actives cote plateforme, cache 24h."""
+    maintenant = time.time()
+    if _cache_outils_generation_disponibles["valeur"] is not None and _cache_outils_generation_disponibles["expire_a"] > maintenant:
+        return _cache_outils_generation_disponibles["valeur"]
     try:
         res = _supabase.table("registre_outils_plateforme").select("nom_outil").eq("disponible", True).execute()
-        return [ligne["nom_outil"] for ligne in (res.data or []) if ligne.get("nom_outil")]
+        valeur = [ligne["nom_outil"] for ligne in (res.data or []) if ligne.get("nom_outil")]
     except Exception as e:
-        logging.error(f"ERREUR SUPABASE (lecture registre_outils_plateforme pour Clovis, outils génération) : {e}")
-        return []
+        logging.error(f"ERREUR SUPABASE (lecture registre_outils_plateforme, outils génération) : {e}")
+        valeur = _cache_outils_generation_disponibles["valeur"] or []
+    _cache_outils_generation_disponibles["valeur"] = valeur
+    _cache_outils_generation_disponibles["expire_a"] = maintenant + _DUREE_CACHE_SECONDES
+    return valeur
 
 
-def _outils_actives_pour_agent(agent_id):
+def _lister_outils_serveur_avec_cache(nom, url, headers):
     """
-    Retourne la liste des noms de serveurs (ex: ["wolfram", "notion"])
-    autorises pour cet agent -- categories 2 et 3 (droit par serveur
-    entier), lues depuis agents_serveurs (remplace l'ancienne colonne
-    agents.tools_enabled).
-
-    Allow-list stricte, intersectee avec la plateforme (voir
-    registre_outils_plateforme.disponible) : un serveur coche par le
-    createur mais retire/indisponible cote plateforme n'apparait pas.
-    Si la requete echoue, on retourne une liste vide plutot que "tous
-    les outils" -> un agent mal configure n'a AUCUN outil.
+    Catalogue d'un serveur MCP (nom/description/schema de chaque outil,
+    via list_tools()) mis en cache 24h, cle par nom de serveur seul (pas
+    par utilisateur) -- ce catalogue est le SCHEMA des outils, identique
+    pour tout le monde, contrairement aux headers d'authentification qui
+    eux varient par utilisateur (ex: Notion). Seul l'appel reseau
+    list_tools() est evite par ce cache ; l'appel reel de l'outil
+    (appeler_outil, plus bas) n'est jamais mis en cache et repart a
+    chaque fois avec les bons headers de l'utilisateur courant.
     """
-    if not agent_id:
-        logging.error("_outils_actives_pour_agent appelé sans agent_id : aucun outil activé.")
-        return []
-    if agent_id == _AGENT_ID_CLOVIS:
-        if _cache_droits_clovis["serveurs"] is None:
-            _cache_droits_clovis["serveurs"] = _tous_les_serveurs_disponibles()
-        return _cache_droits_clovis["serveurs"]
-    try:
-        res = (
-            _supabase.table("agents_serveurs")
-            .select("nom_serveur")
-            .eq("agent_id", agent_id)
-            .execute()
-        )
-        noms_coches = [ligne["nom_serveur"] for ligne in (res.data or [])]
-        if not noms_coches:
-            return []
-
-        dispo_res = (
-            _supabase.table("registre_outils_plateforme")
-            .select("nom_serveur")
-            .in_("nom_serveur", noms_coches)
-            .eq("disponible", True)
-            .execute()
-        )
-        return list({ligne["nom_serveur"] for ligne in (dispo_res.data or [])})
-    except Exception as e:
-        logging.error(f"ERREUR SUPABASE (lecture agents_serveurs, agent_id={agent_id}) : {e}")
-        return []
-
-
-def _outils_generation_actifs_pour_agent(agent_id):
-    """
-    Categorie 1 (generation) : granularite par outil individuel, pas par
-    serveur entier. Meme logique allow-list intersectee avec la
-    plateforme (registre_outils_plateforme.disponible) -- un outil
-    coche par le createur mais retire cote plateforme (ex: plus de cle
-    FAL) n'apparait pas non plus.
-    """
-    if not agent_id:
-        return []
-    if agent_id == _AGENT_ID_CLOVIS:
-        if _cache_droits_clovis["outils_generation"] is None:
-            _cache_droits_clovis["outils_generation"] = _tous_les_outils_generation_disponibles()
-        return _cache_droits_clovis["outils_generation"]
-    try:
-        coches_res = (
-            _supabase.table("agents_outils_generation")
-            .select("nom_outil")
-            .eq("agent_id", agent_id)
-            .execute()
-        )
-        noms_coches = [ligne["nom_outil"] for ligne in (coches_res.data or [])]
-        if not noms_coches:
-            return []
-
-        dispo_res = (
-            _supabase.table("registre_outils_plateforme")
-            .select("nom_outil")
-            .in_("nom_outil", noms_coches)
-            .eq("disponible", True)
-            .execute()
-        )
-        return [ligne["nom_outil"] for ligne in (dispo_res.data or [])]
-    except Exception as e:
-        logging.error(f"ERREUR SUPABASE (lecture agents_outils_generation, agent_id={agent_id}) : {e}")
-        return []
+    maintenant = time.time()
+    entree = _cache_catalogue_outils.get(nom)
+    if entree is not None and entree["expire_a"] > maintenant:
+        return entree["outils"]
+    outils = asyncio.run(_lister_outils_async(url, headers))
+    _cache_catalogue_outils[nom] = {"outils": outils, "expire_a": maintenant + _DUREE_CACHE_SECONDES}
+    return outils
 
 
 async def _lister_outils_async(url, headers=None):
@@ -192,8 +162,8 @@ async def _appeler_outil_async(url, nom_outil, arguments, headers=None):
 
 def lister_outils_autorises_pour_agent(get_secret, user_id=None, agent_id=None):
     """
-    Se connecte a chaque serveur MCP du registre AUTORISE POUR CET AGENT
-    (voir agents.tools_enabled) et retourne :
+    Se connecte a chaque serveur MCP du registre actif cote plateforme et
+    retourne :
     - outils_pour_llm : la liste des outils au format attendu par l'API
       Groq (parametre tools=...)
     - table_routage : un dictionnaire {nom_outil: {"url":..., "headers":...}},
@@ -204,51 +174,42 @@ def lister_outils_autorises_pour_agent(get_secret, user_id=None, agent_id=None):
     lister_tous_les_outils() (juste en dessous) qui applique ce filtre
     pour la reponse normale. Cette fonction existe separement depuis le
     28/07 pour que _router_outils() (core/main.py) puisse juger de la
-    pertinence des outils REELLEMENT autorises pour cet agent, sans
-    dupliquer toute la logique de connexion aux serveurs MCP.
+    pertinence des outils reellement disponibles, sans dupliquer toute la
+    logique de connexion aux serveurs MCP.
 
-    `agent_id` determine quels serveurs de SERVEURS_MCP sont meme
-    interroges (filtre AVANT tout appel reseau, categories 2/3) : un
-    agent sans rien coche dans agents_serveurs n'a acces a AUCUN outil de
-    ces categories, par defaut restrictif (voir _outils_actives_pour_agent).
-    Le serveur "generation" (categorie 1) est toujours interroge, mais
-    ses outils sont filtres un par un via agents_outils_generation
-    (voir _outils_generation_actifs_pour_agent). Ajouter/retirer un
-    outil pour un agent = modifier ces tables en base, jamais ce fichier.
+    Simplifie le 14/08 (demande Bourama) : Clovis est une seule IA, plus
+    de systeme multi-agents/multi-createurs -- l'ancien filtrage par
+    agents_serveurs/agents_outils_generation (par agent) a ete retire.
+    Tous les serveurs et outils de generation disponibles cote plateforme
+    (registre_outils_plateforme.disponible=True) sont proposes.
 
     `user_id` et `agent_id` sont transmis a chaque url_builder/
     headers_builder. La plupart les ignorent (cle API globale, ex:
     Tavily, Wolfram) ; certains outils "par utilisateur" (ex: Notion) en
-    ont besoin pour aller chercher le bon token. Notion specifiquement
-    scope sa connexion par (user_id, agent_id) et non user_id seul
-    (Option A, juillet 2026) : un utilisateur connecte a Notion pour un
-    agent n'est PAS automatiquement connecte pour un autre -> voir
-    connexions/notion.py. Si un outil necessite un utilisateur et qu'aucun
-    n'est connecte (ou pas encore connecte a CET outil POUR CET AGENT), il
+    ont besoin pour aller chercher le bon token -- voir connexions/notion.py.
+    Si un outil necessite un utilisateur et qu'aucun n'est connecte, il
     est ignore silencieusement : il n'apparait simplement pas dans la
     liste proposee au modele.
+
+    Le catalogue d'outils (schema/description via list_tools()) est mis
+    en cache 24h par serveur -- voir _lister_outils_serveur_avec_cache --
+    au lieu d'un appel reseau a chaque message.
     """
     outils_pour_llm = []
     table_routage = {}
 
-    noms_serveurs_actives = _outils_actives_pour_agent(agent_id)
-    serveurs_pour_cet_agent = [
+    noms_serveurs_actifs = _serveurs_disponibles()
+    serveurs_actifs = [
         s for s in SERVEURS_MCP
-        if s["nom"] == "generation" or s["nom"] in noms_serveurs_actives
+        if s["nom"] == "generation" or s["nom"] in noms_serveurs_actifs
     ]
-    # "generation" est toujours interroge : sa restriction se fait APRES,
-    # outil par outil, via _outils_generation_actifs_pour_agent -- pas au
-    # niveau serveur comme wolfram/github/notion (categories 2/3).
-    # Si l'agent n'a coche aucun outil de generation, la fonction
-    # renverra une liste vide et le filtre plus bas videra la liste
-    # d'outils de toute facon (comportement identique a "serveur absent").
 
     logging.info(
-        f"Agent '{agent_id}' -> serveurs MCP activés : {noms_serveurs_actives or '(aucun)'} "
-        f"({len(serveurs_pour_cet_agent)}/{len(SERVEURS_MCP)} du registre retenus)"
+        f"Serveurs MCP actifs : {noms_serveurs_actifs or '(aucun)'} "
+        f"({len(serveurs_actifs)}/{len(SERVEURS_MCP)} du registre retenus)"
     )
 
-    for serveur in serveurs_pour_cet_agent:
+    for serveur in serveurs_actifs:
         nom = serveur["nom"]
         try:
             if serveur.get("necessite_utilisateur") and not user_id:
@@ -259,27 +220,19 @@ def lister_outils_autorises_pour_agent(get_secret, user_id=None, agent_id=None):
             headers = serveur["headers_builder"](get_secret, user_id, agent_id) if "headers_builder" in serveur else None
 
             if serveur.get("necessite_utilisateur") and headers is None:
-                logging.info(f"MCP '{nom}' ignoré : utilisateur {user_id} pas connecté à cet outil POUR L'AGENT '{agent_id}' (headers=None).")
+                logging.info(f"MCP '{nom}' ignoré : utilisateur {user_id} pas connecté à cet outil.")
                 continue
 
-            outils = asyncio.run(_lister_outils_async(url, headers))
+            outils = _lister_outils_serveur_avec_cache(nom, url, headers)
 
             outils_autorises = serveur.get("outils_autorises")
-            # Categorie 1 (generation) : granularite fine par outil,
-            # recalculee par agent a chaque appel (pas une liste fixe
-            # ecrite dans registre_outils.py comme pour Notion).
             if nom == "generation":
-                outils_autorises = _outils_generation_actifs_pour_agent(agent_id)
+                outils_autorises = _outils_generation_disponibles()
                 # consulter_bibliotheque (2026-08-01) : bibliothèque
                 # PERSONNELLE de l'utilisateur (voir "Mon espace"),
-                # n'appartient à aucun agent en particulier -- contrairement
-                # au reste de la catégorie 1, elle ne passe donc PAS par
-                # l'allow-list agents_outils_generation (le créateur ne la
-                # configure pas outil par outil, elle est déjà scopée par
-                # user_id côté core/bibliotheque_rag.py). Toujours proposée
-                # dès qu'un utilisateur est connecté, sur n'importe quel
-                # agent -- cf. demande Bourama "n'importe quelle
-                # conversation, n'importe quel chat".
+                # scopée par user_id côté core/bibliotheque_rag.py, pas
+                # par la liste registre_outils_plateforme. Toujours
+                # proposée dès qu'un utilisateur est connecté.
                 if user_id and "consulter_bibliotheque" not in outils_autorises:
                     outils_autorises = [*outils_autorises, "consulter_bibliotheque"]
             if outils_autorises is not None:
