@@ -1295,7 +1295,7 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         return []
 
 
-def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longueur_reponse="moyenne", fuseau_horaire=None, recherche_forcee=False, outil_force=None, sans_enseignant=False):
+def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longueur_reponse="moyenne", fuseau_horaire=None, recherche_forcee=False, outil_force=None, sans_enseignant=False, comportements_etudiant=None, mes_programmes=None):
     # Restauré le 14/08 (voir commentaire des constantes plus haut) : la
     # page Notion de l'agent (get_system_prompt) ne doit plus contenir QUE
     # la personnalité/le comportement propre à l'agent -- les 3 blocs fixes
@@ -1325,10 +1325,16 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     # le texte. C'est le grand modèle qui décide s'il appelle l'outil
     # consulter_comportement pour lire le texte complet d'un candidat
     # (voir core/serveur_mcp_generation.py).
-    comportements_etudiant = (
-        choisir_comportements_pertinents(message_utilisateur, lister_comportements_etudiant(agent_id, user_id))
-        if user_id else []
-    )
+    #
+    # Calculé une seule fois dans chat() (14/08), plus ici -- reçu en
+    # paramètre. Ça évite un second appel LLM au petit routeur, et surtout
+    # ça permet à chat() de forcer consulter_comportement/consulter_programme
+    # dans la liste réellement envoyée à Groq dès qu'un candidat existe,
+    # AVANT de construire ce prompt (voir outils_forces_contexte plus haut
+    # dans chat()) -- sinon ce bloc annonce un outil que le modèle ne peut
+    # en réalité pas appeler, même contradiction que le bug du 12/08.
+    comportements_etudiant = comportements_etudiant or []
+    mes_programmes = mes_programmes or []
 
     if comportements_etudiant:
         candidats = "\n".join(f"- id={c['id']} : {c['description']}" for c in comportements_etudiant)
@@ -1351,7 +1357,6 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     # core/serveur_mcp_generation.py), pour ne pas alourdir chaque message
     # avec le détail matières/chapitres/limites d'un programme qui peut
     # être long.
-    mes_programmes = lister_mes_programmes_legers(user_id) if user_id else []
     if mes_programmes:
         liste_programmes = "\n".join(
             f"- id={p['id']} — {p['niveau']}" + (f" ({p['nom']})" if p.get("nom") else "")
@@ -2500,6 +2505,43 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     if agent_id is None:
         agent_id = get_secret("AGENT_ID") or AGENT_ID_PAR_DEFAUT
 
+    # Comportements de l'étudiant + programmes (14/08) : calculés UNE
+    # SEULE FOIS ici, jamais recalculés plus bas (voir _construire_system_prompt,
+    # qui les reçoit désormais en paramètre) -- pas de second appel LLM
+    # inutile au petit routeur choisir_comportements_pertinents.
+    #
+    # Corrige une désynchronisation : le mini-routeur "à la skill"
+    # ci-dessous décide QUELS candidats annoncer au modèle, mais c'est un
+    # mécanisme totalement séparé du routeur général d'outils plus bas
+    # (_router_outils), qui lui décide, sans rien savoir de ces candidats,
+    # si consulter_comportement/consulter_programme sont réellement
+    # branchés à l'appel Groq. Avant ce fix, le premier pouvait annoncer un
+    # candidat pertinent sans que le second n'ait jamais branché l'outil
+    # correspondant -- même contradiction que le bug du 12/08 (prompt qui
+    # affirme une capacité non réellement présente). outils_forces_contexte
+    # est donc fusionné à CHAQUE point plus bas où la liste finale d'outils
+    # est décidée, indépendamment de ce que dit le routeur général.
+    #
+    # Pas de chemin image/vidéo (Gemini, aucun outil MCP dans cette
+    # branche, voir plus bas) -- comportements_etudiant/mes_programmes y
+    # restent calculés (coût négligeable, mes_programmes est déjà quasi
+    # gratuit) mais outils_forces_contexte n'y est jamais fusionné.
+    comportements_etudiant = (
+        choisir_comportements_pertinents(message_utilisateur, lister_comportements_etudiant(agent_id, user_id))
+        if user_id and message_utilisateur else []
+    )
+    mes_programmes = lister_mes_programmes_legers(user_id) if user_id else []
+    outils_forces_contexte = []
+    if comportements_etudiant:
+        outils_forces_contexte.append("consulter_comportement")
+    if mes_programmes:
+        outils_forces_contexte.append("consulter_programme")
+
+    def _fusionner_outils(liste_base, extra):
+        """Union ordonnée sans doublons, jamais liste vide (None si rien)."""
+        fusion = list(dict.fromkeys((liste_base or []) + (extra or [])))
+        return fusion or None
+
     # Routeur d'outils (2026-07-28, demande Bourama) : voir _router_outils
     # plus haut pour la doc complète. Ne se déclenche QUE si rien n'est
     # déjà forcé (ni sélection manuelle via BarreDeSaisie.tsx, ni clic sur
@@ -2547,14 +2589,16 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             return _router_outils(message_utilisateur, outils_disponibles_agent, historique)
 
         def _tache_prompt_optimiste():
-            outils_mcp, table_routage = lister_tous_les_outils(get_secret, user_id, agent_id, None)
-            system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, None, sans_enseignant)
+            outil_force_contexte_seul = _fusionner_outils(None, outils_forces_contexte)
+            outils_mcp, table_routage = lister_tous_les_outils(get_secret, user_id, agent_id, outil_force_contexte_seul)
+            outil_force_verifie_optimiste = [o["function"]["name"] for o in outils_mcp] if outil_force_contexte_seul else None
+            system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie_optimiste, sans_enseignant, comportements_etudiant, mes_programmes)
             return outils_mcp, table_routage, system_final
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             f_routeur = executor.submit(_tache_routeur)
             f_optimiste = executor.submit(_tache_prompt_optimiste)
-        outils_suggeres = f_routeur.result()
+        outils_suggeres = _fusionner_outils(f_routeur.result(), outils_forces_contexte) or []
         outils_mcp, table_routage, system_final = f_optimiste.result()
         outil_force_verifie = None
 
@@ -2603,6 +2647,12 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 return
     else:
         outils_mcp = table_routage = system_final = None  # recalculés ci-dessous dans tous les autres cas
+        if not (image_url or images_base64):
+            # Routeur général court-circuité ici (outil déjà forcé manuellement,
+            # bouton "Aucun" cliqué, ou pas de message) -- les outils de
+            # contexte (comportement/programme) doivent quand même être
+            # fusionnés, ils ne dépendent pas du routeur général.
+            outil_force = _fusionner_outils(outil_force, outils_forces_contexte)
 
     # CORRECTION (29/07, Bourama) : la liste réelle d'outils (celle qui
     # part dans tools=... vers Groq, filtrée par autorisation agent en
@@ -2624,7 +2674,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         else:
             outils_mcp, table_routage = lister_tous_les_outils(get_secret, user_id, agent_id, outil_force)
             outil_force_verifie = [o["function"]["name"] for o in outils_mcp] if outil_force else outil_force
-        system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie, sans_enseignant)
+        system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie, sans_enseignant, comportements_etudiant, mes_programmes)
 
         # PERF (10/08) : second (et dernier) point de vérification --
         # couvre tous les chemins qui ne passent PAS par le premier
