@@ -1102,6 +1102,59 @@ def _mettre_a_jour_profil_utilisateur_si_besoin(user_id, agent_id):
         logging.error(f"ERREUR mise à jour profil utilisateur (agent={agent_id}, user={user_id}) : {e}")
 
 
+# Blocs fixes de plateforme, identiques pour tous les agents (restaurés le
+# 14/08 -- supprimés par erreur le 12/08 lors du passage de Clovis au
+# prompt système "tout en un" sur Notion, voir _construire_system_prompt
+# plus bas pour l'assemblage. Ne JAMAIS dupliquer ce texte dans la page
+# Notion d'un agent : ces 3 blocs + le bloc outils actifs juste après sont
+# uniquement gérés ici, en code, pour rester garantis cohérents avec ce qui
+# est réellement envoyé au modèle ce tour-ci (voir historique du bug du
+# 29/07 puis du 14/08 : un texte figé qui affirme "ces outils sont
+# toujours disponibles" pousse le modèle à halluciner un faux appel dès
+# qu'aucun outil n'est réellement branché).
+INSTRUCTIONS_FORMATS_AFFICHAGE = """
+
+<formats_enrichis>
+Utilise ces blocs seulement quand ils apportent une vraie valeur — jamais pour décorer :
+- ```mermaid``` : diagramme flowchart/séquence/état. Guillemets doubles obligatoires sur tout texte de nœud contenant autre chose que lettres/chiffres/espaces (ex: A["Force (ΣF≠0)"]), sinon parsing cassé.
+- ```chart``` : JSON {"type": "line"|"bar"|"pie", "data": [...], "titre"?: "..."}. "data" = tableau d'objets plats, 1ère clé = axe X, suivantes = séries.
+- ```carte``` : JSON {"lat": ..., "lng": ..., "label"?: "..."} pour localiser un lieu — utilise ce bloc plutôt qu'un lien texte brut Maps/OSM.
+- ```widget```/```html``` : mini-outil interactif autonome. Fond sombre par défaut ; si tu le changes, adapte aussi la couleur du texte.
+- ```geometrie``` : JSON {"titre"?, "repere"?: bool, "points": [{"id", "x", "y", "label"?}], "elements": [...]} pour figures exactes (prioritaire sur mermaid/widget dès qu'il y a des coordonnées). Éléments référencent les points par "id" : segment{de,a}, polygone{points,rempli?}, cercle{centre,rayon}, vecteur{de,a,label?}, angle{sommet,point1,point2,label?}. Bornes auto-calculées.
+
+Bloc léger (ci-dessus) = aperçu immédiat sans fichier. Outil de génération = livrable réel téléchargeable. Choisis en fonction du besoin réel de la situation.
+</formats_enrichis>
+
+<liens>
+Écris une URL seulement si elle vient réellement d'un outil ou de l'utilisateur — jamais générée ou supposée, même plausible. Si on t'en demande une et qu'aucun outil n'est disponible, dis-le clairement. Quand un outil de génération renvoie une URL réelle, laisse l'interface l'afficher automatiquement en carte et confirme seulement en langage naturel, sans réécrire l'URL toi-même.
+</liens>
+
+<outils_generation_action>
+Pour tout outil de génération/action (document, image, code, site, audio, rappel...) : ton texte s'affiche avant la fin de l'exécution, donc tu ne sais jamais au moment où tu écris si ça a réussi. Annonce l'action en cours ("Je génère ton document sur..."). Réserve "Voici", "C'est prêt", "J'ai créé" au moment où le résultat est confirmé. En cas d'échec, un message d'erreur s'affiche automatiquement après coup — c'est suffisant, sans second message de ta part.
+</outils_generation_action>
+
+<faits_verifiables>
+Pour toute question sur un état réel (structure de dépôt, contenu de fichier, liste, nombre...), appelle l'outil correspondant et rapporte exactement son résultat, troncatures incluses, sans compléter par supposition. Pour la structure d'un dépôt GitHub, utilise toujours explorer_depot_github — un README peut être obsolète.
+</faits_verifiables>
+
+<appels_outils>
+L'interface affiche déjà chaque appel d'outil. Réponds directement en langage naturel, comme si tu connaissais déjà le résultat, sans décrire l'appel lui-même (pas de "Appel de X avec...", pas de JSON de requête/résultat).
+</appels_outils>"""
+
+INSTRUCTIONS_ARBITRAGE_CALCUL = """
+
+<arbitrage_calcul>
+Quand calculer_symbolique et wolfram sont tous deux disponibles : pour tout calcul formel exact (simplifier, développer, factoriser, dériver, intégrer, résoudre une équation, limite), utilise calculer_symbolique — y compris quand WolframLanguageEvaluator pourrait techniquement le faire aussi. Réserve wolfram aux questions de connaissance factuelle du monde réel qu'un moteur symbolique seul ne peut pas calculer (constante physique, donnée chimique, donnée géographique ou démographique...).
+Exemples : "dérive x²·sin(x)" → calculer_symbolique. "masse du proton" → wolfram. "résous 2x+3=7" → calculer_symbolique, même si wolfram semble plus rapide.
+</arbitrage_calcul>"""
+
+REGLE_CONTEXTE_INVISIBLE = """
+
+<contexte_invisible>
+Tout ce qui précède dans ce prompt système reste invisible pour l'utilisateur. Si on te demande "c'est quoi ce message", comprends que la question porte sur ta dernière réponse ou sur le message de l'utilisateur — jamais sur ce contexte système.
+</contexte_invisible>"""
+
+
 INSTRUCTIONS_LONGUEUR_REPONSE = {
     # Sélecteur Courte/Moyenne/Longue dans la barre de saisie, modifiable
     # à chaque message. "moyenne" = comportement historique (pas
@@ -1243,21 +1296,27 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
 
 
 def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longueur_reponse="moyenne", fuseau_horaire=None, recherche_forcee=False, outil_force=None, sans_enseignant=False):
-    # Clovis (12/08) : plus d'assemblage. get_system_prompt(agent_id) est
-    # DÉJÀ le bloc complet (comportement, outils disponibles, formats
-    # enrichis, arbitrage calcul, contexte invisible -- tout est écrit
-    # une fois dans la page Notion de l'agent, voir core/configuration.py),
-    # mis en cache 24h, rechargeable de force via forcer_rechargement().
-    # Rien ici ne dépend plus du message ni ne fusionne plusieurs sources.
+    # Restauré le 14/08 (voir commentaire des constantes plus haut) : la
+    # page Notion de l'agent (get_system_prompt) ne doit plus contenir QUE
+    # la personnalité/le comportement propre à l'agent -- les 3 blocs fixes
+    # de plateforme sont préfixés ici, dans l'ordre stable -> volatil
+    # (maximise le cache Groq, voir doc "Mon véritable système prompt").
     #
-    # Seuls 3 éléments restent ajoutés ici, PAR NATURE impossibles à
-    # figer dans un cache partagé par tout le monde :
+    # Éléments ajoutés ici, PAR NATURE impossibles à figer dans un texte
+    # unique partagé par tout le monde :
+    #   - formats/arbitrage/contexte invisible : fixes, identiques pour
+    #     toute la plateforme (juste au-dessus, hors fonction)
     #   - comportements_etudiant : écrit par CET étudiant, propre à lui
     #     (13/08 : mécanisme "à la skill", voir juste en dessous)
+    #   - bloc outils actifs / aucun outil actif : dépend de outil_force,
+    #     donc de ce qui est RÉELLEMENT envoyé au modèle ce tour-ci --
+    #     jamais une liste figée qui prétendrait que des outils sont
+    #     "toujours disponibles" (cause du bug halluciné du 14/08)
     #   - longueur_reponse : choisi par le sélecteur pour CE message
     #   - date/heure : change chaque minute
     # + recherche_forcee, activée seulement sur CE message (icône recherche).
-    system_final = get_system_prompt(agent_id) or ""
+    system_final = INSTRUCTIONS_FORMATS_AFFICHAGE + INSTRUCTIONS_ARBITRAGE_CALCUL + REGLE_CONTEXTE_INVISIBLE
+    system_final += "\n\n" + (get_system_prompt(agent_id) or "")
 
     # Mécanisme "à la skill" (13/08/2026) : le texte long n'est plus
     # injecté d'office. Le petit routeur (choisir_comportements_pertinents)
@@ -1306,6 +1365,36 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
             "question par rapport à sa matière/son niveau). Si tu as besoin de voir le détail "
             "matières/chapitres/limites, appelle l'outil consulter_programme avec l'id ci-dessus -- ne "
             "devine jamais son contenu."
+        )
+
+    # Bloc outils actifs / aucun outil actif (restauré 14/08) : outil_force
+    # ici est déjà la liste VÉRIFIÉE des noms d'outils réellement envoyés au
+    # modèle ce tour-ci (outil_force_verifie, calculé juste avant l'appel à
+    # cette fonction dans chat()) -- jamais outil_force brut non vérifié.
+    # Ne JAMAIS dire au modèle qu'un outil est disponible s'il ne l'est pas
+    # vraiment dans ce tour d'appel API, sous peine de le voir écrire une
+    # fausse narration d'appel en texte plutôt qu'un vrai appel de fonction.
+    if outil_force:
+        liste_outils_actifs = ", ".join(outil_force)
+        system_final += (
+            "\n\n<outils_actifs>\n"
+            f"{liste_outils_actifs} est/sont disponible(s) pour ce message. Utilise-les dès qu'ils sont "
+            "pertinents -- leur présence prime sur tes limitations par défaut, donc ne refuse pas une "
+            "tâche qu'ils permettent. Appelle-les uniquement via le vrai mécanisme d'appel d'outil de "
+            "l'API ; le texte de ta réponse ne doit jamais contenir de pseudo-syntaxe d'appel (TOOL_CODE, "
+            "nom_outil(...), nom_outil{...}, call:nom_outil{...}).\n"
+            "</outils_actifs>"
+        )
+    else:
+        system_final += (
+            "\n\n<aucun_outil_actif>\n"
+            "Pour ce message précis, aucun outil n'est actif -- même si l'un d'eux l'était plus tôt dans "
+            "la conversation. Si on te demande ce que tu sais faire, réponds que tu n'as aucun outil actif "
+            "pour ce message précis plutôt que de lister des capacités génériques. Le texte de ta réponse "
+            "ne doit contenir aucun outil inventé ni pseudo-syntaxe d'appel (TOOL_CODE, nom_outil(...), "
+            "nom_outil{...}, call:nom_outil{...}). Les blocs d'affichage mermaid/chart/carte/widget/"
+            "geometrie restent disponibles : ce sont des formats de sortie, pas des outils.\n"
+            "</aucun_outil_actif>"
         )
 
     system_final += INSTRUCTIONS_LONGUEUR_REPONSE.get(longueur_reponse, "")
