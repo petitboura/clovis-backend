@@ -2586,6 +2586,24 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     if not outil_force and not ignorer_suggestion_outils and message_utilisateur and not image_url and not images_base64:
         def _tache_routeur():
             outils_disponibles_agent, _ = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id)
+            # Notion + GitHub exclus du CATALOGUE envoyé au routeur automatique
+            # (14/08, demande Bourama : "enlève le catalogue que ce ne soit
+            # plus suggéré, comme s'il ne fonctionne plus"). Ces deux serveurs
+            # à eux seuls totalisent ~31 outils sur 62 disponibles pour Clovis,
+            # chacun avec sa description complète -- ce qui fait dépasser à
+            # coup sûr la limite TPM (6000) du petit modèle routeur
+            # (MODELE_ROUTEUR_OUTILS), d'où le 413 Payload Too Large observé
+            # à CHAQUE appel et donc AUCUNE suggestion automatique possible,
+            # quelle que soit la question. Filtre appliqué uniquement ici (le
+            # catalogue proposé au routeur) : la sélection MANUELLE (bouton
+            # Outils, outil_force) n'est pas touchée, Notion et GitHub restent
+            # entièrement utilisables ainsi -- voir lister_tous_les_outils
+            # plus bas, non modifié.
+            outils_disponibles_agent = [
+                o for o in outils_disponibles_agent
+                if not o["function"]["name"].startswith("notion-")
+                and "depot_github" not in o["function"]["name"]
+            ]
             return _router_outils(message_utilisateur, outils_disponibles_agent, historique)
 
         def _tache_prompt_optimiste():
