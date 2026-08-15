@@ -214,9 +214,10 @@ def obtenir_contenu_chapitre(user_id: str, chapitre_id: str) -> str | None:
         return None
     if not programme_res or not programme_res.data:
         return None
-    if programme_res.data["proprietaire_id"] != user_id:
+    programme = programme_res.data
+    if programme["proprietaire_id"] != user_id:
         from codes_partage import peut_acceder_programme_recu
-        if not peut_acceder_programme_recu(user_id, programme_res.data["id"]):
+        if not peut_acceder_programme_recu(user_id, programme["id"]):
             return None
 
     try:
@@ -364,7 +365,7 @@ def obtenir_examens_programme(user_id: str, programme_id: str) -> str | None:
             supabase.table("examens_programme")
             .select("id, titre, type")
             .in_("id", examen_ids)
-            .eq("proprietaire_id", user_id)
+            .eq("proprietaire_id", programme["proprietaire_id"])
             .order("created_at")
             .execute()
             .data
