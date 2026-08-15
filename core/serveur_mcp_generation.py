@@ -489,11 +489,22 @@ def consulter_comportement(comportement_id: str, ctx: Context) -> str:
 def ajouter_comportement(texte: str, ctx: Context) -> str:
     """
     Enregistre une nouvelle instruction personnelle pour CET étudiant
-    (section "Mes comportements"), à utiliser dès qu'il te demande de
-    retenir une préférence ou une règle à suivre pour la suite (ex:
-    "explique-moi toujours avec des schémas", "ne me donne jamais la
-    réponse directe, guide-moi"). S'ajoute EN PLUS de ses autres
-    comportements, ne les remplace pas.
+    (section "Mes comportements"), à utiliser SEULEMENT quand il exprime
+    CLAIREMENT et EXPLICITEMENT une préférence ou une règle à retenir
+    pour la suite (ex: "explique-moi toujours avec des schémas", "ne me
+    donne jamais la réponse directe, guide-moi"). S'ajoute EN PLUS de ses
+    autres comportements, ne les remplace pas.
+
+    N'UTILISE JAMAIS CET OUTIL SUR UNE SUPPOSITION. Si la demande est
+    vague, ambiguë, ou que tu devines seulement ce que l'étudiant
+    voudrait retenir sans qu'il l'ait dit clairement, NE CRÉE RIEN --
+    demande-lui d'abord de préciser ce qu'il veut que tu retiennes
+    exactement. Ne crée jamais un comportement "au cas où", pour
+    anticiper un besoin non exprimé, ou à partir d'une remarque en
+    passant qui n'était pas une vraie demande de mémorisation. Une
+    création hâtive et mal comprise est pire qu'aucune création : elle
+    pollue durablement ses instructions et influence toutes ses
+    conversations futures avec toi.
     """
     try:
         requete = ctx.request_context.request
@@ -599,7 +610,10 @@ def ajouter_programme(niveau: str, ctx: Context, nom: str = "") -> str:
     niveau scolaire, `nom` un label optionnel s'il en donne un. Utilise
     cet outil quand l'étudiant veut structurer une nouvelle année/classe,
     pas pour ajouter une matière à un programme déjà existant (voir
-    ajouter_matiere).
+    ajouter_matiere). N'utilise JAMAIS cet outil sur une supposition --
+    si tu n'es pas sûr que l'étudiant veut vraiment créer un nouveau
+    programme (plutôt que, par exemple, ajouter une matière à un
+    programme existant), demande-lui de préciser avant d'agir.
     """
     try:
         user_id = _user_id_ou_erreur(ctx)
@@ -660,7 +674,9 @@ def ajouter_matiere(programme_id: str, nom: str, ctx: Context, limites: str = ""
     Ajoute une matière à un programme existant de CET étudiant (ex:
     "Mathématiques" dans son programme "Terminale S"). `limites` est une
     description optionnelle du cadre officiel (pour savoir ce qui est
-    "hors programme").
+    "hors programme"). N'utilise JAMAIS cet outil sur une supposition --
+    si l'étudiant n'a pas clairement demandé d'ajouter CETTE matière à
+    CE programme, demande-lui de confirmer avant d'agir.
     """
     try:
         user_id = _user_id_ou_erreur(ctx)
@@ -721,6 +737,9 @@ def ajouter_chapitre(matiere_id: str, nom: str, ctx: Context, ordre: int = 0, li
     Ajoute un chapitre à une matière existante de CET étudiant. `ordre`
     contrôle sa position d'affichage (0 = premier). `limites` est une
     description optionnelle du cadre officiel pour ce chapitre.
+    N'utilise JAMAIS cet outil sur une supposition -- si l'étudiant n'a
+    pas clairement demandé d'ajouter CE chapitre à CETTE matière,
+    demande-lui de confirmer avant d'agir.
     """
     try:
         user_id = _user_id_ou_erreur(ctx)
