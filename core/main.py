@@ -1184,6 +1184,34 @@ INSTRUCTIONS_LONGUEUR_REPONSE = {
 #      le frontend (djiguigne-frontend) sait déjà rendre ces trois blocs
 #      nativement (voir CarteMessage.tsx, GraphiqueDonnees.tsx,
 #      WidgetSandbox.tsx), il manquait juste la convention ici.
+def _resume_description_outil(description, max_caracteres=200):
+    """
+    Version courte d'une description d'outil, pour le catalogue envoyé au
+    routeur (_router_outils) uniquement -- jamais pour l'exécution réelle
+    (lister_tous_les_outils envoie toujours la description complète au
+    modèle principal, qui lui en a besoin pour bien remplir les
+    paramètres). Ajouté le 15/08 (Bourama : le routeur -- un petit modèle
+    8B -- dépassait systématiquement son budget de tokens avec 50+ outils
+    à décrire en entier, donc échouait à CHAQUE message -> aucune
+    suggestion automatique possible, quelle que soit la question).
+
+    Coupe à la première phrase complète (le "à quoi ça sert" est
+    quasiment toujours dedans, le reste des docstrings détaille des cas
+    limites/formats dont un simple tri n'a pas besoin) -- garde donc le
+    sens plutôt que de tronquer au milieu d'un mot. Si la première phrase
+    dépasse quand même max_caracteres, coupe au dernier espace avant la
+    limite plutôt qu'en plein milieu d'un mot.
+    """
+    description = description.strip()
+    fin_phrase = description.find(". ")
+    if 0 < fin_phrase <= max_caracteres:
+        return description[: fin_phrase + 1]
+    if len(description) <= max_caracteres:
+        return description
+    coupe = description[:max_caracteres].rsplit(" ", 1)[0]
+    return coupe + "..."
+
+
 def _router_outils(message_utilisateur, outils_disponibles, historique=None):
     """
     Bouton Outils, couche de suggestion automatique (2026-07-28, demande
@@ -1220,7 +1248,7 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
 
     noms_valides = {o["function"]["name"] for o in outils_disponibles}
     catalogue = "\n".join(
-        f"- {o['function']['name']} : {o['function']['description']}"
+        f"- {o['function']['name']} : {_resume_description_outil(o['function']['description'])}"
         for o in outils_disponibles
     )
 
