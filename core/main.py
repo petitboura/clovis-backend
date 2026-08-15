@@ -126,12 +126,25 @@ MODELE_PROFIL = "llama-3.1-8b-instant"  # meme raison que MODELE_RESUME : quota 
 # Routeur d'outils (2026-07-28, demande Bourama) : premier appel LLM
 # séparé, rapide, qui juge quels outils seraient pertinents pour la
 # question -- voir _router_outils plus bas. Tâche de classification
-# simple (pas besoin de raisonnement) -- llama-3.1-8b-instant plutôt que
-# MODELE_PROFIL/MODELE_RESUME (llama-3.3-70b-versatile) : demande
-# explicite de Bourama (28/07) : "un petit rapide et open source, le
-# plus rapide possible" -- ce modèle est déjà le plus rapide de la
-# cascade Groq existante (voir GROQ_FALLBACKS).
-MODELE_ROUTEUR_OUTILS = "llama-3.1-8b-instant"
+# simple (pas besoin de raisonnement) -- un petit modèle rapide et open
+# source plutôt que MODELE_PROFIL/MODELE_RESUME (llama-3.3-70b-versatile).
+#
+# 15/08 (demande Bourama, option 2 de la discussion sur le 413 TPM) :
+# gemma2-9b-it au lieu de llama-3.1-8b-instant -- même tier Groq gratuit,
+# mais limite spéciale de 15 000 TPM au lieu de 6 000 (2,5x), largement
+# suffisant pour le catalogue actuel (~31 outils, Notion/GitHub déjà
+# exclus, voir plus bas _tache_routeur) sans avoir à passer sur un plan
+# payant. Contexte plus court (8K vs 128K) mais sans impact ici, le
+# prompt du routeur ne s'en approche pas.
+#
+# ÉTAPE SUIVANTE PRÉVUE (pas encore faite, demande Bourama : "meilleure
+# et moins cher") : migrer vers openai/gpt-oss-20b dès que le budget
+# Groq passe sur le plan payant Developer -- meilleure qualité de
+# classification que gemma2-9b-it, et moins cher au token que
+# llama-3.3-70b-versatile si jamais un modèle plus costaud était
+# nécessaire. Ne PAS l'activer tant qu'on est sur le tier gratuit :
+# gpt-oss-20b n'y a que 8 000 TPM, un gain plus faible que gemma2-9b-it.
+MODELE_ROUTEUR_OUTILS = "gemma2-9b-it"
 
 # D'apres la doc Groq (console.groq.com/docs/reasoning), le parametre
 # reasoning_effort n'est reconnu que par certains modeles (GPT-OSS 20B/120B,
