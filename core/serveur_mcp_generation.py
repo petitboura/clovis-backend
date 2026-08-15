@@ -589,8 +589,7 @@ def consulter_programme(programme_id: str, ctx: Context) -> str:
     plutôt que de deviner.
     """
     try:
-        requete = ctx.request_context.request
-        user_id = requete.query_params.get("user_id")
+        user_id = _user_id_ou_erreur(ctx)
         if not user_id:
             return "Erreur : impossible d'identifier l'étudiant."
         structure = _obtenir_structure_programme(user_id, programme_id)
@@ -1024,8 +1023,7 @@ def consulter_matiere_programme(matiere_id: str, ctx: Context) -> str:
     de la matière au préalable.
     """
     try:
-        requete = ctx.request_context.request
-        user_id = requete.query_params.get("user_id")
+        user_id = _user_id_ou_erreur(ctx)
         if not user_id:
             return "Erreur : impossible d'identifier l'étudiant."
         chapitres = _obtenir_chapitres_matiere(user_id, matiere_id)
@@ -1047,8 +1045,7 @@ def consulter_chapitre_programme(chapitre_id: str, ctx: Context) -> str:
     connaître l'id du chapitre au préalable.
     """
     try:
-        requete = ctx.request_context.request
-        user_id = requete.query_params.get("user_id")
+        user_id = _user_id_ou_erreur(ctx)
         if not user_id:
             return "Erreur : impossible d'identifier l'étudiant."
         contenu = _obtenir_contenu_chapitre(user_id, chapitre_id)
@@ -1071,8 +1068,7 @@ def consulter_examens_programme(programme_id: str, ctx: Context) -> str:
     son titre, son type et les chapitres qu'il couvre.
     """
     try:
-        requete = ctx.request_context.request
-        user_id = requete.query_params.get("user_id")
+        user_id = _user_id_ou_erreur(ctx)
         if not user_id:
             return "Erreur : impossible d'identifier l'étudiant."
         texte = _obtenir_examens_programme(user_id, programme_id)
