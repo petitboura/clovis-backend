@@ -291,6 +291,7 @@ REGISTRE_AFFICHAGE_OUTILS = {
 
     # --- Programme adaptatif (interne) ---
     "consulter_matiere_active": {"label": "Consultation de la matière active", "icone": "BookOpen", "onglet": "utilitaires"},
+    "consulter_matiere_programme": {"label": "Consultation des chapitres d'une matière", "icone": "BookOpen", "onglet": "utilitaires"},
     "ajouter_programme": {"label": "Création d'un programme", "icone": "GraduationCap", "onglet": "utilitaires"},
     "modifier_programme": {"label": "Modification d'un programme", "icone": "GraduationCap", "onglet": "utilitaires"},
     "consulter_programme": {"label": "Consultation d'un programme", "icone": "GraduationCap", "onglet": "utilitaires"},
