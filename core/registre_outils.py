@@ -179,6 +179,18 @@ OUTILS_SENSIBLES = {
     # (commit sur la branche de base) ou "branche_pr" (nouvelle branche +
     # Pull Request). Aucun des deux modes n'est silencieux.
     "modifier_fichier_depot_github",
+    # Suppressions programme/comportement (14/08, demande Bourama :
+    # "confirmer pour sensible et irréversible") -- contrairement aux
+    # ajouts/modifications de ces mêmes ressources (voir
+    # core/programme_ecriture.py, annuler_derniere_modification), une
+    # suppression n'a pas de filet de rattrapage, donc TOUJOURS confirmée.
+    "supprimer_programme",
+    "supprimer_matiere",
+    "supprimer_chapitre",
+    "supprimer_document_programme",
+    "supprimer_exercice_programme",
+    "supprimer_examen",
+    "supprimer_comportement",
 }
 
 # Outils dont le RÉSULTAT n'a pas besoin de retourner au modèle (2026-07-29,

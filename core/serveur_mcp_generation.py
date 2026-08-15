@@ -57,10 +57,36 @@ from api.roles import (
     resoudre_destinataire_autorise as _resoudre_destinataire_autorise,
     _inserer_message,
 )
-from core.comportements_etudiants import obtenir_comportement_texte as _obtenir_comportement_texte
+from core.comportements_etudiants import (
+    obtenir_comportement_texte as _obtenir_comportement_texte,
+    ajouter_comportement as _ajouter_comportement,
+    modifier_comportement as _modifier_comportement,
+    supprimer_comportement as _supprimer_comportement,
+)
 from core.programme_llm import obtenir_structure_programme as _obtenir_structure_programme
 from core.programme_llm import obtenir_contenu_chapitre as _obtenir_contenu_chapitre
 from core.programme_llm import obtenir_examens_programme as _obtenir_examens_programme
+from core.programme_ecriture import (
+    ajouter_programme as _ajouter_programme,
+    modifier_programme as _modifier_programme,
+    ajouter_matiere as _ajouter_matiere,
+    modifier_matiere as _modifier_matiere,
+    ajouter_chapitre as _ajouter_chapitre,
+    modifier_chapitre as _modifier_chapitre,
+    ajouter_document as _ajouter_document,
+    modifier_document as _modifier_document,
+    ajouter_exercice as _ajouter_exercice_programme,
+    modifier_exercice as _modifier_exercice_programme,
+    ajouter_examen as _ajouter_examen,
+    modifier_examen as _modifier_examen,
+    supprimer_programme as _supprimer_programme,
+    supprimer_matiere as _supprimer_matiere,
+    supprimer_chapitre as _supprimer_chapitre,
+    supprimer_document as _supprimer_document,
+    supprimer_exercice as _supprimer_exercice_programme,
+    supprimer_examen as _supprimer_examen,
+    annuler_derniere_modification as _annuler_derniere_modification,
+)
 from core.generation_site import (
     deployer_site as _deployer_site,
     site_deploiement_disponible,
@@ -460,6 +486,75 @@ def consulter_comportement(comportement_id: str, ctx: Context) -> str:
 
 
 @mcp_generation.tool()
+def ajouter_comportement(texte: str, ctx: Context) -> str:
+    """
+    Enregistre une nouvelle instruction personnelle pour CET étudiant
+    (section "Mes comportements"), à utiliser dès qu'il te demande de
+    retenir une préférence ou une règle à suivre pour la suite (ex:
+    "explique-moi toujours avec des schémas", "ne me donne jamais la
+    réponse directe, guide-moi"). S'ajoute EN PLUS de ses autres
+    comportements, ne les remplace pas.
+    """
+    try:
+        requete = ctx.request_context.request
+        user_id = requete.query_params.get("user_id")
+        agent_id = requete.query_params.get("agent_id")
+        if not user_id or not agent_id:
+            return "Erreur : impossible d'identifier l'étudiant ou l'agent."
+        ligne = _ajouter_comportement(agent_id, user_id, texte)
+        return f"Comportement enregistré (id {ligne['id']}) : {ligne['description']}"
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_comportement : {e}")
+        return "Erreur : impossible d'enregistrer ce comportement, réessaie."
+
+
+@mcp_generation.tool()
+def modifier_comportement(comportement_id: str, texte: str, ctx: Context) -> str:
+    """
+    Remplace le texte COMPLET d'un comportement existant de CET étudiant
+    (à partir de son id, vu via consulter_comportement ou la description
+    courte donnée dans le message système). Utilise cet outil quand
+    l'étudiant veut corriger ou préciser une instruction déjà enregistrée
+    -- pas pour en ajouter une nouvelle (voir ajouter_comportement).
+    """
+    try:
+        requete = ctx.request_context.request
+        user_id = requete.query_params.get("user_id")
+        agent_id = requete.query_params.get("agent_id")
+        if not user_id or not agent_id:
+            return "Erreur : impossible d'identifier l'étudiant ou l'agent."
+        ligne = _modifier_comportement(agent_id, user_id, comportement_id, texte)
+        if ligne is None:
+            return "Ce comportement est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return f"Comportement modifié : {ligne['description']}"
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_comportement : {e}")
+        return "Erreur : impossible de modifier ce comportement, réessaie."
+
+
+@mcp_generation.tool()
+def supprimer_comportement(comportement_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT un comportement de CET étudiant (à partir de
+    son id). SENSIBLE : demande toujours confirmation à l'étudiant avant
+    d'être exécuté, quelle que soit la formulation de sa demande.
+    """
+    try:
+        requete = ctx.request_context.request
+        user_id = requete.query_params.get("user_id")
+        agent_id = requete.query_params.get("agent_id")
+        if not user_id or not agent_id:
+            return "Erreur : impossible d'identifier l'étudiant ou l'agent."
+        ok = _supprimer_comportement(agent_id, user_id, comportement_id)
+        if not ok:
+            return "Ce comportement est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return "Comportement supprimé."
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_comportement : {e}")
+        return "Erreur : impossible de supprimer ce comportement, réessaie."
+
+
+@mcp_generation.tool()
 def consulter_programme(programme_id: str, ctx: Context) -> str:
     """
     Lit la structure (matières -> chapitres, avec leurs limites de cadre
@@ -487,6 +582,407 @@ def consulter_programme(programme_id: str, ctx: Context) -> str:
     except Exception as e:
         logging.error(f"ERREUR outil consulter_programme : {e}")
         return "Erreur : impossible de consulter ce programme, réessaie."
+
+
+def _user_id_ou_erreur(ctx: Context) -> str | None:
+    """Petit helper commun à tous les outils programme ci-dessous (pas
+    besoin d'agent_id, contrairement aux comportements -- un programme
+    appartient à l'utilisateur, pas à un agent précis)."""
+    return ctx.request_context.request.query_params.get("user_id")
+
+
+@mcp_generation.tool()
+def ajouter_programme(niveau: str, ctx: Context, nom: str = "") -> str:
+    """
+    Crée un nouveau programme (ex: "Terminale S", "3ème") pour CET
+    étudiant, dans sa section "Programme". `niveau` est le texte libre du
+    niveau scolaire, `nom` un label optionnel s'il en donne un. Utilise
+    cet outil quand l'étudiant veut structurer une nouvelle année/classe,
+    pas pour ajouter une matière à un programme déjà existant (voir
+    ajouter_matiere).
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        ligne = _ajouter_programme(user_id, niveau, nom or None)
+        return f"Programme créé (id {ligne['id']}) : {ligne['niveau']}" + (f" — {ligne['nom']}" if ligne.get("nom") else "")
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_programme : {e}")
+        return "Erreur : impossible de créer ce programme, réessaie."
+
+
+@mcp_generation.tool()
+def modifier_programme(programme_id: str, ctx: Context, niveau: str = "", nom: str = "") -> str:
+    """
+    Modifie le niveau et/ou le nom d'un programme existant de CET
+    étudiant. Laisse un champ vide ("") pour ne pas le changer -- ne
+    touche QUE les champs fournis. Ne modifie pas les matières/chapitres
+    à l'intérieur (voir modifier_matiere, modifier_chapitre).
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        ligne = _modifier_programme(user_id, programme_id, niveau or None, nom if nom else None)
+        if ligne is None:
+            return "Ce programme est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return f"Programme modifié : {ligne.get('niveau')}" + (f" — {ligne['nom']}" if ligne.get("nom") else "")
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_programme : {e}")
+        return "Erreur : impossible de modifier ce programme, réessaie."
+
+
+@mcp_generation.tool()
+def supprimer_programme(programme_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT un programme de CET étudiant, ainsi que TOUT
+    son contenu (matières, chapitres, documents, exercices). SENSIBLE :
+    demande toujours confirmation avant exécution, quelle que soit la
+    formulation de la demande.
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        ok = _supprimer_programme(user_id, programme_id)
+        if not ok:
+            return "Ce programme est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return "Programme supprimé, avec tout son contenu."
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_programme : {e}")
+        return "Erreur : impossible de supprimer ce programme, réessaie."
+
+
+@mcp_generation.tool()
+def ajouter_matiere(programme_id: str, nom: str, ctx: Context, limites: str = "") -> str:
+    """
+    Ajoute une matière à un programme existant de CET étudiant (ex:
+    "Mathématiques" dans son programme "Terminale S"). `limites` est une
+    description optionnelle du cadre officiel (pour savoir ce qui est
+    "hors programme").
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        ligne = _ajouter_matiere(user_id, programme_id, nom, limites or None)
+        if ligne is None:
+            return "Ce programme est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return f"Matière ajoutée (id {ligne['id']}) : {ligne['nom']}"
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_matiere : {e}")
+        return "Erreur : impossible d'ajouter cette matière, réessaie."
+
+
+@mcp_generation.tool()
+def modifier_matiere(matiere_id: str, ctx: Context, nom: str = "", limites: str = "") -> str:
+    """
+    Modifie le nom et/ou les limites de cadre officiel d'une matière
+    existante de CET étudiant. Laisse un champ vide ("") pour ne pas le
+    changer.
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        ligne = _modifier_matiere(user_id, matiere_id, nom or None, limites if limites else None)
+        if ligne is None:
+            return "Cette matière est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return f"Matière modifiée : {ligne.get('nom')}"
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_matiere : {e}")
+        return "Erreur : impossible de modifier cette matière, réessaie."
+
+
+@mcp_generation.tool()
+def supprimer_matiere(matiere_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT une matière de CET étudiant, avec tous ses
+    chapitres/documents/exercices. SENSIBLE : demande toujours
+    confirmation avant exécution.
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        ok = _supprimer_matiere(user_id, matiere_id)
+        if not ok:
+            return "Cette matière est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return "Matière supprimée, avec tout son contenu."
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_matiere : {e}")
+        return "Erreur : impossible de supprimer cette matière, réessaie."
+
+
+@mcp_generation.tool()
+def ajouter_chapitre(matiere_id: str, nom: str, ctx: Context, ordre: int = 0, limites: str = "") -> str:
+    """
+    Ajoute un chapitre à une matière existante de CET étudiant. `ordre`
+    contrôle sa position d'affichage (0 = premier). `limites` est une
+    description optionnelle du cadre officiel pour ce chapitre.
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        ligne = _ajouter_chapitre(user_id, matiere_id, nom, ordre, limites or None)
+        if ligne is None:
+            return "Cette matière est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return f"Chapitre ajouté (id {ligne['id']}) : {ligne['nom']}"
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_chapitre : {e}")
+        return "Erreur : impossible d'ajouter ce chapitre, réessaie."
+
+
+@mcp_generation.tool()
+def modifier_chapitre(chapitre_id: str, ctx: Context, nom: str = "", ordre: int = -1, limites: str = "") -> str:
+    """
+    Modifie le nom, l'ordre d'affichage et/ou les limites d'un chapitre
+    existant de CET étudiant. Laisse `nom`/`limites` vides ("") et
+    `ordre` à -1 pour ne pas changer le champ correspondant.
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        ligne = _modifier_chapitre(user_id, chapitre_id, nom or None, ordre if ordre >= 0 else None, limites if limites else None)
+        if ligne is None:
+            return "Ce chapitre est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return f"Chapitre modifié : {ligne.get('nom')}"
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_chapitre : {e}")
+        return "Erreur : impossible de modifier ce chapitre, réessaie."
+
+
+@mcp_generation.tool()
+def supprimer_chapitre(chapitre_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT un chapitre de CET étudiant, avec ses
+    documents/exercices. SENSIBLE : demande toujours confirmation avant
+    exécution.
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        ok = _supprimer_chapitre(user_id, chapitre_id)
+        if not ok:
+            return "Ce chapitre est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return "Chapitre supprimé, avec son contenu."
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_chapitre : {e}")
+        return "Erreur : impossible de supprimer ce chapitre, réessaie."
+
+
+@mcp_generation.tool()
+def ajouter_document_programme(chapitre_id: str, titre: str, url_ou_contenu: str, ctx: Context) -> str:
+    """
+    Ajoute un document à un chapitre du programme de CET étudiant :
+    `url_ou_contenu` est SOIT un lien (ex: une URL de cours en ligne),
+    SOIT un texte direct (ex: un résumé de cours écrit dans le message).
+    Pour un fichier déjà uploadé par l'étudiant dans le chat, cherche
+    d'abord son URL avec chercher_fichier avant d'appeler cet outil.
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        ligne = _ajouter_document(user_id, chapitre_id, titre, url_ou_contenu)
+        if ligne is None:
+            return "Ce chapitre est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return f"Document ajouté (id {ligne['id']}) : {ligne['titre']}"
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_document_programme : {e}")
+        return "Erreur : impossible d'ajouter ce document, réessaie."
+
+
+@mcp_generation.tool()
+def modifier_document_programme(document_id: str, ctx: Context, titre: str = "", url_ou_contenu: str = "") -> str:
+    """
+    Modifie le titre et/ou le contenu (texte ou lien) d'un document
+    existant du programme de CET étudiant. Laisse un champ vide ("")
+    pour ne pas le changer.
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        ligne = _modifier_document(user_id, document_id, titre or None, url_ou_contenu or None)
+        if ligne is None:
+            return "Ce document est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return f"Document modifié : {ligne.get('titre')}"
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_document_programme : {e}")
+        return "Erreur : impossible de modifier ce document, réessaie."
+
+
+@mcp_generation.tool()
+def supprimer_document_programme(document_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT un document du programme de CET étudiant.
+    SENSIBLE : demande toujours confirmation avant exécution.
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        ok = _supprimer_document(user_id, document_id)
+        if not ok:
+            return "Ce document est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return "Document supprimé."
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_document_programme : {e}")
+        return "Erreur : impossible de supprimer ce document, réessaie."
+
+
+@mcp_generation.tool()
+def ajouter_exercice_programme(chapitre_id: str, enonce: str, ctx: Context) -> str:
+    """
+    Ajoute un exercice (rattaché à UN SEUL chapitre) au programme de CET
+    étudiant. Pour un exercice/devoir couvrant PLUSIEURS chapitres,
+    utilise ajouter_examen à la place.
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        ligne = _ajouter_exercice_programme(user_id, chapitre_id, enonce)
+        if ligne is None:
+            return "Ce chapitre est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return f"Exercice ajouté (id {ligne['id']})."
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_exercice_programme : {e}")
+        return "Erreur : impossible d'ajouter cet exercice, réessaie."
+
+
+@mcp_generation.tool()
+def modifier_exercice_programme(exercice_id: str, enonce: str, ctx: Context) -> str:
+    """
+    Remplace l'énoncé COMPLET d'un exercice existant du programme de CET
+    étudiant.
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        ligne = _modifier_exercice_programme(user_id, exercice_id, enonce)
+        if ligne is None:
+            return "Cet exercice est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return "Exercice modifié."
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_exercice_programme : {e}")
+        return "Erreur : impossible de modifier cet exercice, réessaie."
+
+
+@mcp_generation.tool()
+def supprimer_exercice_programme(exercice_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT un exercice du programme de CET étudiant.
+    SENSIBLE : demande toujours confirmation avant exécution.
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        ok = _supprimer_exercice_programme(user_id, exercice_id)
+        if not ok:
+            return "Cet exercice est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return "Exercice supprimé."
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_exercice_programme : {e}")
+        return "Erreur : impossible de supprimer cet exercice, réessaie."
+
+
+@mcp_generation.tool()
+def ajouter_examen(titre: str, type: str, chapitre_ids: list[str], ctx: Context) -> str:
+    """
+    Crée un examen/devoir/problème composite pour CET étudiant, couvrant
+    UN OU PLUSIEURS chapitres (potentiellement de matières différentes,
+    dans le même programme). `type` doit valoir "examen", "devoir" ou
+    "probleme_composite". `chapitre_ids` est la liste des ids de
+    chapitres concernés -- tous doivent appartenir à cet étudiant.
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        if type not in ("examen", "devoir", "probleme_composite"):
+            return 'Erreur : `type` doit valoir "examen", "devoir" ou "probleme_composite".'
+        ligne = _ajouter_examen(user_id, titre, type, chapitre_ids)
+        if ligne is None:
+            return "Un ou plusieurs chapitres sont introuvables, ou ne correspondent pas à cet étudiant."
+        return f"Examen créé (id {ligne['id']}) : {ligne['titre']} ({len(chapitre_ids)} chapitre(s))."
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_examen : {e}")
+        return "Erreur : impossible de créer cet examen, réessaie."
+
+
+@mcp_generation.tool()
+def modifier_examen(examen_id: str, ctx: Context, titre: str = "", type: str = "", chapitre_ids: list[str] | None = None) -> str:
+    """
+    Modifie le titre, le type et/ou la liste des chapitres couverts d'un
+    examen existant de CET étudiant. Laisse `titre`/`type` vides ("") et
+    `chapitre_ids` non fourni pour ne pas changer le champ correspondant
+    -- fournir `chapitre_ids` REMPLACE la liste entière, pas un ajout.
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        if type and type not in ("examen", "devoir", "probleme_composite"):
+            return 'Erreur : `type` doit valoir "examen", "devoir" ou "probleme_composite".'
+        ligne = _modifier_examen(user_id, examen_id, titre or None, type or None, chapitre_ids)
+        if ligne is None:
+            return "Cet examen est introuvable, ou un chapitre fourni ne correspond pas à cet étudiant."
+        return f"Examen modifié : {ligne.get('titre')}"
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_examen : {e}")
+        return "Erreur : impossible de modifier cet examen, réessaie."
+
+
+@mcp_generation.tool()
+def supprimer_examen(examen_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT un examen/devoir/problème composite de CET
+    étudiant (ne supprime PAS les chapitres qu'il couvrait, juste
+    l'examen lui-même). SENSIBLE : demande toujours confirmation avant
+    exécution.
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        ok = _supprimer_examen(user_id, examen_id)
+        if not ok:
+            return "Cet examen est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return "Examen supprimé."
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_examen : {e}")
+        return "Erreur : impossible de supprimer cet examen, réessaie."
+
+
+@mcp_generation.tool()
+def annuler_derniere_modification(ctx: Context) -> str:
+    """
+    Annule le DERNIER ajout ou la dernière modification faite par toi
+    (via ajouter_programme, modifier_matiere, ajouter_chapitre,
+    ajouter_comportement, etc.) pour CET étudiant -- ne concerne PAS les
+    suppressions, qui demandent déjà une confirmation avant d'être
+    exécutées. À utiliser quand l'étudiant dit explicitement vouloir
+    annuler/revenir en arrière sur ta dernière écriture.
+    """
+    try:
+        user_id = _user_id_ou_erreur(ctx)
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        resultat = _annuler_derniere_modification(user_id)
+        if resultat is None:
+            return "Rien à annuler : aucune modification récente trouvée."
+        return f"Dernière modification annulée ({resultat['type_cible']}, action initiale : {resultat['action']})."
+    except Exception as e:
+        logging.error(f"ERREUR outil annuler_derniere_modification : {e}")
+        return "Erreur : impossible d'annuler, réessaie."
 
 
 @mcp_generation.tool()
