@@ -1296,6 +1296,24 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         "(actualité, prix, météo...), contenu spécifique à récupérer "
         "(fichier, page web, dépôt...), ou calcul non trivial qu'un humain "
         "ne ferait pas de tête.\n\n"
+        # CORRECTIF 2026-08-15 (signalé par Bourama, test réel :
+        # consulter_bibliotheque n'était suggéré que quand le mot
+        # "bibliothèque" apparaissait littéralement dans la question) :
+        # même leçon que le correctif du 31/07 ci-dessus -- un petit
+        # modèle 8B a besoin d'un exemple concret pour généraliser une
+        # intention, sinon il retombe sur du matching littéral. La
+        # description de l'outil dit CE QU'IL cherche (PDF de la
+        # bibliothèque perso), pas QUAND le déclencher -- c'est ce que
+        # cet exemple comble.
+        "IMPORTANT : consulter_bibliotheque doit être suggéré dès que la "
+        "question porte sur le contenu d'un cours, chapitre, exercice ou "
+        "document que l'étudiant a pu uploader dans sa bibliothèque "
+        "personnelle -- même si le mot \"bibliothèque\" n'apparaît jamais "
+        "dans la question. Exemples qui DOIVENT suggérer cet outil : "
+        "\"explique-moi le chapitre 3\", \"résume mon cours sur les "
+        "intégrales\", \"qu'est-ce que dit mon document sur la "
+        "photosynthèse ?\", \"aide-moi avec l'exercice 4\". Ne te fie "
+        "jamais au mot \"bibliothèque\" lui-même.\n\n"
         f"Outils disponibles :\n{catalogue}\n\n"
         f"{contexte}"
         f"Question de l'utilisateur : {message_utilisateur}\n\n"
