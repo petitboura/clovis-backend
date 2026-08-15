@@ -17,6 +17,7 @@ from comportements_etudiants import (
     choisir_comportements_pertinents,
 )
 from programme_llm import lister_mes_programmes_legers
+from codes_partage import lister_comportements_recus, lister_programmes_recus_legers
 from mcp_tools import lister_tous_les_outils, lister_outils_autorises_pour_agent, appeler_outil
 from registre_outils import OUTILS_SENSIBLES, OUTILS_AUTONOMES
 from fournisseurs_llm import generer_reponse_premium
@@ -1385,8 +1386,9 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     if comportements_etudiant:
         candidats = "\n".join(f"- id={c['id']} : {c['description']}" for c in comportements_etudiant)
         system_final += (
-            "\n\nINSTRUCTIONS PERSONNELLES DE CET ÉTUDIANT POTENTIELLEMENT PERTINENTES POUR CE MESSAGE "
-            "(il les a écrites lui-même) :\n"
+            "\n\nINSTRUCTIONS PERSONNELLES POTENTIELLEMENT PERTINENTES POUR CE MESSAGE (écrites par cet "
+            "utilisateur lui-même, ou reçues d'un autre utilisateur via un code -- la description précise "
+            "\"(reçu de ...)\" dans ce second cas) :\n"
             f"{candidats}\n"
             "Si l'une d'elles semble s'appliquer, appelle l'outil consulter_comportement avec son id "
             "pour lire son contenu complet AVANT de répondre -- ne devine jamais son contenu à partir "
@@ -2583,11 +2585,19 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     # branche, voir plus bas) -- comportements_etudiant/mes_programmes y
     # restent calculés (coût négligeable, mes_programmes est déjà quasi
     # gratuit) mais outils_forces_contexte n'y est jamais fusionné.
+    # Système de codes de partage (14/08, voir core/codes_partage.py) :
+    # ce que cet utilisateur a REÇU (comportement/programme) via un code
+    # entré est fusionné avec ses propres comportements/programmes AVANT
+    # le petit routeur "à la skill" -- même traitement, même pertinence
+    # jugée par message, pas d'affichage systématique.
     comportements_etudiant = (
-        choisir_comportements_pertinents(message_utilisateur, lister_comportements_etudiant(agent_id, user_id))
+        choisir_comportements_pertinents(
+            message_utilisateur,
+            lister_comportements_etudiant(agent_id, user_id) + lister_comportements_recus(user_id),
+        )
         if user_id and message_utilisateur else []
     )
-    mes_programmes = lister_mes_programmes_legers(user_id) if user_id else []
+    mes_programmes = (lister_mes_programmes_legers(user_id) + lister_programmes_recus_legers(user_id)) if user_id else []
     outils_forces_contexte = []
     if comportements_etudiant:
         outils_forces_contexte.append("consulter_comportement")

@@ -33,6 +33,7 @@ from core.erreurs import erreur_api
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "core"))
 from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien, lister_fichiers, supprimer_fichier  # noqa: E402
 from bibliotheque_rag import indexer_pdf_bibliotheque, indexer_texte_bibliotheque  # noqa: E402
+from codes_partage import propager_fichier_bibliotheque, propager_lien_bibliotheque  # noqa: E402
 
 router = APIRouter(prefix="/api/bibliotheque", tags=["bibliotheque-utilisateur"])
 
@@ -122,6 +123,14 @@ async def uploader_document(
         request=request,
     )
 
+    # Propagation (14/08, système de codes de partage) : non bloquant, ne
+    # doit jamais faire échouer l'ajout original -- voir sa propre
+    # gestion d'erreur interne dans core/codes_partage.py.
+    try:
+        propager_fichier_bibliotheque(utilisateur.id, contenu, nom_original, fichier.content_type, description_finale)
+    except Exception as e:
+        logging.error(f"ERREUR propagation bibliothèque (fichier, {utilisateur.id}) : {e}")
+
     return ligne
 
 
@@ -172,6 +181,11 @@ def ajouter_lien(
         details={"description": description_finale, "type_mime": "text/uri-list"},
         request=request,
     )
+
+    try:
+        propager_lien_bibliotheque(utilisateur.id, payload.url.strip(), (payload.titre or payload.url).strip(), description_finale)
+    except Exception as e:
+        logging.error(f"ERREUR propagation bibliothèque (lien, {utilisateur.id}) : {e}")
 
     return ligne
 
@@ -229,6 +243,11 @@ def ajouter_texte(
         details={"description": titre, "type_mime": "text/plain"},
         request=request,
     )
+
+    try:
+        propager_fichier_bibliotheque(utilisateur.id, contenu.encode("utf-8"), nom_fichier, "text/plain", titre or None)
+    except Exception as e:
+        logging.error(f"ERREUR propagation bibliothèque (texte, {utilisateur.id}) : {e}")
 
     return ligne
 

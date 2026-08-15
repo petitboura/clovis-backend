@@ -87,6 +87,7 @@ from core.programme_ecriture import (
     supprimer_examen as _supprimer_examen,
     annuler_derniere_modification as _annuler_derniere_modification,
 )
+from core.codes_partage import obtenir_comportement_texte_recu as _obtenir_comportement_texte_recu
 from core.generation_site import (
     deployer_site as _deployer_site,
     site_deploiement_disponible,
@@ -463,12 +464,14 @@ def consulter_profil_utilisateur(ctx: Context) -> str:
 @mcp_generation.tool()
 def consulter_comportement(comportement_id: str, ctx: Context) -> str:
     """
-    Lit le texte COMPLET d'une instruction personnelle que cet étudiant
-    a écrite lui-même (section "Mes comportements"), à partir de son id.
-    Le message système t'a déjà donné une courte description de ceux
-    qui semblent pertinents pour ce message -- utilise cet outil quand
-    l'un d'eux semble s'appliquer, AVANT de répondre, pour lire son
-    contenu réel plutôt que de deviner à partir de la description seule.
+    Lit le texte COMPLET d'une instruction personnelle -- que cet
+    utilisateur l'ait écrite lui-même (section "Mes comportements"), ou
+    qu'il l'ait reçue d'un autre utilisateur via un code (id préfixé
+    "recu:", voir core/codes_partage.py) -- à partir de son id. Le
+    message système t'a déjà donné une courte description de ceux qui
+    semblent pertinents pour ce message -- utilise cet outil quand l'un
+    d'eux semble s'appliquer, AVANT de répondre, pour lire son contenu
+    réel plutôt que de deviner à partir de la description seule.
     """
     try:
         requete = ctx.request_context.request
@@ -476,7 +479,10 @@ def consulter_comportement(comportement_id: str, ctx: Context) -> str:
         agent_id = requete.query_params.get("agent_id")
         if not user_id or not agent_id:
             return "Erreur : impossible d'identifier l'étudiant ou l'agent."
-        texte = _obtenir_comportement_texte(agent_id, user_id, comportement_id)
+        if comportement_id.startswith("recu:"):
+            texte = _obtenir_comportement_texte_recu(user_id, comportement_id)
+        else:
+            texte = _obtenir_comportement_texte(agent_id, user_id, comportement_id)
         if texte is None:
             return "Ce comportement est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
         return texte

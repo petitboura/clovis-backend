@@ -77,21 +77,23 @@ def lister_mes_programmes_legers(user_id: str) -> list[dict]:
 def obtenir_structure_programme(user_id: str, programme_id: str) -> str | None:
     """
     Structure complète d'UN programme précis (matières -> chapitres,
-    avec leurs limites de cadre officiel si renseignées), vérifiée comme
-    appartenant bien à cet user_id -- utilisée par l'outil
-    consulter_programme (core/serveur_mcp_generation.py). Retourne un
+    avec leurs limites de cadre officiel si renseignées), utilisée par
+    l'outil consulter_programme (core/serveur_mcp_generation.py).
+    Autorisé si cet user_id est le propriétaire direct, OU s'il a reçu
+    ce programme via un code de partage actif (14/08, voir
+    core/codes_partage.py::peut_acceder_programme_recu -- import différé
+    ici pour éviter un import circulaire, programme_llm et codes_partage
+    ne dépendant sinon l'un de l'autre dans aucun sens). Retourne un
     texte déjà formaté, prêt à être renvoyé tel quel au modèle. None si
-    introuvable ou n'appartenant pas à cet utilisateur (jamais de fuite
-    entre étudiants).
+    introuvable ou sans accès (jamais de fuite entre utilisateurs).
     """
     if not user_id or not programme_id:
         return None
     try:
         programme_res = (
             supabase.table("programmes")
-            .select("id, niveau, nom")
+            .select("id, niveau, nom, proprietaire_id")
             .eq("id", programme_id)
-            .eq("proprietaire_id", user_id)
             .maybe_single()
             .execute()
         )
@@ -101,6 +103,10 @@ def obtenir_structure_programme(user_id: str, programme_id: str) -> str | None:
     if not programme_res or not programme_res.data:
         return None
     programme = programme_res.data
+    if programme["proprietaire_id"] != user_id:
+        from codes_partage import peut_acceder_programme_recu
+        if not peut_acceder_programme_recu(user_id, programme_id):
+            return None
 
     try:
         matieres = (
@@ -154,12 +160,14 @@ def obtenir_contenu_chapitre(user_id: str, chapitre_id: str) -> str | None:
     par l'outil consulter_chapitre_programme (core/serveur_mcp_
     generation.py) -- 3e niveau de navigation, après lister_mes_
     programmes_legers (choisir un programme) et obtenir_structure_
-    programme (choisir un chapitre dans sa structure). Vérifiée comme
-    appartenant bien à cet user_id via la chaîne chapitre -> matière ->
-    programme (pas de RLS sur ces tables, vérification manuelle comme
-    partout ailleurs dans cette API). Retourne un texte déjà formaté,
-    prêt à être renvoyé tel quel au modèle. None si introuvable ou
-    n'appartenant pas à cet utilisateur (jamais de fuite entre étudiants).
+    programme (choisir un chapitre dans sa structure). Autorisé si cet
+    user_id est propriétaire du programme (via la chaîne chapitre ->
+    matière -> programme, pas de RLS sur ces tables, vérification
+    manuelle comme partout ailleurs dans cette API), OU s'il a reçu ce
+    programme via un code de partage actif (14/08, voir
+    core/codes_partage.py::peut_acceder_programme_recu). Retourne un
+    texte déjà formaté, prêt à être renvoyé tel quel au modèle. None si
+    introuvable ou sans accès (jamais de fuite entre utilisateurs).
     """
     if not user_id or not chapitre_id:
         return None
@@ -204,8 +212,12 @@ def obtenir_contenu_chapitre(user_id: str, chapitre_id: str) -> str | None:
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (lecture programme {matiere['programme_id']}) : {e}")
         return None
-    if not programme_res or not programme_res.data or programme_res.data["proprietaire_id"] != user_id:
+    if not programme_res or not programme_res.data:
         return None
+    if programme_res.data["proprietaire_id"] != user_id:
+        from codes_partage import peut_acceder_programme_recu
+        if not peut_acceder_programme_recu(user_id, programme_res.data["id"]):
+            return None
 
     try:
         documents = (
@@ -262,10 +274,12 @@ def obtenir_examens_programme(user_id: str, programme_id: str) -> str | None:
     consulter_examens_programme (core/serveur_mcp_generation.py), au
     NIVEAU PROGRAMME comme côté frontend (SectionExamensDuProgramme) --
     un examen peut couvrir plusieurs chapitres à la fois, contrairement à
-    obtenir_contenu_chapitre qui est scopée à UN chapitre. Vérifiée comme
-    appartenant bien à cet user_id. Retourne un texte déjà formaté, prêt
-    à être renvoyé tel quel au modèle. None si introuvable ou
-    n'appartenant pas à cet utilisateur.
+    obtenir_contenu_chapitre qui est scopée à UN chapitre. Autorisé si
+    cet user_id est propriétaire du programme, OU s'il l'a reçu via un
+    code de partage actif (14/08, voir
+    core/codes_partage.py::peut_acceder_programme_recu). Retourne un
+    texte déjà formaté, prêt à être renvoyé tel quel au modèle. None si
+    introuvable ou sans accès.
     """
     if not user_id or not programme_id:
         return None
@@ -280,9 +294,13 @@ def obtenir_examens_programme(user_id: str, programme_id: str) -> str | None:
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (lecture programme {programme_id}) : {e}")
         return None
-    if not programme_res or not programme_res.data or programme_res.data["proprietaire_id"] != user_id:
+    if not programme_res or not programme_res.data:
         return None
     programme = programme_res.data
+    if programme["proprietaire_id"] != user_id:
+        from codes_partage import peut_acceder_programme_recu
+        if not peut_acceder_programme_recu(user_id, programme_id):
+            return None
 
     try:
         matieres = (
