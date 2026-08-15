@@ -19,7 +19,7 @@ from comportements_etudiants import (
 from programme_llm import lister_mes_programmes_legers
 from codes_partage import lister_comportements_recus, lister_programmes_recus_legers
 from mcp_tools import lister_tous_les_outils, lister_outils_autorises_pour_agent, appeler_outil
-from registre_outils import OUTILS_SENSIBLES, OUTILS_AUTONOMES
+from registre_outils import OUTILS_SENSIBLES
 from fournisseurs_llm import generer_reponse_premium
 
 logging.basicConfig(level=logging.INFO)
@@ -1131,7 +1131,7 @@ Bloc léger (ci-dessus) = aperçu immédiat sans fichier. Outil de génération 
 </liens>
 
 <outils_generation_action>
-Pour tout outil de génération/action (document, image, code, site, audio, rappel...) : ton texte s'affiche avant la fin de l'exécution, donc tu ne sais jamais au moment où tu écris si ça a réussi. Annonce l'action en cours ("Je génère ton document sur..."). Réserve "Voici", "C'est prêt", "J'ai créé" au moment où le résultat est confirmé. En cas d'échec, un message d'erreur s'affiche automatiquement après coup — c'est suffisant, sans second message de ta part.
+Pour tout outil de génération/action (document, image, code, site, audio, rappel...) : ton texte s'affiche avant la fin de l'exécution, donc tu ne sais jamais au moment où tu écris si ça a réussi. Annonce l'action en cours ("Je génère ton document sur..."), sans "Voici"/"C'est prêt"/"J'ai créé" à ce stade. Une fois le résultat réellement reçu, tu reprends la main normalement : confirme en langage naturel si ça a réussi (sans réécrire l'URL, voir <liens>), explique clairement ce qui s'est passé si ça a échoué, et propose une suite si besoin (réessayer, ajuster...).
 </outils_generation_action>
 
 <faits_verifiables>
@@ -2251,9 +2251,10 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
             yield _evenement_confirmation(attente, messages_agent, outils_mcp, table_routage, modele, reasoning_effort, agent_nom)
             return
 
-        # (2026-07-30, demande Bourama : retour au round-trip standard
-        # apres execution des outils -- meme pour les outils de
-        # generation/OUTILS_AUTONOMES. On ne s'arrete plus ici : la
+        # (2026-07-30, demande Bourama : round-trip standard apres
+        # execution des outils, SANS EXCEPTION -- y compris pour les
+        # outils de generation/action (ancien OUTILS_AUTONOMES, retire le
+        # 15/08, voir registre_outils.py). On ne s'arrete plus ici : la
         # boucle `for` continue naturellement vers un nouvel appel Groq
         # avec les resultats d'outils ajoutes a messages_agent, pour que
         # le modele formule sa reponse finale a partir d'eux -- le

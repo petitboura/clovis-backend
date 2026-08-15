@@ -1413,9 +1413,10 @@ if notifications_push_disponible():
 # enregistré, car actif d'office sur les IA auto-créées à choix de rôle
 # (voir _creer_agent_minimal dans api/roles.py) et sans dépendance à une
 # clé API externe. Renvoie toujours du texte (jamais de génération de
-# fichier), donc PAS ajouté à OUTILS_AUTONOMES (registre_outils.py) : le
-# round-trip vers le modèle reste nécessaire pour qu'il relaie une erreur
-# de destinataire ambigu/introuvable à l'utilisateur.
+# fichier) : le round-trip vers le modèle (standard pour tous les outils
+# depuis le 15/08, voir registre_outils.py) reste de toute façon
+# nécessaire pour qu'il relaie une erreur de destinataire ambigu/introuvable
+# à l'utilisateur.
 #
 # TESTÉ le 2026-08-04 (tâche E) : voir test_envoyer_message_manuel.py,
 # qui construit une vraie requête Starlette (même mécanisme que
