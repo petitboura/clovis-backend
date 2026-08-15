@@ -283,18 +283,31 @@ def chercher_fichier(recherche: str, agent_id: str = None, user_id: str = None) 
 
 
 @mcp_generation.tool()
-def consulter_bibliotheque(question: str, user_id: str = None) -> str:
+def consulter_bibliotheque(question: str, ctx: Context) -> str:
     """
     Cherche dans la bibliothèque personnelle de documents PDF de CET
     utilisateur (voir "Mon espace" côté app) les passages les plus
     pertinents pour répondre à `question`, quel que soit l'agent avec
     qui la conversation a lieu -- cette bibliothèque n'appartient à
     aucun agent en particulier, elle est propre à l'utilisateur, et
-    invisible pour tout autre utilisateur. `user_id` doit être
-    exactement celui donné dans tes instructions système, pas inventé.
+    invisible pour tout autre utilisateur.
     Renvoie les extraits trouvés (à utiliser directement pour répondre)
     ou un message si rien de pertinent n'a été trouvé.
     """
+    # BUG corrigé le 14/08 (constaté en prod : "Rien de pertinent trouvé"
+    # alors que la bibliothèque contenait bien des documents indexés) --
+    # `user_id` était avant un paramètre texte laissé au LLM (`user_id:
+    # str = None`), qui pouvait l'halluciner/inventer au lieu de recopier
+    # celui de ses instructions système (constaté : un UUID totalement
+    # inexistant en base). Même faille que consulter_memoire_utilisateur
+    # évitait déjà : on récupère maintenant le vrai user_id authentifié
+    # via ctx (query params de l'URL construite serveur-côté, voir
+    # _url_generation dans registre_outils.py), jamais depuis un
+    # paramètre que le modèle pourrait remplir lui-même -- ça fermait
+    # aussi une fuite potentielle (un utilisateur aurait pu, en théorie,
+    # demander à lire la bibliothèque d'un autre en donnant son id).
+    requete = ctx.request_context.request
+    user_id = requete.query_params.get("user_id")
     if not user_id:
         return "Aucune bibliothèque disponible : utilisateur non connecté."
 
