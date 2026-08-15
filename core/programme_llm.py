@@ -19,10 +19,16 @@ obtenir d'un coup) :
 - obtenir_contenu_chapitre : documents + exercices d'UN chapitre précis,
   demandée via l'outil consulter_chapitre_programme quand le modèle a
   choisi un chapitre précis dans la structure obtenue à l'étape
-  précédente. Ne couvre pas les examens (transverses à plusieurs
-  chapitres/matières, affichés au niveau du programme entier côté
-  frontend -- SectionExamensDuProgramme -- pas au niveau d'un chapitre ;
-  hors périmètre de cette navigation, signalé à Bourama).
+  précédente.
+- obtenir_examens_programme : examens/devoirs d'UN programme précis
+  (titre, type, chapitres couverts -- ce sont les seules données qui
+  existent pour un examen, voir examens_programme dans migrations/
+  2026_08_12_contenu_pratique_programme.sql, aucun champ de contenu/
+  énoncé). Rattachée au NIVEAU PROGRAMME, pas au niveau chapitre, comme
+  côté frontend (SectionExamensDuProgramme dans EspaceProgrammeContenu.
+  tsx) : un examen peut couvrir plusieurs chapitres à la fois, donc n'a
+  pas sa place dans la navigation par chapitre. Demandée via l'outil
+  consulter_examens_programme (14/08).
 
 Voir l'injection dans core/main.py::_construire_system_prompt.
 """
@@ -244,5 +250,114 @@ def obtenir_contenu_chapitre(user_id: str, chapitre_id: str) -> str | None:
         lignes.append("  (aucun exercice pour l'instant)")
     for i, ex in enumerate(exercices, start=1):
         lignes.append(f"  {i}. {ex['enonce']}")
+
+    return "\n".join(lignes)
+
+
+def obtenir_examens_programme(user_id: str, programme_id: str) -> str | None:
+    """
+    Examens/devoirs d'UN programme précis (titre, type, chapitres
+    couverts -- ce sont les seules données qui existent pour un examen,
+    aucun champ de contenu/énoncé côté base). Utilisée par l'outil
+    consulter_examens_programme (core/serveur_mcp_generation.py), au
+    NIVEAU PROGRAMME comme côté frontend (SectionExamensDuProgramme) --
+    un examen peut couvrir plusieurs chapitres à la fois, contrairement à
+    obtenir_contenu_chapitre qui est scopée à UN chapitre. Vérifiée comme
+    appartenant bien à cet user_id. Retourne un texte déjà formaté, prêt
+    à être renvoyé tel quel au modèle. None si introuvable ou
+    n'appartenant pas à cet utilisateur.
+    """
+    if not user_id or not programme_id:
+        return None
+    try:
+        programme_res = (
+            supabase.table("programmes")
+            .select("id, niveau, nom, proprietaire_id")
+            .eq("id", programme_id)
+            .maybe_single()
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture programme {programme_id}) : {e}")
+        return None
+    if not programme_res or not programme_res.data or programme_res.data["proprietaire_id"] != user_id:
+        return None
+    programme = programme_res.data
+
+    try:
+        matieres = (
+            supabase.table("matieres")
+            .select("id, nom")
+            .eq("programme_id", programme_id)
+            .execute()
+            .data
+            or []
+        )
+        chapitres = (
+            supabase.table("chapitres")
+            .select("id, matiere_id, nom")
+            .in_("matiere_id", [m["id"] for m in matieres])
+            .execute()
+            .data
+            or []
+            if matieres
+            else []
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture matières/chapitres programme {programme_id}) : {e}")
+        return None
+
+    chapitre_ids = [c["id"] for c in chapitres]
+    noms_chapitres = {
+        c["id"]: f"{next((m['nom'] for m in matieres if m['id'] == c['matiere_id']), '?')} — {c['nom']}"
+        for c in chapitres
+    }
+
+    lignes = [f"Examens/devoirs : {programme['niveau']}" + (f" ({programme['nom']})" if programme.get("nom") else "")]
+
+    if not chapitre_ids:
+        lignes.append("(aucun chapitre créé pour l'instant, donc aucun examen possible)")
+        return "\n".join(lignes)
+
+    try:
+        liens = (
+            supabase.table("examen_chapitres")
+            .select("examen_id, chapitre_id")
+            .in_("chapitre_id", chapitre_ids)
+            .execute()
+            .data
+            or []
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture examen_chapitres programme {programme_id}) : {e}")
+        return None
+
+    examen_ids = sorted({l["examen_id"] for l in liens})
+    if not examen_ids:
+        lignes.append("(aucun examen pour l'instant)")
+        return "\n".join(lignes)
+
+    chapitres_par_examen: dict[str, list[str]] = {}
+    for l in liens:
+        chapitres_par_examen.setdefault(l["examen_id"], []).append(l["chapitre_id"])
+
+    try:
+        examens = (
+            supabase.table("examens_programme")
+            .select("id, titre, type")
+            .in_("id", examen_ids)
+            .eq("proprietaire_id", user_id)
+            .order("created_at")
+            .execute()
+            .data
+            or []
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture examens_programme {programme_id}) : {e}")
+        return None
+
+    for e in examens:
+        chs = [noms_chapitres.get(cid, "?") for cid in chapitres_par_examen.get(e["id"], [])]
+        lignes.append(f"- [{e['type']}] {e['titre']} -- chapitres couverts : {', '.join(chs) or '?'}")
 
     return "\n".join(lignes)

@@ -60,6 +60,7 @@ from api.roles import (
 from core.comportements_etudiants import obtenir_comportement_texte as _obtenir_comportement_texte
 from core.programme_llm import obtenir_structure_programme as _obtenir_structure_programme
 from core.programme_llm import obtenir_contenu_chapitre as _obtenir_contenu_chapitre
+from core.programme_llm import obtenir_examens_programme as _obtenir_examens_programme
 from core.generation_site import (
     deployer_site as _deployer_site,
     site_deploiement_disponible,
@@ -464,9 +465,11 @@ def consulter_programme(programme_id: str, ctx: Context) -> str:
     Lit la structure (matières -> chapitres, avec leurs limites de cadre
     officiel si renseignées) d'un programme que cet étudiant a créé
     lui-même (section "Programme" de son espace), à partir de son id. Ne
-    contient PAS le contenu des chapitres (documents/exercices) : une
-    fois que tu as choisi un chapitre précis dans cette structure, utilise
-    consulter_chapitre_programme pour voir ce qu'il contient. Le message
+    contient PAS le contenu des chapitres (documents/exercices), ni les
+    examens/devoirs : une fois que tu as choisi un chapitre précis dans
+    cette structure, utilise consulter_chapitre_programme ; pour les
+    examens/devoirs de ce programme (qui peuvent couvrir plusieurs
+    chapitres à la fois), utilise consulter_examens_programme. Le message
     système t'a déjà donné la liste légère (id/niveau/nom) des programmes
     de cet étudiant -- utilise cet outil quand tu as besoin de savoir
     quelles matières/chapitres existent dans un programme précis, plutôt
@@ -507,6 +510,30 @@ def consulter_chapitre_programme(chapitre_id: str, ctx: Context) -> str:
     except Exception as e:
         logging.error(f"ERREUR outil consulter_chapitre_programme : {e}")
         return "Erreur : impossible de consulter ce chapitre, réessaie."
+
+
+@mcp_generation.tool()
+def consulter_examens_programme(programme_id: str, ctx: Context) -> str:
+    """
+    Lit les examens/devoirs (titre, type, chapitres couverts) d'un
+    programme de cet étudiant, à partir de son id. Un examen peut couvrir
+    plusieurs chapitres à la fois, c'est pourquoi il se consulte au
+    niveau du programme entier et non via consulter_chapitre_programme.
+    Aucun contenu/énoncé détaillé n'existe pour un examen -- seulement
+    son titre, son type et les chapitres qu'il couvre.
+    """
+    try:
+        requete = ctx.request_context.request
+        user_id = requete.query_params.get("user_id")
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        texte = _obtenir_examens_programme(user_id, programme_id)
+        if texte is None:
+            return "Ce programme est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return texte
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_examens_programme : {e}")
+        return "Erreur : impossible de consulter les examens de ce programme, réessaie."
 
 
 @mcp_generation.tool()
