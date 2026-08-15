@@ -59,6 +59,7 @@ from api.roles import (
 )
 from core.comportements_etudiants import obtenir_comportement_texte as _obtenir_comportement_texte
 from core.programme_llm import obtenir_structure_programme as _obtenir_structure_programme
+from core.programme_llm import obtenir_contenu_chapitre as _obtenir_contenu_chapitre
 from core.generation_site import (
     deployer_site as _deployer_site,
     site_deploiement_disponible,
@@ -447,13 +448,16 @@ def consulter_comportement(comportement_id: str, ctx: Context) -> str:
 @mcp_generation.tool()
 def consulter_programme(programme_id: str, ctx: Context) -> str:
     """
-    Lit la structure complète (matières -> chapitres, avec leurs limites
-    de cadre officiel si renseignées) d'un programme que cet étudiant a
-    créé lui-même (section "Programme" de son espace), à partir de son
-    id. Le message système t'a déjà donné la liste légère (id/niveau/nom)
-    des programmes de cet étudiant -- utilise cet outil quand tu as
-    besoin du détail matières/chapitres pour aider l'étudiant ou situer
-    une question par rapport à son programme, plutôt que de deviner.
+    Lit la structure (matières -> chapitres, avec leurs limites de cadre
+    officiel si renseignées) d'un programme que cet étudiant a créé
+    lui-même (section "Programme" de son espace), à partir de son id. Ne
+    contient PAS le contenu des chapitres (documents/exercices) : une
+    fois que tu as choisi un chapitre précis dans cette structure, utilise
+    consulter_chapitre_programme pour voir ce qu'il contient. Le message
+    système t'a déjà donné la liste légère (id/niveau/nom) des programmes
+    de cet étudiant -- utilise cet outil quand tu as besoin de savoir
+    quelles matières/chapitres existent dans un programme précis, plutôt
+    que de deviner.
     """
     try:
         requete = ctx.request_context.request
@@ -467,6 +471,29 @@ def consulter_programme(programme_id: str, ctx: Context) -> str:
     except Exception as e:
         logging.error(f"ERREUR outil consulter_programme : {e}")
         return "Erreur : impossible de consulter ce programme, réessaie."
+
+
+@mcp_generation.tool()
+def consulter_chapitre_programme(chapitre_id: str, ctx: Context) -> str:
+    """
+    Lit le contenu réel (documents + exercices) d'UN chapitre précis d'un
+    programme de cet étudiant, à partir de son id. Utilise cet outil
+    seulement après avoir consulté consulter_programme et choisi le
+    chapitre qui t'intéresse dans sa structure -- jamais à l'aveugle sans
+    connaître l'id du chapitre au préalable.
+    """
+    try:
+        requete = ctx.request_context.request
+        user_id = requete.query_params.get("user_id")
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        contenu = _obtenir_contenu_chapitre(user_id, chapitre_id)
+        if contenu is None:
+            return "Ce chapitre est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return contenu
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_chapitre_programme : {e}")
+        return "Erreur : impossible de consulter ce chapitre, réessaie."
 
 
 @mcp_generation.tool()

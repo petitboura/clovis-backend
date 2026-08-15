@@ -1352,11 +1352,15 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     # ci-dessus, pas besoin d'un routeur : la liste est déjà minuscule
     # (juste id/niveau/nom, jamais la structure matières/chapitres), donc
     # injectée telle quelle plutôt que filtrée. Coût quasi nul, aucun appel
-    # LLM supplémentaire (voir core/programme_llm.py). La structure
-    # complète reste sur demande via l'outil consulter_programme (voir
-    # core/serveur_mcp_generation.py), pour ne pas alourdir chaque message
-    # avec le détail matières/chapitres/limites d'un programme qui peut
-    # être long.
+    # LLM supplémentaire (voir core/programme_llm.py).
+    #
+    # Navigation en 3 niveaux (14/08, décision Bourama : le modèle doit se
+    # naviguer dans le programme comme l'étudiant, jamais tout obtenir
+    # d'un coup) -- 1) cette liste légère, 2) consulter_programme pour la
+    # structure matières/chapitres d'UN programme choisi, 3)
+    # consulter_chapitre_programme pour le contenu (documents/exercices)
+    # d'UN chapitre choisi dans cette structure. Jamais de saut direct de
+    # 1 à 3 : il faut connaître l'id du chapitre, obtenu à l'étape 2.
     if mes_programmes:
         liste_programmes = "\n".join(
             f"- id={p['id']} — {p['niveau']}" + (f" ({p['nom']})" if p.get("nom") else "")
@@ -1367,9 +1371,11 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
             "section Programme de son espace) :\n"
             f"{liste_programmes}\n"
             "Tu peux t'appuyer dessus pour personnaliser ta réponse (proposer d'y accéder, situer une "
-            "question par rapport à sa matière/son niveau). Si tu as besoin de voir le détail "
-            "matières/chapitres/limites, appelle l'outil consulter_programme avec l'id ci-dessus -- ne "
-            "devine jamais son contenu."
+            "question par rapport à sa matière/son niveau). Pour aller plus loin, navigue en deux temps, "
+            "jamais tout d'un coup : 1) appelle consulter_programme avec l'id ci-dessus pour voir ses "
+            "matières et chapitres (jamais leur contenu à ce stade) ; 2) une fois que tu as identifié le "
+            "chapitre pertinent dans cette structure, appelle consulter_chapitre_programme avec l'id de "
+            "CE chapitre pour voir ses documents et exercices. Ne devine jamais ce contenu."
         )
 
     # Bloc outils actifs / aucun outil actif (restauré 14/08) : outil_force
@@ -2536,6 +2542,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         outils_forces_contexte.append("consulter_comportement")
     if mes_programmes:
         outils_forces_contexte.append("consulter_programme")
+        outils_forces_contexte.append("consulter_chapitre_programme")
 
     def _fusionner_outils(liste_base, extra):
         """Union ordonnée sans doublons, jamais liste vide (None si rien)."""
