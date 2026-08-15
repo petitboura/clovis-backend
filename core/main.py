@@ -1415,16 +1415,18 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     # injectée telle quelle plutôt que filtrée. Coût quasi nul, aucun appel
     # LLM supplémentaire (voir core/programme_llm.py).
     #
-    # Navigation en 3 niveaux (14/08, décision Bourama : le modèle doit se
-    # naviguer dans le programme comme l'étudiant, jamais tout obtenir
-    # d'un coup) -- 1) cette liste légère, 2) consulter_programme pour la
-    # structure matières/chapitres d'UN programme choisi, 3a)
+    # Navigation en plusieurs niveaux (14-15/08, décision Bourama : le
+    # modèle doit se naviguer dans le programme comme l'étudiant, jamais
+    # tout obtenir d'un coup) -- 1) cette liste légère, 2)
+    # consulter_programme pour les matières d'UN programme choisi (SANS
+    # leurs chapitres), 3) consulter_matiere_programme pour les chapitres
+    # d'UNE matière choisie (SANS leur contenu), 4)
     # consulter_chapitre_programme pour le contenu (documents/exercices)
-    # d'UN chapitre choisi dans cette structure, 3b)
-    # consulter_examens_programme pour les examens/devoirs de ce programme
-    # (niveau programme, pas chapitre : un examen peut couvrir plusieurs
-    # chapitres). Jamais de saut direct de 1 à 3 : il faut connaître l'id
-    # du chapitre/programme, obtenu à l'étape 2.
+    # d'UN chapitre choisi, 5) consulter_examens_programme pour les
+    # examens/devoirs de ce programme (niveau programme, pas
+    # matière/chapitre : un examen peut couvrir plusieurs matières à la
+    # fois). Jamais de saut direct entre deux étapes non consécutives :
+    # chaque id nécessaire vient de l'étape juste avant.
     if mes_programmes:
         liste_programmes = "\n".join(
             f"- id={p['id']} — {p['niveau']}" + (f" ({p['nom']})" if p.get("nom") else "")
@@ -1435,13 +1437,15 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
             "section Programme de son espace) :\n"
             f"{liste_programmes}\n"
             "Tu peux t'appuyer dessus pour personnaliser ta réponse (proposer d'y accéder, situer une "
-            "question par rapport à sa matière/son niveau). Pour aller plus loin, navigue en plusieurs "
-            "temps, jamais tout d'un coup : 1) appelle consulter_programme avec l'id ci-dessus pour voir "
-            "ses matières et chapitres (jamais leur contenu à ce stade) ; 2) une fois que tu as identifié "
-            "le chapitre pertinent dans cette structure, appelle consulter_chapitre_programme avec l'id de "
-            "CE chapitre pour voir ses documents et exercices ; 3) pour les examens/devoirs de ce "
-            "programme, appelle consulter_examens_programme avec l'id du programme (pas d'un chapitre : un "
-            "examen peut en couvrir plusieurs). Ne devine jamais ce contenu."
+            "question par rapport à sa matière/son niveau). Pour aller plus loin, navigue étape par "
+            "étape, jamais tout d'un coup : 1) appelle consulter_programme avec l'id ci-dessus pour voir "
+            "ses matières (jamais leurs chapitres à ce stade) ; 2) une fois que tu as identifié la "
+            "matière pertinente, appelle consulter_matiere_programme avec l'id de CETTE matière pour voir "
+            "ses chapitres (jamais leur contenu à ce stade) ; 3) une fois que tu as identifié le chapitre "
+            "pertinent, appelle consulter_chapitre_programme avec l'id de CE chapitre pour voir ses "
+            "documents et exercices ; 4) pour les examens/devoirs de ce programme, appelle "
+            "consulter_examens_programme avec l'id du programme (pas d'une matière ou d'un chapitre : un "
+            "examen peut en couvrir plusieurs). Ne devine jamais ce contenu, et ne saute jamais une étape."
         )
 
     # Bloc outils actifs / aucun outil actif (restauré 14/08) : outil_force
@@ -2617,6 +2621,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         outils_forces_contexte.append("consulter_comportement")
     if mes_programmes:
         outils_forces_contexte.append("consulter_programme")
+        outils_forces_contexte.append("consulter_matiere_programme")
         outils_forces_contexte.append("consulter_chapitre_programme")
         outils_forces_contexte.append("consulter_examens_programme")
 

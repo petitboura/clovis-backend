@@ -64,6 +64,7 @@ from core.comportements_etudiants import (
     supprimer_comportement as _supprimer_comportement,
 )
 from core.programme_llm import obtenir_structure_programme as _obtenir_structure_programme
+from core.programme_llm import obtenir_chapitres_matiere as _obtenir_chapitres_matiere
 from core.programme_llm import obtenir_contenu_chapitre as _obtenir_contenu_chapitre
 from core.programme_llm import obtenir_examens_programme as _obtenir_examens_programme
 from core.programme_ecriture import (
@@ -574,18 +575,18 @@ def supprimer_comportement(comportement_id: str, ctx: Context) -> str:
 @mcp_generation.tool()
 def consulter_programme(programme_id: str, ctx: Context) -> str:
     """
-    Lit la structure (matières -> chapitres, avec leurs limites de cadre
-    officiel si renseignées) d'un programme que cet étudiant a créé
-    lui-même (section "Programme" de son espace), à partir de son id. Ne
-    contient PAS le contenu des chapitres (documents/exercices), ni les
-    examens/devoirs : une fois que tu as choisi un chapitre précis dans
-    cette structure, utilise consulter_chapitre_programme ; pour les
+    Lit les matières (avec leurs limites de cadre officiel si
+    renseignées) d'un programme que cet étudiant a créé lui-même
+    (section "Programme" de son espace), à partir de son id. Ne contient
+    PAS les chapitres de ces matières, ni les examens/devoirs : une fois
+    que tu as choisi une matière précise dans cette liste, utilise
+    consulter_matiere_programme pour voir ses chapitres ; pour les
     examens/devoirs de ce programme (qui peuvent couvrir plusieurs
-    chapitres à la fois), utilise consulter_examens_programme. Le message
-    système t'a déjà donné la liste légère (id/niveau/nom) des programmes
-    de cet étudiant -- utilise cet outil quand tu as besoin de savoir
-    quelles matières/chapitres existent dans un programme précis, plutôt
-    que de deviner.
+    matières/chapitres à la fois), utilise consulter_examens_programme.
+    Le message système t'a déjà donné la liste légère (id/niveau/nom)
+    des programmes de cet étudiant -- utilise cet outil quand tu as
+    besoin de savoir quelles matières existent dans un programme précis,
+    plutôt que de deviner.
     """
     try:
         requete = ctx.request_context.request
@@ -1011,12 +1012,38 @@ def annuler_derniere_modification(ctx: Context) -> str:
 
 
 @mcp_generation.tool()
+def consulter_matiere_programme(matiere_id: str, ctx: Context) -> str:
+    """
+    Lit les chapitres (avec leurs limites de cadre officiel si
+    renseignées) d'UNE matière précise d'un programme de cet étudiant, à
+    partir de son id. Ne contient PAS le contenu des chapitres
+    (documents/exercices) : une fois que tu as choisi un chapitre précis
+    dans cette liste, utilise consulter_chapitre_programme. Utilise cet
+    outil seulement après avoir consulté consulter_programme et choisi
+    la matière qui t'intéresse -- jamais à l'aveugle sans connaître l'id
+    de la matière au préalable.
+    """
+    try:
+        requete = ctx.request_context.request
+        user_id = requete.query_params.get("user_id")
+        if not user_id:
+            return "Erreur : impossible d'identifier l'étudiant."
+        chapitres = _obtenir_chapitres_matiere(user_id, matiere_id)
+        if chapitres is None:
+            return "Cette matière est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+        return chapitres
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_matiere_programme : {e}")
+        return "Erreur : impossible de consulter cette matière, réessaie."
+
+
+@mcp_generation.tool()
 def consulter_chapitre_programme(chapitre_id: str, ctx: Context) -> str:
     """
     Lit le contenu réel (documents + exercices) d'UN chapitre précis d'un
     programme de cet étudiant, à partir de son id. Utilise cet outil
-    seulement après avoir consulté consulter_programme et choisi le
-    chapitre qui t'intéresse dans sa structure -- jamais à l'aveugle sans
+    seulement après avoir consulté consulter_matiere_programme et choisi
+    le chapitre qui t'intéresse dans sa liste -- jamais à l'aveugle sans
     connaître l'id du chapitre au préalable.
     """
     try:
