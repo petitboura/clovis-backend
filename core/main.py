@@ -19,7 +19,7 @@ from comportements_etudiants import (
 from programme_llm import lister_mes_programmes_legers
 from codes_partage import lister_comportements_recus, lister_programmes_recus_legers
 from mcp_tools import lister_tous_les_outils, lister_outils_autorises_pour_agent, appeler_outil
-from registre_outils import OUTILS_SENSIBLES
+from registre_outils import OUTILS_SENSIBLES, REGISTRE_AFFICHAGE_OUTILS
 from fournisseurs_llm import generer_reponse_premium
 
 logging.basicConfig(level=logging.INFO)
@@ -596,21 +596,10 @@ def _finaliser_fragment_texte(etat, messages_agent):
             evenements.append({"type": "reponse", "texte": etat["buffer"]})
         etat["buffer"] = ""
     return evenements
-# Nouvel outil = ajouter une ligne ici (optionnel, sinon le nom brut s'affiche).
-NOMS_OUTILS_LISIBLES = {
-    "tavily_search": "Recherche sur le web",
-    "tavily_extract": "Lecture d'une page web",
-    "tavily_crawl": "Exploration d'un site web",
-    "tavily_map": "Cartographie d'un site web",
-    "tavily_research": "Recherche approfondie",
-    "notion-search": "Recherche dans ton Notion",
-    "notion-fetch": "Lecture d'une page Notion",
-    "notion-create-pages": "Création d'une page Notion",
-    "notion-update-page": "Modification d'une page Notion",
-    "explorer_depot_github": "Exploration d'un dépôt GitHub",
-    "lire_fichier_depot_github": "Lecture d'un fichier GitHub",
-    "modifier_fichier_depot_github": "Modification d'un fichier GitHub",
-}
+# Nouvel outil = ajouter une ligne dans REGISTRE_AFFICHAGE_OUTILS
+# (core/registre_outils.py), rien à faire ici -- ni dans le frontend
+# (voir api/outils_registre.py, expose ce meme registre en JSON).
+NOMS_OUTILS_LISIBLES = {nom: entree["label"] for nom, entree in REGISTRE_AFFICHAGE_OUTILS.items()}
 
 
 def _construire_parts_gemini(texte, images=None):

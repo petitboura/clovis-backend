@@ -193,3 +193,129 @@ OUTILS_SENSIBLES = {
     "supprimer_comportement",
 }
 
+
+# Registre d'affichage unique (2026-08-15, demande Bourama : "qu'à un
+# nouvel outil, on ne touche pas au frontend" + "beaucoup d'outils
+# affichent leur nom brut / une icône générique").
+#
+# AVANT : deux listes tenues à la main en parallèle -- NOMS_OUTILS_LISIBLES
+# dans core/main.py (12 entrées sur 83 outils réels) côté backend, et
+# OUTILS_DISPONIBLES dans classgpt-frontend/lib/outils.ts (~24/83) côté
+# frontend -- d'où le nom brut ("generer_document_word") ou l'icône
+# générique (Wrench) pour tout le reste.
+#
+# MAINTENANT : ce dict est la SEULE source de vérité pour les deux, sur
+# les deux dépôts. Pour ajouter un nouvel outil, une seule ligne à ajouter
+# ICI, rien d'autre :
+# - Backend (core/main.py, _nom_lisible) : lit ce dict directement.
+# - Frontend (classgpt-frontend/lib/outils.ts) : va chercher ce dict via
+#   GET /api/outils/registre (voir api/outils_registre.py) au chargement
+#   du chat -- aucune modification du frontend nécessaire, aucun rebuild
+#   ni redéploiement du dépôt frontend.
+#
+# `icone` est une chaîne = un nom d'export de lucide-react (vérifié
+# présent dans la version installée, classgpt-frontend/package.json).
+# Exception : "notion-logo", un cas spécial connu du frontend (logo
+# Notion, pas un export lucide-react).
+#
+# `onglet` correspond aux catégories du menu "Outils" du frontend :
+# "generer" / "rechercher" / "action_app" / "utilitaires".
+# `appli` (optionnel) : regroupe sous un connecteur externe ("github" ou
+# "notion") dans l'onglet "action_app" -- absent pour tout le reste.
+REGISTRE_AFFICHAGE_OUTILS = {
+    # --- Génération ---
+    "generer_document": {"label": "Génération d'un PDF/texte", "icone": "FileText", "onglet": "generer"},
+    "generer_document_word": {"label": "Génération d'un Word", "icone": "FileType", "onglet": "generer"},
+    "generer_document_excel": {"label": "Génération d'un Excel", "icone": "FileSpreadsheet", "onglet": "generer"},
+    "generer_document_powerpoint": {"label": "Génération d'un PowerPoint", "icone": "Presentation", "onglet": "generer"},
+    "generer_document_latex": {"label": "Génération d'un document LaTeX", "icone": "FileDigit", "onglet": "generer"},
+    "generer_code": {"label": "Génération de code", "icone": "Code", "onglet": "generer"},
+    "generer_site_zip": {"label": "Génération d'un site (zip)", "icone": "Package", "onglet": "generer"},
+    "generer_bundle": {"label": "Génération d'une archive", "icone": "Archive", "onglet": "generer"},
+    "generer_image": {"label": "Génération d'une image", "icone": "Image", "onglet": "generer"},
+    "generer_audio": {"label": "Génération audio", "icone": "AudioLines", "onglet": "generer"},
+    "lancer_generation_video": {"label": "Génération d'une vidéo", "icone": "Video", "onglet": "generer"},
+    "consulter_statut_video": {"label": "Vérification du statut de la vidéo", "icone": "RefreshCw", "onglet": "generer"},
+    "lancer_generation_3d": {"label": "Génération d'un modèle 3D", "icone": "Box", "onglet": "generer"},
+    "consulter_statut_3d": {"label": "Vérification du statut de génération 3D", "icone": "RefreshCw", "onglet": "generer"},
+    "envoyer_pour_signature": {"label": "Envoi pour signature", "icone": "FileSignature", "onglet": "generer"},
+    "consulter_statut_signature": {"label": "Vérification du statut de signature", "icone": "RefreshCw", "onglet": "generer"},
+    "deployer_site": {"label": "Déploiement d'un site", "icone": "Rocket", "onglet": "generer"},
+    "exporter_donnees": {"label": "Export de données", "icone": "FileOutput", "onglet": "generer"},
+    "calculer_symbolique": {"label": "Calcul symbolique (résoudre, dériver, intégrer)", "icone": "Divide", "onglet": "generer"},
+
+    # --- Recherche ---
+    "tavily_search": {"label": "Recherche web", "icone": "Search", "onglet": "rechercher"},
+    "tavily_extract": {"label": "Extraction d'une page", "icone": "FileSearch", "onglet": "rechercher"},
+    "tavily_crawl": {"label": "Exploration d'un site", "icone": "Globe", "onglet": "rechercher"},
+    "tavily_map": {"label": "Cartographie d'un site", "icone": "Map", "onglet": "rechercher"},
+    "tavily_research": {"label": "Recherche approfondie", "icone": "BookOpen", "onglet": "rechercher"},
+    "chercher_fichier": {"label": "Recherche d'un fichier", "icone": "FolderSearch", "onglet": "rechercher"},
+    "consulter_bibliotheque": {"label": "Consultation de la bibliothèque", "icone": "Library", "onglet": "rechercher"},
+    "chercher_dans_base_connaissances": {"label": "Recherche dans la base de connaissances", "icone": "BookMarked", "onglet": "rechercher"},
+
+    # --- Action dans l'app : GitHub ---
+    "explorer_depot_github": {"label": "Exploration d'un dépôt GitHub", "icone": "FolderTree", "onglet": "action_app", "appli": "github"},
+    "lire_fichier_depot_github": {"label": "Lecture d'un fichier GitHub", "icone": "FileCode", "onglet": "action_app", "appli": "github"},
+    "modifier_fichier_depot_github": {"label": "Modification d'un fichier GitHub", "icone": "Edit3", "onglet": "action_app", "appli": "github"},
+
+    # --- Action dans l'app : Notion ---
+    "notion-search": {"label": "Recherche dans Notion", "icone": "notion-logo", "onglet": "action_app", "appli": "notion"},
+    "notion-fetch": {"label": "Ouverture d'une page/base Notion", "icone": "FileSearch", "onglet": "action_app", "appli": "notion"},
+    "notion-query-data-sources": {"label": "Interrogation d'une base Notion (SQL)", "icone": "Table2", "onglet": "action_app", "appli": "notion"},
+    "notion-query-database-view": {"label": "Interrogation d'une vue Notion", "icone": "LayoutGrid", "onglet": "action_app", "appli": "notion"},
+    "notion-query-meeting-notes": {"label": "Recherche dans les notes de réunion", "icone": "StickyNote", "onglet": "action_app", "appli": "notion"},
+    "notion-get-comments": {"label": "Lecture des commentaires Notion", "icone": "MessagesSquare", "onglet": "action_app", "appli": "notion"},
+    "notion-get-async-task": {"label": "Suivi d'une tâche Notion en cours", "icone": "Clock", "onglet": "action_app", "appli": "notion"},
+    "notion-get-teams": {"label": "Liste des équipes Notion", "icone": "Users", "onglet": "action_app", "appli": "notion"},
+    "notion-get-users": {"label": "Liste des utilisateurs Notion", "icone": "UserCog", "onglet": "action_app", "appli": "notion"},
+    "notion-download-attachment": {"label": "Téléchargement d'une pièce jointe Notion", "icone": "Download", "onglet": "action_app", "appli": "notion"},
+    "notion-create-pages": {"label": "Création d'une page Notion", "icone": "FilePlus", "onglet": "action_app", "appli": "notion"},
+    "notion-update-page": {"label": "Modification d'une page Notion", "icone": "Edit3", "onglet": "action_app", "appli": "notion"},
+    "notion-move-pages": {"label": "Déplacement d'une page Notion", "icone": "Move", "onglet": "action_app", "appli": "notion"},
+    "notion-duplicate-page": {"label": "Duplication d'une page Notion", "icone": "Copy", "onglet": "action_app", "appli": "notion"},
+    "notion-create-database": {"label": "Création d'une base Notion", "icone": "Database", "onglet": "action_app", "appli": "notion"},
+    "notion-update-data-source": {"label": "Modification du schéma d'une base Notion", "icone": "Settings2", "onglet": "action_app", "appli": "notion"},
+    "notion-create-comment": {"label": "Commentaire dans Notion", "icone": "MessageSquare", "onglet": "action_app", "appli": "notion"},
+    "notion-create-attachment": {"label": "Ajout d'une pièce jointe Notion", "icone": "Paperclip", "onglet": "action_app", "appli": "notion"},
+    "notion-create-view": {"label": "Création d'une vue Notion", "icone": "PanelsTopLeft", "onglet": "action_app", "appli": "notion"},
+    "notion-update-view": {"label": "Modification d'une vue Notion", "icone": "SlidersHorizontal", "onglet": "action_app", "appli": "notion"},
+
+    # --- Utilitaires ---
+    "planifier_rappel": {"label": "Planification d'un rappel", "icone": "Bell", "onglet": "utilitaires"},
+    "envoyer_message": {"label": "Envoi d'un message", "icone": "Send", "onglet": "utilitaires"},
+    "consulter_memoire_utilisateur": {"label": "Consultation de ta mémoire", "icone": "Brain", "onglet": "utilitaires"},
+    "mettre_a_jour_memoire_utilisateur": {"label": "Mise à jour de ta mémoire", "icone": "Brain", "onglet": "utilitaires"},
+    "consulter_profil_utilisateur": {"label": "Consultation de ton profil", "icone": "UserCircle", "onglet": "utilitaires"},
+    "mettre_a_jour_profil_utilisateur": {"label": "Mise à jour de ton profil", "icone": "UserCog", "onglet": "utilitaires"},
+
+    # --- Programme adaptatif (interne) ---
+    "consulter_matiere_active": {"label": "Consultation de la matière active", "icone": "BookOpen", "onglet": "utilitaires"},
+    "ajouter_programme": {"label": "Création d'un programme", "icone": "GraduationCap", "onglet": "utilitaires"},
+    "modifier_programme": {"label": "Modification d'un programme", "icone": "GraduationCap", "onglet": "utilitaires"},
+    "consulter_programme": {"label": "Consultation d'un programme", "icone": "GraduationCap", "onglet": "utilitaires"},
+    "supprimer_programme": {"label": "Suppression d'un programme", "icone": "Trash2", "onglet": "utilitaires"},
+    "ajouter_matiere": {"label": "Ajout d'une matière", "icone": "BookOpen", "onglet": "utilitaires"},
+    "modifier_matiere": {"label": "Modification d'une matière", "icone": "BookOpen", "onglet": "utilitaires"},
+    "supprimer_matiere": {"label": "Suppression d'une matière", "icone": "Trash2", "onglet": "utilitaires"},
+    "ajouter_chapitre": {"label": "Ajout d'un chapitre", "icone": "Layers", "onglet": "utilitaires"},
+    "modifier_chapitre": {"label": "Modification d'un chapitre", "icone": "Layers", "onglet": "utilitaires"},
+    "consulter_chapitre_programme": {"label": "Consultation d'un chapitre", "icone": "Layers", "onglet": "utilitaires"},
+    "supprimer_chapitre": {"label": "Suppression d'un chapitre", "icone": "Trash2", "onglet": "utilitaires"},
+    "ajouter_document_programme": {"label": "Ajout d'un document au programme", "icone": "FileText", "onglet": "utilitaires"},
+    "modifier_document_programme": {"label": "Modification d'un document du programme", "icone": "FileText", "onglet": "utilitaires"},
+    "supprimer_document_programme": {"label": "Suppression d'un document du programme", "icone": "Trash2", "onglet": "utilitaires"},
+    "ajouter_exercice_programme": {"label": "Ajout d'un exercice", "icone": "ListChecks", "onglet": "utilitaires"},
+    "modifier_exercice_programme": {"label": "Modification d'un exercice", "icone": "ListChecks", "onglet": "utilitaires"},
+    "supprimer_exercice_programme": {"label": "Suppression d'un exercice", "icone": "Trash2", "onglet": "utilitaires"},
+    "ajouter_examen": {"label": "Ajout d'un examen", "icone": "ClipboardList", "onglet": "utilitaires"},
+    "modifier_examen": {"label": "Modification d'un examen", "icone": "ClipboardList", "onglet": "utilitaires"},
+    "consulter_examens_programme": {"label": "Consultation des examens", "icone": "ClipboardList", "onglet": "utilitaires"},
+    "supprimer_examen": {"label": "Suppression d'un examen", "icone": "Trash2", "onglet": "utilitaires"},
+    "annuler_derniere_modification": {"label": "Annulation de la dernière modification", "icone": "Undo2", "onglet": "utilitaires"},
+    "ajouter_comportement": {"label": "Ajout d'un comportement", "icone": "Sparkles", "onglet": "utilitaires"},
+    "modifier_comportement": {"label": "Modification d'un comportement", "icone": "Sparkles", "onglet": "utilitaires"},
+    "consulter_comportement": {"label": "Consultation d'un comportement", "icone": "Sparkles", "onglet": "utilitaires"},
+    "supprimer_comportement": {"label": "Suppression d'un comportement", "icone": "Trash2", "onglet": "utilitaires"},
+}
+
