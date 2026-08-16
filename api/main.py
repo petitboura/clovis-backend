@@ -134,41 +134,79 @@ app.mount("/mcp/generation", mcp_generation.streamable_http_app(stateless_http=T
 # ci-dessus. registre_outils.py l'enregistre sous le nom "github".
 app.mount("/mcp/github", mcp_github.streamable_http_app(stateless_http=True, streamable_http_path="/"))
 
-# Serveur MCP PUBLIC (Clovis) : contrairement aux deux ci-dessus, celui-ci
-# est destiné à être ajouté comme connecteur externe dans un client MCP
-# (Claude), pas consommé par l'agent Clovis lui-même -- voir
-# core/serveur_mcp_public.py. Authentification OAuth branchée (voir
-# core/mcp_auth_public.py) : peut être communiqué comme URL de connecteur
-# dès que les réglages Supabase (Authentication > OAuth Server) sont
-# activés côté tableau de bord.
-app.mount("/mcp/public", mcp_public.streamable_http_app(stateless_http=True, streamable_http_path="/"))
+# Serveurs MCP PUBLICS (Clovis) : contrairement aux deux ci-dessus,
+# destines a etre ajoutes comme connecteur externe dans un client MCP
+# (Claude), pas consommes par l'agent Clovis lui-meme -- voir
+# core/serveur_mcp_public.py (bibliotheque RAG) et
+# core/serveur_mcp_espace.py (bibliotheque/memoire/comportements/
+# historique de "Mon espace"). Authentification OAuth (voir
+# core/mcp_auth_public.py, delegation complete a Supabase) : peuvent
+# etre communiques comme URL de connecteur des que les reglages Supabase
+# (Authentication > OAuth Server) sont actives cote tableau de bord.
+#
+# CORRECTIF (16/08) -- connexion Claude a "/mcp/public" (sans slash
+# final) impossible : `app.mount("/mcp/public", ...)` ci-dessous (ancien
+# code) prefixait TOUJOURS le chemin en plus du prefixe deja porte par
+# le sous-serveur, donc une requete sans slash final arrivait comme
+# chemin vide "" au sous-serveur Starlette, qui ne matchait pas sa route
+# interne "/" -> redirection 307 vers "/mcp/public/", jamais suivie par
+# le client Claude (echec de connexion silencieux, capture d'ecran
+# Bourama 16/08). Meme classe de bug que le correctif de decouverte
+# OAuth juste en dessous, et meme solution : au lieu de `app.mount(...)`
+# (qui isole le sous-serveur ET reprefixe ses routes), on construit
+# l'app du sous-serveur avec streamable_http_path deja egal au chemin
+# COMPLET souhaite, puis on ne republie que sa route MCP principale
+# (celle qui matche exactement ce chemin, sans slash final) directement
+# sur le routeur racine -- jamais de Mount, jamais de reprefixage.
+# Ces deux serveurs n'ont qu'un token_verifier (verification Supabase),
+# pas de auth_server_provider (pas de serveur d'autorisation local) :
+# streamable_http_app() ne cree donc bien qu'une seule Route MCP a
+# republier ici, les routes de decouverte RFC 9728 restant gerees a part
+# ci-dessous exactement comme avant.
+from starlette.routing import Route
 
-# Serveur MCP PUBLIC "Mon espace" (bibliothèque/mémoire/comportements/
-# historique) : voir core/serveur_mcp_espace.py. Même authentification
-# OAuth que mcp_public ci-dessus (core/mcp_auth_public.py), chemin de
-# montage séparé -- sert aussi d'identifiant de ressource RFC 9728 propre
-# à ce serveur (voir construire_auth_settings("/mcp/espace")).
-app.mount("/mcp/espace", mcp_espace.streamable_http_app(stateless_http=True, streamable_http_path="/"))
+def _route_mcp_principale(app_mcp_starlette, chemin_complet):
+    """Extrait l'unique Route MCP (chemin == chemin_complet) d'une app
+    Starlette generee par streamable_http_app(), pour republication
+    directe sur le routeur racine (jamais tel quel via app.mount)."""
+    routes_trouvees = [
+        r for r in app_mcp_starlette.routes
+        if isinstance(r, Route) and r.path == chemin_complet
+    ]
+    if len(routes_trouvees) != 1:
+        raise RuntimeError(
+            f"Attendu exactement 1 route MCP pour {chemin_complet!r}, "
+            f"trouve {len(routes_trouvees)} -- verifier la config auth "
+            f"(auth_server_provider ajouterait des routes supplementaires)."
+        )
+    return routes_trouvees[0]
 
-# CORRECTIF (16/08) -- decouverte OAuth (RFC 9728) cassee pour les 2
-# serveurs MCP PUBLICS ci-dessus (mcp_public, mcp_espace), jamais pour
-# mcp_generation/mcp_github qui restent internes, sans client OAuth
-# externe.
+app.router.routes.append(
+    _route_mcp_principale(
+        mcp_public.streamable_http_app(stateless_http=True, streamable_http_path="/mcp/public"),
+        "/mcp/public",
+    )
+)
+app.router.routes.append(
+    _route_mcp_principale(
+        mcp_espace.streamable_http_app(stateless_http=True, streamable_http_path="/mcp/espace"),
+        "/mcp/espace",
+    )
+)
+
+# CORRECTIF (16/08, deja en place avant celui ci-dessus) -- decouverte
+# OAuth (RFC 9728) cassee pour les 2 serveurs MCP PUBLICS ci-dessus
+# (mcp_public, mcp_espace), jamais pour mcp_generation/mcp_github qui
+# restent internes, sans client OAuth externe.
 #
 # Le probleme : core/mcp_auth_public.py construit resource_server_url en
 # incluant deja le chemin de montage (ex. ".../mcp/public"). La
-# librairie mcp s'en sert pour calculer, A L'INTERIEUR du sous-serveur,
-# le chemin de sa route de decouverte
-# ("/.well-known/oauth-protected-resource/mcp/public") ET l'URL absolue
-# qu'elle annonce dans l'en-tete WWW-Authenticate
-# ("https://.../.well-known/oauth-protected-resource/mcp/public"). Mais
-# app.mount("/mcp/public", ...) ci-dessus prefixe ENCORE une fois toutes
-# les routes internes du sous-serveur -- la route finit donc reellement
-# montee sur "/mcp/public/.well-known/oauth-protected-resource/mcp/public",
-# jamais atteinte, alors que Claude suit exactement l'URL annoncee dans
-# l'en-tete (sans prefixe en trop) et tombe donc systematiquement en 404
-# -- aucune authentification possible (voir capture d'ecran Bourama,
-# 16/08).
+# librairie mcp s'en sert pour calculer le chemin de sa route de
+# decouverte ("/.well-known/oauth-protected-resource/mcp/public") ET
+# l'URL absolue qu'elle annonce dans l'en-tete WWW-Authenticate. Ces
+# routes de decouverte, elles, restent republiees a part ici (jamais
+# concernees par le changement app.mount -> route directe ci-dessus,
+# qui ne touche que la route MCP principale elle-meme).
 #
 # Correctif : republier les memes routes de decouverte (generees par la
 # librairie elle-meme via construire_auth_settings -- aucune valeur
