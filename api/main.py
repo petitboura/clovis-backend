@@ -40,6 +40,7 @@ from core.serveur_mcp_generation import mcp_generation
 from core.notifications_push import traiter_rappels_echus, notifications_push_disponible
 from core.proactivite import verifier_relances_proactives
 from core.serveur_mcp_github import mcp_github
+from core.serveur_mcp_public import mcp_public
 from core.erreurs import erreur_api
 
 logging.basicConfig(level=logging.INFO)
@@ -97,7 +98,11 @@ async def _lifespan(app: FastAPI):
     # besoin de tourner pendant toute la durée de vie du process, sinon
     # streamable_http_app() renvoie une erreur "Task group is not
     # initialized" au premier appel d'outil.
-    async with mcp_generation.session_manager.run(), mcp_github.session_manager.run():
+    async with (
+        mcp_generation.session_manager.run(),
+        mcp_github.session_manager.run(),
+        mcp_public.session_manager.run(),
+    ):
         tache_planificateur = None
         tache_proactivite = None
         if notifications_push_disponible():
@@ -126,6 +131,15 @@ app.mount("/mcp/generation", mcp_generation.streamable_http_app(stateless_http=T
 # core/serveur_mcp_github.py, monté de la même façon que "generation"
 # ci-dessus. registre_outils.py l'enregistre sous le nom "github".
 app.mount("/mcp/github", mcp_github.streamable_http_app(stateless_http=True, streamable_http_path="/"))
+
+# Serveur MCP PUBLIC (Clovis) : contrairement aux deux ci-dessus, celui-ci
+# est destiné à être ajouté comme connecteur externe dans un client MCP
+# (Claude), pas consommé par l'agent Clovis lui-même -- voir
+# core/serveur_mcp_public.py. Squelette minimal pour l'instant (aucun
+# outil, aucune authentification externe) : pas encore à communiquer
+# publiquement comme URL de connecteur tant que l'authentification n'est
+# pas en place.
+app.mount("/mcp/public", mcp_public.streamable_http_app(stateless_http=True, streamable_http_path="/"))
 
 # Domaines autorisés à appeler cette API. Service isolé pour Clovis
 # uniquement (séparé de djiguigne-backend le 12/08) -- seules les origines
