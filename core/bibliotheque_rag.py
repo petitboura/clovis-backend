@@ -92,7 +92,16 @@ def indexer_pdf_bibliotheque(chemin_pdf: str, fichier_id: str, user_id: str) -> 
 def chercher_bibliotheque(question: str, user_id: str, match_count: int = 5) -> list:
     """
     Recherche sémantique dans la bibliothèque personnelle de `user_id`.
-    Renvoie une liste de {contenu, similarite}, triée par pertinence.
+    Renvoie une liste de {contenu, similarite, fichier_id, nom_fichier,
+    url_publique, type_mime}, triée par pertinence -- la fonction SQL
+    recherche_bibliotheque (17/08) joint désormais fichiers_uploades pour
+    que chaque extrait porte la référence de son document d'origine :
+    avant ça, un extrait pertinent trouvé ici ne permettait jamais de
+    remonter jusqu'au fichier complet (ni son nom, ni son lien), donc
+    consulter_bibliotheque ne pouvait renvoyer que du texte brut, jamais
+    de quoi montrer le document lui-même (voir consulter_bibliotheque
+    dans core/serveur_mcp_generation.py, qui construit le lien à partir
+    de url_publique désormais présent ici).
     """
     if not user_id:
         logging.error("chercher_bibliotheque appelé sans user_id : renvoie vide.")

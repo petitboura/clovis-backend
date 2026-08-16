@@ -320,8 +320,13 @@ def consulter_bibliotheque(question: str, ctx: Context) -> str:
     qui la conversation a lieu -- cette bibliothèque n'appartient à
     aucun agent en particulier, elle est propre à l'utilisateur, et
     invisible pour tout autre utilisateur.
-    Renvoie les extraits trouvés (à utiliser directement pour répondre)
-    ou un message si rien de pertinent n'a été trouvé.
+    Renvoie les extraits trouvés (à utiliser directement pour répondre),
+    chacun accompagné du nom et du lien de son document d'origine --
+    si tu juges utile de montrer un de ces documents en entier plutôt
+    que de le résumer, inclus son lien dans ta réponse (![...](url)
+    pour une image, [...](url) pour les autres types), il s'affichera
+    alors correctement selon son type. Renvoie un message si rien de
+    pertinent n'a été trouvé.
     """
     # BUG corrigé le 14/08 (constaté en prod : "Rien de pertinent trouvé"
     # alors que la bibliothèque contenait bien des documents indexés) --
@@ -348,7 +353,25 @@ def consulter_bibliotheque(question: str, ctx: Context) -> str:
     if not resultats:
         return "Rien de pertinent trouvé dans la bibliothèque pour cette question."
 
-    return "\n\n---\n\n".join(r["contenu"] for r in resultats)
+    # Correction du 17/08 (Bourama : "il faut que l'IA puisse le
+    # récupérer en entier aussi pour l'afficher s'il le décide, pas
+    # uniquement les vecteurs") -- avant ça, seul le texte des extraits
+    # était renvoyé, sans jamais dire de quel fichier ça venait. Chaque
+    # extrait porte maintenant sa source (nom + lien, voir
+    # recherche_bibliotheque et bibliotheque_rag.py) : à toi de choisir,
+    # une fois la question répondue à partir des extraits, si montrer le
+    # document original en entier apporte quelque chose -- pas besoin
+    # de le relire en entier pour ça, uniquement d'inclure son lien dans
+    # ta réponse (![...](url) pour une image, [...](url) pour les
+    # autres types) pour qu'il s'affiche correctement selon son type.
+    blocs = []
+    for r in resultats:
+        bloc = r["contenu"]
+        if r.get("nom_fichier") and r.get("url_publique"):
+            bloc += f"\n(Source : {r['nom_fichier']} -- {r['url_publique']})"
+        blocs.append(bloc)
+
+    return "\n\n---\n\n".join(blocs)
 
 
 @mcp_generation.tool()
