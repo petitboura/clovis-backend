@@ -150,6 +150,42 @@ app.mount("/mcp/public", mcp_public.streamable_http_app(stateless_http=True, str
 # à ce serveur (voir construire_auth_settings("/mcp/espace")).
 app.mount("/mcp/espace", mcp_espace.streamable_http_app(stateless_http=True, streamable_http_path="/"))
 
+# CORRECTIF (16/08) -- decouverte OAuth (RFC 9728) cassee pour les 2
+# serveurs MCP PUBLICS ci-dessus (mcp_public, mcp_espace), jamais pour
+# mcp_generation/mcp_github qui restent internes, sans client OAuth
+# externe.
+#
+# Le probleme : core/mcp_auth_public.py construit resource_server_url en
+# incluant deja le chemin de montage (ex. ".../mcp/public"). La
+# librairie mcp s'en sert pour calculer, A L'INTERIEUR du sous-serveur,
+# le chemin de sa route de decouverte
+# ("/.well-known/oauth-protected-resource/mcp/public") ET l'URL absolue
+# qu'elle annonce dans l'en-tete WWW-Authenticate
+# ("https://.../.well-known/oauth-protected-resource/mcp/public"). Mais
+# app.mount("/mcp/public", ...) ci-dessus prefixe ENCORE une fois toutes
+# les routes internes du sous-serveur -- la route finit donc reellement
+# montee sur "/mcp/public/.well-known/oauth-protected-resource/mcp/public",
+# jamais atteinte, alors que Claude suit exactement l'URL annoncee dans
+# l'en-tete (sans prefixe en trop) et tombe donc systematiquement en 404
+# -- aucune authentification possible (voir capture d'ecran Bourama,
+# 16/08).
+#
+# Correctif : republier les memes routes de decouverte (generees par la
+# librairie elle-meme via construire_auth_settings -- aucune valeur
+# dupliquee/en dur ici) directement a la racine de l'app FastAPI, la ou
+# Claude va reellement les chercher.
+from mcp.server.auth.routes import create_protected_resource_routes
+from core.mcp_auth_public import construire_auth_settings
+
+for _chemin_public in ("/mcp/public", "/mcp/espace"):
+    _reglages_auth = construire_auth_settings(_chemin_public)
+    app.router.routes.extend(
+        create_protected_resource_routes(
+            resource_url=_reglages_auth.resource_server_url,
+            authorization_servers=[_reglages_auth.issuer_url],
+        )
+    )
+
 # Domaines autorisés à appeler cette API. Service isolé pour Clovis
 # uniquement (séparé de djiguigne-backend le 12/08) -- seules les origines
 # Clovis restent ici, les origines Djiguignè (djiguign-ai.vercel.app,
