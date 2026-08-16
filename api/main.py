@@ -209,15 +209,52 @@ def _route_mcp_principale(app_mcp_starlette, chemin_complet):
         middleware=app_mcp_starlette.user_middleware,
     )
 
+# CORRECTIF (16/08, encore un autre) -- 421 Misdirected Request,
+# "Invalid Host header: clovis-backend-production.up.railway.app", en
+# logs Railway (troisieme bug distinct des deux precedents, pas cause
+# par le passage app.mount -> route directe : celui-ci existait deja
+# avant, simplement jamais atteint tant que la redirection 307 puis le
+# 401 bloquaient la requete plus tot). Cause : `streamable_http_app()`
+# a un parametre `host` par defaut a "127.0.0.1", et quand il n'est PAS
+# fourni explicitement (jamais fait dans ce fichier), la librairie mcp
+# active automatiquement sa protection anti-DNS-rebinding en n'autorisant
+# QUE localhost -- donc tout Host header reel (le domaine Railway) est
+# rejete. Fix : fournir explicitement `transport_security` avec le vrai
+# domaine public, lu depuis `RAILWAY_PUBLIC_DOMAIN` (variable fournie
+# automatiquement par Railway, deja visible dans les 29 variables du
+# service -- jamais code en dur ici). Si la variable est absente
+# (execution hors Railway), protection desactivee plutot que de bloquer
+# tout le monde par defaut.
+import os
+from mcp.server.transport_security import TransportSecuritySettings
+
+_domaine_public_railway = os.environ.get("RAILWAY_PUBLIC_DOMAIN")
+_reglages_securite_transport = (
+    TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[_domaine_public_railway],
+    )
+    if _domaine_public_railway
+    else TransportSecuritySettings(enable_dns_rebinding_protection=False)
+)
+
 app.router.routes.append(
     _route_mcp_principale(
-        mcp_public.streamable_http_app(stateless_http=True, streamable_http_path="/mcp/public"),
+        mcp_public.streamable_http_app(
+            stateless_http=True,
+            streamable_http_path="/mcp/public",
+            transport_security=_reglages_securite_transport,
+        ),
         "/mcp/public",
     )
 )
 app.router.routes.append(
     _route_mcp_principale(
-        mcp_espace.streamable_http_app(stateless_http=True, streamable_http_path="/mcp/espace"),
+        mcp_espace.streamable_http_app(
+            stateless_http=True,
+            streamable_http_path="/mcp/espace",
+            transport_security=_reglages_securite_transport,
+        ),
         "/mcp/espace",
     )
 )
