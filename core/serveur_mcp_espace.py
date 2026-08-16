@@ -69,6 +69,11 @@ from mcp.server.mcpserver import MCPServer as FastMCP, Context
 from mcp.types import ToolAnnotations
 from supabase import create_client
 
+from core.mcp_auth_public import (
+    VerificateurJetonSupabase,
+    construire_auth_settings,
+    user_id_depuis_contexte as _user_id_verifie,
+)
 from core.bibliotheque_fichiers import (
     enregistrer_fichier as _enregistrer_fichier,
     enregistrer_lien as _enregistrer_lien,
@@ -117,26 +122,23 @@ _TYPES_AUTORISES = {
 }
 _TAILLE_MAX_OCTETS = 50 * 1024 * 1024  # 50 Mo
 
-mcp_espace = FastMCP(name="espace")
+mcp_espace = FastMCP(
+    name="espace",
+    token_verifier=VerificateurJetonSupabase(),
+    auth=construire_auth_settings("/mcp/espace"),
+)
 
 
 def _user_id_authentifie(ctx: Context) -> str | None:
     """
     Point d'entrée UNIQUE pour récupérer l'identité de l'appelant dans ce
-    fichier -- à brancher sur le vrai mécanisme d'auth externe une fois
-    la Partie 2 prête. Pour l'instant, relais du query param "user_id"
-    (même mécanique que planifier_rappel/envoyer_message dans
-    serveur_mcp_generation.py), MAIS ce fichier n'est pas censé être
-    monté en localhost comme le serveur interne : ne pas exposer cette
-    route publiquement tant que la Partie 2 n'a pas remplacé cette
-    fonction par une vérification réelle (token/session), sous peine de
-    laisser n'importe quel appelant lire/modifier les données de
-    n'importe quel user_id fourni en clair.
+    fichier. Rebranché (voir Partie 2, core/mcp_auth_public.py) sur la
+    vraie vérification de jeton OAuth Supabase -- l'identité vient
+    exclusivement du jeton déjà validé par la librairie mcp avant
+    l'exécution de l'outil, plus jamais d'un query param "user_id" fourni
+    en clair par l'appelant.
     """
-    try:
-        return ctx.request_context.request.query_params.get("user_id")
-    except Exception:
-        return None
+    return _user_id_verifie(ctx)
 
 
 # --- Bibliothèque personnelle -----------------------------------------

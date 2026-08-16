@@ -41,6 +41,7 @@ from core.notifications_push import traiter_rappels_echus, notifications_push_di
 from core.proactivite import verifier_relances_proactives
 from core.serveur_mcp_github import mcp_github
 from core.serveur_mcp_public import mcp_public
+from core.serveur_mcp_espace import mcp_espace
 from core.erreurs import erreur_api
 
 logging.basicConfig(level=logging.INFO)
@@ -102,6 +103,7 @@ async def _lifespan(app: FastAPI):
         mcp_generation.session_manager.run(),
         mcp_github.session_manager.run(),
         mcp_public.session_manager.run(),
+        mcp_espace.session_manager.run(),
     ):
         tache_planificateur = None
         tache_proactivite = None
@@ -135,11 +137,18 @@ app.mount("/mcp/github", mcp_github.streamable_http_app(stateless_http=True, str
 # Serveur MCP PUBLIC (Clovis) : contrairement aux deux ci-dessus, celui-ci
 # est destiné à être ajouté comme connecteur externe dans un client MCP
 # (Claude), pas consommé par l'agent Clovis lui-même -- voir
-# core/serveur_mcp_public.py. Squelette minimal pour l'instant (aucun
-# outil, aucune authentification externe) : pas encore à communiquer
-# publiquement comme URL de connecteur tant que l'authentification n'est
-# pas en place.
+# core/serveur_mcp_public.py. Authentification OAuth branchée (voir
+# core/mcp_auth_public.py) : peut être communiqué comme URL de connecteur
+# dès que les réglages Supabase (Authentication > OAuth Server) sont
+# activés côté tableau de bord.
 app.mount("/mcp/public", mcp_public.streamable_http_app(stateless_http=True, streamable_http_path="/"))
+
+# Serveur MCP PUBLIC "Mon espace" (bibliothèque/mémoire/comportements/
+# historique) : voir core/serveur_mcp_espace.py. Même authentification
+# OAuth que mcp_public ci-dessus (core/mcp_auth_public.py), chemin de
+# montage séparé -- sert aussi d'identifiant de ressource RFC 9728 propre
+# à ce serveur (voir construire_auth_settings("/mcp/espace")).
+app.mount("/mcp/espace", mcp_espace.streamable_http_app(stateless_http=True, streamable_http_path="/"))
 
 # Domaines autorisés à appeler cette API. Service isolé pour Clovis
 # uniquement (séparé de djiguigne-backend le 12/08) -- seules les origines
