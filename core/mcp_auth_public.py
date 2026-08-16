@@ -108,9 +108,27 @@ def construire_auth_settings(chemin_montage: str) -> AuthSettings:
     """`chemin_montage` : ex. "/mcp/public" ou "/mcp/espace" -- doit
     correspondre exactement au chemin utilisé dans app.mount(...) côté
     api/main.py, sert d'identifiant de ressource RFC 8707/9728.
+
+    CORRECTIF (16/08) -- `issuer_url` doit pointer vers
+    `{SUPABASE_URL}/auth/v1`, PAS vers `SUPABASE_URL` seul (utilisé
+    ailleurs dans ce fichier pour `create_client`, qui lui attend bien
+    la racine sans `/auth/v1`, ajoutee en interne par le client Python
+    Supabase -- les deux usages de SUPABASE_URL sont donc legitimement
+    differents, pas une incoherence a corriger globalement).
+
+    Le serveur OAuth de Supabase sert ses metadonnees de decouverte a
+    "/.well-known/oauth-authorization-server/auth/v1" (RFC 8414,
+    insertion du chemin de l'issuer) et son vrai endpoint d'autorisation
+    a "/auth/v1/oauth/authorize" -- jamais a la racine du projet. Avec
+    issuer_url=SUPABASE_URL (racine), la librairie mcp construit une URL
+    de decouverte a la racine qui n'existe pas chez Supabase (404) ; en
+    consequence Claude ne trouve jamais le vrai registration_endpoint et
+    retente un POST /register directement sur clovis-backend, qui
+    n'existe pas non plus (voir logs Railway 16/08, deploiement
+    85461dab : "POST /register -> 404").
     """
     return AuthSettings(
-        issuer_url=SUPABASE_URL,
+        issuer_url=f"{SUPABASE_URL}/auth/v1",
         resource_server_url=f"{URL_BASE_PUBLIQUE}{chemin_montage}",
         client_registration_options=ClientRegistrationOptions(enabled=True),
     )
