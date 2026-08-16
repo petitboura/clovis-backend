@@ -1644,7 +1644,7 @@ def _mettre_a_jour_resume_si_besoin(user_id):
         # aucun rapport avec l'école, produisant des résumés inventés/hors
         # sujet). Ne présuppose plus rien sur qui est cette personne ni
         # sur la nature de l'agent avec qui elle parle.
-        prompt_resume = (
+        instruction_resume = (
             "Condense ce qui suit en un résumé factuel et concis (5-8 lignes maximum) "
             "de cette personne, utile pour personnaliser une future session avec elle : "
             "ses centres d'intérêt ou sujets récurrents, ses préférences, le contexte "
@@ -1652,16 +1652,43 @@ def _mettre_a_jour_resume_si_besoin(user_id):
             "clairement indiqué -- ne présuppose ni niveau scolaire, ni statut "
             "d'étudiant, ni progression pédagogique si rien dans la conversation ne "
             "l'indique explicitement. Pas de politesse, pas de méta-commentaire, "
-            "juste les faits utiles.\n\n"
+            "juste les faits utiles."
         )
+
+        # CORRECTIF (16/08, decouvert via lire_memoire cote MCP -- capture
+        # d'ecran Bourama) -- le resume genere par ce petit modele rapide
+        # (llama-3.1-8b-instant) etait parfois une reponse conversationnelle
+        # ("Je vais bien, merci !...") au lieu d'un resume, sauvegardee
+        # telle quelle en base. Cause : tout partait dans un seul message
+        # role="user" qui se terminait par "Utilisateur : <dernier
+        # message>" -- un modele rapide/leger suit alors le pattern de la
+        # transcription et "repond" a ce dernier tour au lieu d'executer la
+        # consigne, placee plus haut, loin de la fin. Fix : instruction en
+        # role="system" (jamais melangee a la transcription), transcription
+        # nettement delimitee et explicitement marquee comme NE PAS y
+        # repondre, et rappel de la consigne juste apres (les modeles
+        # legers suivent mieux une instruction proche de la fin du prompt).
+        contenu_utilisateur = ""
         if ancien_resume:
-            prompt_resume += f"Résumé précédent :\n{ancien_resume}\n\n"
-        prompt_resume += f"Nouveaux échanges à intégrer :\n{messages_recents}"
+            contenu_utilisateur += f"Résumé précédent :\n{ancien_resume}\n\n"
+        contenu_utilisateur += (
+            "Transcription à condenser (ne PAS y répondre, ne PAS continuer "
+            "cette conversation -- ta seule tâche est de la résumer selon la "
+            "consigne ci-dessus) :\n"
+            "--- DÉBUT TRANSCRIPTION ---\n"
+            f"{messages_recents}\n"
+            "--- FIN TRANSCRIPTION ---\n\n"
+            "Rappel : produis uniquement le résumé factuel demandé (5-8 lignes), "
+            "jamais une réponse à la personne."
+        )
 
         client_groq = Groq(api_key=get_secret("GROQ_API_KEY"), max_retries=0)
         completion = client_groq.chat.completions.create(
             model=MODELE_RESUME,
-            messages=[{"role": "user", "content": prompt_resume}],
+            messages=[
+                {"role": "system", "content": instruction_resume},
+                {"role": "user", "content": contenu_utilisateur},
+            ],
             max_completion_tokens=None,
             timeout=DELAI_MAX_PAR_APPEL,
         )
