@@ -74,6 +74,33 @@ from core.mcp_auth_public import (
     construire_auth_settings,
     user_id_depuis_contexte as _user_id_verifie,
 )
+from core.programme_llm import (
+    obtenir_structure_programme as _obtenir_structure_programme,
+    obtenir_chapitres_matiere as _obtenir_chapitres_matiere,
+    obtenir_contenu_chapitre as _obtenir_contenu_chapitre,
+    obtenir_examens_programme as _obtenir_examens_programme,
+)
+from core.programme_ecriture import (
+    ajouter_programme as _ajouter_programme,
+    modifier_programme as _modifier_programme,
+    supprimer_programme as _supprimer_programme,
+    ajouter_matiere as _ajouter_matiere,
+    modifier_matiere as _modifier_matiere,
+    supprimer_matiere as _supprimer_matiere,
+    ajouter_chapitre as _ajouter_chapitre,
+    modifier_chapitre as _modifier_chapitre,
+    supprimer_chapitre as _supprimer_chapitre,
+    ajouter_document as _ajouter_document_programme,
+    modifier_document as _modifier_document_programme,
+    supprimer_document as _supprimer_document_programme,
+    ajouter_exercice as _ajouter_exercice_programme,
+    modifier_exercice as _modifier_exercice_programme,
+    supprimer_exercice as _supprimer_exercice_programme,
+    ajouter_examen as _ajouter_examen,
+    modifier_examen as _modifier_examen,
+    supprimer_examen as _supprimer_examen,
+    annuler_derniere_modification as _annuler_derniere_modification,
+)
 from core.bibliotheque_fichiers import (
     enregistrer_fichier as _enregistrer_fichier,
     enregistrer_lien as _enregistrer_lien,
@@ -702,3 +729,516 @@ def lire_conversation_historique(conversation_id: str, ctx: Context) -> str:
         return "Cette conversation est introuvable ou vide."
 
     return "\n".join(f"[{l['role']}] {l['content']}" for l in lignes)
+
+
+# --- Programme académique ----------------------------------------------
+# Ajouté le 16/08/2026 (demande Bourama) : Claude doit pouvoir naviguer
+# dans l'app comme s'il était notre IA -- pas seulement "Mon espace"
+# (bibliothèque/mémoire/comportements/historique), mais aussi la gestion
+# du programme scolaire (programmes/matières/chapitres/documents/
+# exercices/examens). Aucune logique dupliquée : ce sont les mêmes
+# fonctions core.programme_ecriture / core.programme_llm que
+# core/serveur_mcp_generation.py (serveur interne) utilise déjà pour ce
+# même besoin côté agent Clovis -- seule l'enveloppe MCP change ici
+# (auth OAuth réelle via _user_id_authentifie au lieu du query param
+# interne user_id, décorateur @mcp_espace.tool()). Docstrings et
+# comportement des outils repris à l'identique de mcp_generation.
+
+@mcp_espace.tool()
+def consulter_programme(programme_id: str, ctx: Context) -> str:
+    """
+    Lit les matières (avec leurs limites de cadre officiel si
+    renseignées) d'un programme que cet étudiant a créé lui-même
+    (section "Programme" de son espace), à partir de son id. Ne contient
+    PAS les chapitres de ces matières, ni les examens/devoirs : une fois
+    que tu as choisi une matière précise dans cette liste, utilise
+    consulter_matiere_programme pour voir ses chapitres ; pour les
+    examens/devoirs de ce programme (qui peuvent couvrir plusieurs
+    matières/chapitres à la fois), utilise consulter_examens_programme.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        structure = _obtenir_structure_programme(user_id, programme_id)
+        if structure is None:
+            return "Ce programme est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return structure
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_programme : {e}")
+        return "Erreur : impossible de consulter ce programme, réessaie."
+
+
+@mcp_espace.tool()
+def ajouter_programme(niveau: str, ctx: Context, nom: str = "") -> str:
+    """
+    Crée un nouveau programme (ex: "Terminale S", "3ème") pour CET
+    utilisateur, dans sa section "Programme". `niveau` est le texte
+    libre du niveau scolaire, `nom` un label optionnel s'il en donne un.
+    Utilise cet outil quand l'utilisateur veut structurer une nouvelle
+    année/classe, pas pour ajouter une matière à un programme déjà
+    existant (voir ajouter_matiere). N'utilise JAMAIS cet outil sur une
+    supposition -- si tu n'es pas sûr que l'utilisateur veut vraiment
+    créer un nouveau programme, demande-lui de préciser avant d'agir.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ligne = _ajouter_programme(user_id, niveau, nom or None)
+        return f"Programme créé (id {ligne['id']}) : {ligne['niveau']}" + (f" — {ligne['nom']}" if ligne.get("nom") else "")
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_programme : {e}")
+        return "Erreur : impossible de créer ce programme, réessaie."
+
+
+@mcp_espace.tool()
+def modifier_programme(programme_id: str, ctx: Context, niveau: str = "", nom: str = "") -> str:
+    """
+    Modifie le niveau et/ou le nom d'un programme existant de CET
+    utilisateur. Laisse un champ vide ("") pour ne pas le changer -- ne
+    touche QUE les champs fournis. Ne modifie pas les matières/chapitres
+    à l'intérieur (voir modifier_matiere, modifier_chapitre).
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ligne = _modifier_programme(user_id, programme_id, niveau or None, nom if nom else None)
+        if ligne is None:
+            return "Ce programme est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return f"Programme modifié : {ligne.get('niveau')}" + (f" — {ligne['nom']}" if ligne.get("nom") else "")
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_programme : {e}")
+        return "Erreur : impossible de modifier ce programme, réessaie."
+
+
+@mcp_espace.tool(annotations=ToolAnnotations(destructive_hint=True))
+def supprimer_programme(programme_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT un programme de CET utilisateur, ainsi que
+    TOUT son contenu (matières, chapitres, documents, exercices).
+    SENSIBLE : demande toujours confirmation avant exécution, quelle que
+    soit la formulation de la demande.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ok = _supprimer_programme(user_id, programme_id)
+        if not ok:
+            return "Ce programme est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return "Programme supprimé, avec tout son contenu."
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_programme : {e}")
+        return "Erreur : impossible de supprimer ce programme, réessaie."
+
+
+@mcp_espace.tool()
+def ajouter_matiere(programme_id: str, nom: str, ctx: Context, limites: str = "") -> str:
+    """
+    Ajoute une matière à un programme existant de CET utilisateur (ex:
+    "Mathématiques" dans son programme "Terminale S"). `limites` est une
+    description optionnelle du cadre officiel (pour savoir ce qui est
+    "hors programme"). N'utilise JAMAIS cet outil sur une supposition --
+    si l'utilisateur n'a pas clairement demandé d'ajouter CETTE matière
+    à CE programme, demande-lui de confirmer avant d'agir.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ligne = _ajouter_matiere(user_id, programme_id, nom, limites or None)
+        if ligne is None:
+            return "Ce programme est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return f"Matière ajoutée (id {ligne['id']}) : {ligne['nom']}"
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_matiere : {e}")
+        return "Erreur : impossible d'ajouter cette matière, réessaie."
+
+
+@mcp_espace.tool()
+def modifier_matiere(matiere_id: str, ctx: Context, nom: str = "", limites: str = "") -> str:
+    """
+    Modifie le nom et/ou les limites de cadre officiel d'une matière
+    existante de CET utilisateur. Laisse un champ vide ("") pour ne pas
+    le changer.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ligne = _modifier_matiere(user_id, matiere_id, nom or None, limites if limites else None)
+        if ligne is None:
+            return "Cette matière est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return f"Matière modifiée : {ligne.get('nom')}"
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_matiere : {e}")
+        return "Erreur : impossible de modifier cette matière, réessaie."
+
+
+@mcp_espace.tool(annotations=ToolAnnotations(destructive_hint=True))
+def supprimer_matiere(matiere_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT une matière de CET utilisateur, avec tous
+    ses chapitres/documents/exercices. SENSIBLE : demande toujours
+    confirmation avant exécution.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ok = _supprimer_matiere(user_id, matiere_id)
+        if not ok:
+            return "Cette matière est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return "Matière supprimée, avec tout son contenu."
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_matiere : {e}")
+        return "Erreur : impossible de supprimer cette matière, réessaie."
+
+
+@mcp_espace.tool()
+def ajouter_chapitre(matiere_id: str, nom: str, ctx: Context, ordre: int = 0, limites: str = "") -> str:
+    """
+    Ajoute un chapitre à une matière existante de CET utilisateur.
+    `ordre` contrôle sa position d'affichage (0 = premier). `limites`
+    est une description optionnelle du cadre officiel pour ce chapitre.
+    N'utilise JAMAIS cet outil sur une supposition -- si l'utilisateur
+    n'a pas clairement demandé d'ajouter CE chapitre à CETTE matière,
+    demande-lui de confirmer avant d'agir.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ligne = _ajouter_chapitre(user_id, matiere_id, nom, ordre, limites or None)
+        if ligne is None:
+            return "Cette matière est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return f"Chapitre ajouté (id {ligne['id']}) : {ligne['nom']}"
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_chapitre : {e}")
+        return "Erreur : impossible d'ajouter ce chapitre, réessaie."
+
+
+@mcp_espace.tool()
+def modifier_chapitre(chapitre_id: str, ctx: Context, nom: str = "", ordre: int = -1, limites: str = "") -> str:
+    """
+    Modifie le nom, l'ordre d'affichage et/ou les limites d'un chapitre
+    existant de CET utilisateur. Laisse `nom`/`limites` vides ("") et
+    `ordre` à -1 pour ne pas changer le champ correspondant.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ligne = _modifier_chapitre(user_id, chapitre_id, nom or None, ordre if ordre >= 0 else None, limites if limites else None)
+        if ligne is None:
+            return "Ce chapitre est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return f"Chapitre modifié : {ligne.get('nom')}"
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_chapitre : {e}")
+        return "Erreur : impossible de modifier ce chapitre, réessaie."
+
+
+@mcp_espace.tool(annotations=ToolAnnotations(destructive_hint=True))
+def supprimer_chapitre(chapitre_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT un chapitre de CET utilisateur, avec ses
+    documents/exercices. SENSIBLE : demande toujours confirmation avant
+    exécution.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ok = _supprimer_chapitre(user_id, chapitre_id)
+        if not ok:
+            return "Ce chapitre est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return "Chapitre supprimé, avec son contenu."
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_chapitre : {e}")
+        return "Erreur : impossible de supprimer ce chapitre, réessaie."
+
+
+@mcp_espace.tool()
+def ajouter_document_programme(chapitre_id: str, titre: str, url_ou_contenu: str, ctx: Context) -> str:
+    """
+    Ajoute un document à un chapitre du programme de CET utilisateur :
+    `url_ou_contenu` est SOIT un lien (ex: une URL de cours en ligne),
+    SOIT un texte direct (ex: un résumé de cours écrit dans le
+    message). Pour un fichier déjà présent dans sa bibliothèque, utilise
+    plutôt classer_document_dans_programme.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ligne = _ajouter_document_programme(user_id, chapitre_id, titre, url_ou_contenu)
+        if ligne is None:
+            return "Ce chapitre est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return f"Document ajouté (id {ligne['id']}) : {ligne['titre']}"
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_document_programme : {e}")
+        return "Erreur : impossible d'ajouter ce document, réessaie."
+
+
+@mcp_espace.tool()
+def modifier_document_programme(document_id: str, ctx: Context, titre: str = "", url_ou_contenu: str = "") -> str:
+    """
+    Modifie le titre et/ou le contenu (texte ou lien) d'un document
+    existant du programme de CET utilisateur. Laisse un champ vide ("")
+    pour ne pas le changer.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ligne = _modifier_document_programme(user_id, document_id, titre or None, url_ou_contenu or None)
+        if ligne is None:
+            return "Ce document est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return f"Document modifié : {ligne.get('titre')}"
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_document_programme : {e}")
+        return "Erreur : impossible de modifier ce document, réessaie."
+
+
+@mcp_espace.tool(annotations=ToolAnnotations(destructive_hint=True))
+def supprimer_document_programme(document_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT un document du programme de CET utilisateur.
+    SENSIBLE : demande toujours confirmation avant exécution.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ok = _supprimer_document_programme(user_id, document_id)
+        if not ok:
+            return "Ce document est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return "Document supprimé."
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_document_programme : {e}")
+        return "Erreur : impossible de supprimer ce document, réessaie."
+
+
+@mcp_espace.tool()
+def ajouter_exercice_programme(chapitre_id: str, enonce: str, ctx: Context) -> str:
+    """
+    Ajoute un exercice (rattaché à UN SEUL chapitre) au programme de CET
+    utilisateur. Pour un exercice/devoir couvrant PLUSIEURS chapitres,
+    utilise ajouter_examen à la place.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ligne = _ajouter_exercice_programme(user_id, chapitre_id, enonce)
+        if ligne is None:
+            return "Ce chapitre est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return f"Exercice ajouté (id {ligne['id']})."
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_exercice_programme : {e}")
+        return "Erreur : impossible d'ajouter cet exercice, réessaie."
+
+
+@mcp_espace.tool()
+def modifier_exercice_programme(exercice_id: str, enonce: str, ctx: Context) -> str:
+    """
+    Remplace l'énoncé COMPLET d'un exercice existant du programme de CET
+    utilisateur.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ligne = _modifier_exercice_programme(user_id, exercice_id, enonce)
+        if ligne is None:
+            return "Cet exercice est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return "Exercice modifié."
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_exercice_programme : {e}")
+        return "Erreur : impossible de modifier cet exercice, réessaie."
+
+
+@mcp_espace.tool(annotations=ToolAnnotations(destructive_hint=True))
+def supprimer_exercice_programme(exercice_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT un exercice du programme de CET utilisateur.
+    SENSIBLE : demande toujours confirmation avant exécution.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ok = _supprimer_exercice_programme(user_id, exercice_id)
+        if not ok:
+            return "Cet exercice est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return "Exercice supprimé."
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_exercice_programme : {e}")
+        return "Erreur : impossible de supprimer cet exercice, réessaie."
+
+
+@mcp_espace.tool()
+def ajouter_examen(titre: str, type: str, chapitre_ids: list[str], ctx: Context) -> str:
+    """
+    Crée un examen/devoir/problème composite pour CET utilisateur,
+    couvrant UN OU PLUSIEURS chapitres (potentiellement de matières
+    différentes, dans le même programme). `type` doit valoir "examen",
+    "devoir" ou "probleme_composite". `chapitre_ids` est la liste des
+    ids de chapitres concernés -- tous doivent appartenir à cet
+    utilisateur.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    if type not in ("examen", "devoir", "probleme_composite"):
+        return 'Erreur : `type` doit valoir "examen", "devoir" ou "probleme_composite".'
+    try:
+        ligne = _ajouter_examen(user_id, titre, type, chapitre_ids)
+        if ligne is None:
+            return "Un ou plusieurs chapitres sont introuvables, ou ne correspondent pas à cet utilisateur."
+        return f"Examen créé (id {ligne['id']}) : {ligne['titre']} ({len(chapitre_ids)} chapitre(s))."
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_examen : {e}")
+        return "Erreur : impossible de créer cet examen, réessaie."
+
+
+@mcp_espace.tool()
+def modifier_examen(examen_id: str, ctx: Context, titre: str = "", type: str = "", chapitre_ids: list[str] | None = None) -> str:
+    """
+    Modifie le titre, le type et/ou la liste des chapitres couverts
+    d'un examen existant de CET utilisateur. Laisse `titre`/`type`
+    vides ("") et `chapitre_ids` non fourni pour ne pas changer le champ
+    correspondant -- fournir `chapitre_ids` REMPLACE la liste entière,
+    pas un ajout.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    if type and type not in ("examen", "devoir", "probleme_composite"):
+        return 'Erreur : `type` doit valoir "examen", "devoir" ou "probleme_composite".'
+    try:
+        ligne = _modifier_examen(user_id, examen_id, titre or None, type or None, chapitre_ids)
+        if ligne is None:
+            return "Cet examen est introuvable, ou un chapitre fourni ne correspond pas à cet utilisateur."
+        return f"Examen modifié : {ligne.get('titre')}"
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_examen : {e}")
+        return "Erreur : impossible de modifier cet examen, réessaie."
+
+
+@mcp_espace.tool(annotations=ToolAnnotations(destructive_hint=True))
+def supprimer_examen(examen_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT un examen/devoir/problème composite de CET
+    utilisateur (ne supprime PAS les chapitres qu'il couvrait, juste
+    l'examen lui-même). SENSIBLE : demande toujours confirmation avant
+    exécution.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ok = _supprimer_examen(user_id, examen_id)
+        if not ok:
+            return "Cet examen est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return "Examen supprimé."
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_examen : {e}")
+        return "Erreur : impossible de supprimer cet examen, réessaie."
+
+
+@mcp_espace.tool()
+def annuler_derniere_modification(ctx: Context) -> str:
+    """
+    Annule le DERNIER ajout ou la dernière modification de programme
+    faite par toi (via ajouter_programme, modifier_matiere,
+    ajouter_chapitre, etc.) pour CET utilisateur -- ne concerne PAS les
+    suppressions, qui demandent déjà une confirmation avant d'être
+    exécutées. À utiliser quand l'utilisateur dit explicitement vouloir
+    annuler/revenir en arrière sur ta dernière écriture.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        resultat = _annuler_derniere_modification(user_id)
+        if resultat is None:
+            return "Rien à annuler : aucune modification récente trouvée."
+        return f"Dernière modification annulée ({resultat['type_cible']}, action initiale : {resultat['action']})."
+    except Exception as e:
+        logging.error(f"ERREUR outil annuler_derniere_modification : {e}")
+        return "Erreur : impossible d'annuler, réessaie."
+
+
+@mcp_espace.tool()
+def consulter_matiere_programme(matiere_id: str, ctx: Context) -> str:
+    """
+    Lit les chapitres (avec leurs limites de cadre officiel si
+    renseignées) d'UNE matière précise d'un programme de cet
+    utilisateur, à partir de son id. Ne contient PAS le contenu des
+    chapitres (documents/exercices) : une fois que tu as choisi un
+    chapitre précis dans cette liste, utilise
+    consulter_chapitre_programme. Utilise cet outil seulement après
+    avoir consulté consulter_programme et choisi la matière qui
+    t'intéresse -- jamais à l'aveugle sans connaître l'id de la matière
+    au préalable.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        chapitres = _obtenir_chapitres_matiere(user_id, matiere_id)
+        if chapitres is None:
+            return "Cette matière est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return chapitres
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_matiere_programme : {e}")
+        return "Erreur : impossible de consulter cette matière, réessaie."
+
+
+@mcp_espace.tool()
+def consulter_chapitre_programme(chapitre_id: str, ctx: Context) -> str:
+    """
+    Lit le contenu réel (documents + exercices) d'UN chapitre précis
+    d'un programme de cet utilisateur, à partir de son id. Utilise cet
+    outil seulement après avoir consulté consulter_matiere_programme et
+    choisi le chapitre qui t'intéresse dans sa liste -- jamais à
+    l'aveugle sans connaître l'id du chapitre au préalable.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        contenu = _obtenir_contenu_chapitre(user_id, chapitre_id)
+        if contenu is None:
+            return "Ce chapitre est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return contenu
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_chapitre_programme : {e}")
+        return "Erreur : impossible de consulter ce chapitre, réessaie."
+
+
+@mcp_espace.tool()
+def consulter_examens_programme(programme_id: str, ctx: Context) -> str:
+    """
+    Lit les examens/devoirs (titre, type, chapitres couverts) d'un
+    programme de cet utilisateur, à partir de son id. Un examen peut
+    couvrir plusieurs chapitres à la fois, c'est pourquoi il se
+    consulte au niveau du programme entier et non via
+    consulter_chapitre_programme. Aucun contenu/énoncé détaillé n'existe
+    pour un examen -- seulement son titre, son type et les chapitres
+    qu'il couvre.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        texte = _obtenir_examens_programme(user_id, programme_id)
+        if texte is None:
+            return "Ce programme est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
+        return texte
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_examens_programme : {e}")
+        return "Erreur : impossible de consulter les examens de ce programme, réessaie."
