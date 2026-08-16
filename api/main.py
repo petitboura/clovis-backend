@@ -163,12 +163,34 @@ app.mount("/mcp/github", mcp_github.streamable_http_app(stateless_http=True, str
 # streamable_http_app() ne cree donc bien qu'une seule Route MCP a
 # republier ici, les routes de decouverte RFC 9728 restant gerees a part
 # ci-dessous exactement comme avant.
+#
+# CORRECTIF (16/08, suite) -- premiere version de ce correctif buguee :
+# elle republiait la Route MCP seule, mais oubliait que
+# AuthenticationMiddleware (verifie le jeton Bearer via BearerAuthBackend)
+# et AuthContextMiddleware ne sont PAS attaches a la route elle-meme --
+# streamable_http_app() les attache au niveau de l'app Starlette du
+# sous-serveur (parametre `middleware=` de Starlette(...)), qui disparait
+# completement quand on prend juste la Route et qu'on saute le Mount.
+# Consequence concrete : la route repondait TOUJOURS 401 "Authentication
+# required", meme avec un jeton Supabase valide, car
+# RequireAuthMiddleware (lui bien present, cote endpoint) lit
+# `scope["user"]` -- jamais rempli sans AuthenticationMiddleware en amont
+# -- Claude se connectait mais voyait "aucun outil disponible" (capture
+# d'ecran Bourama 16/08, apres deploiement du 1er correctif). Confirme
+# par test isole (TestClient) avant correctif ci-dessous.
+#
+# Fix : recreer la Route avec ce meme middleware, recupere directement
+# depuis `app_mcp_starlette.user_middleware` (liste construite par la
+# librairie elle-meme -- aucune valeur dupliquee/en dur), au lieu de
+# republier la Route brute.
 from starlette.routing import Route
 
 def _route_mcp_principale(app_mcp_starlette, chemin_complet):
     """Extrait l'unique Route MCP (chemin == chemin_complet) d'une app
-    Starlette generee par streamable_http_app(), pour republication
-    directe sur le routeur racine (jamais tel quel via app.mount)."""
+    Starlette generee par streamable_http_app(), et la reconstruit avec
+    le middleware d'authentification de cette meme app (sinon perdu),
+    pour republication directe sur le routeur racine (jamais tel quel
+    via app.mount)."""
     routes_trouvees = [
         r for r in app_mcp_starlette.routes
         if isinstance(r, Route) and r.path == chemin_complet
@@ -179,7 +201,13 @@ def _route_mcp_principale(app_mcp_starlette, chemin_complet):
             f"trouve {len(routes_trouvees)} -- verifier la config auth "
             f"(auth_server_provider ajouterait des routes supplementaires)."
         )
-    return routes_trouvees[0]
+    route_brute = routes_trouvees[0]
+    return Route(
+        route_brute.path,
+        endpoint=route_brute.endpoint,
+        methods=list(route_brute.methods) if route_brute.methods else None,
+        middleware=app_mcp_starlette.user_middleware,
+    )
 
 app.router.routes.append(
     _route_mcp_principale(
