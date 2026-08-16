@@ -90,7 +90,7 @@ def lister_comportements(agent_id: str, etudiant_id: str) -> list[dict]:
     try:
         res = (
             supabase.table("comportements_etudiants")
-            .select("id, texte, description")
+            .select("id, texte, description, lien_type, lien_id")
             .eq("agent_id", agent_id)
             .eq("etudiant_id", etudiant_id)
             .order("created_at")
@@ -100,7 +100,13 @@ def lister_comportements(agent_id: str, etudiant_id: str) -> list[dict]:
         logging.error(f"ERREUR SUPABASE (lecture comportements {agent_id}/{etudiant_id}) : {e}")
         return []
     return [
-        {"id": ligne["id"], "texte": ligne["texte"], "description": ligne.get("description") or ""}
+        {
+            "id": ligne["id"],
+            "texte": ligne["texte"],
+            "description": ligne.get("description") or "",
+            "lien_type": ligne.get("lien_type"),
+            "lien_id": ligne.get("lien_id"),
+        }
         for ligne in (res.data or [])
         if ligne.get("texte", "").strip()
     ]
@@ -186,19 +192,44 @@ def choisir_comportements_pertinents(message_utilisateur: str, comportements: li
         return []
 
 
-def ajouter_comportement(agent_id: str, etudiant_id: str, texte: str) -> dict:
+def ajouter_comportement(
+    agent_id: str, etudiant_id: str, texte: str, lien_type: str | None = None, lien_id: str | None = None
+) -> dict:
+    """
+    lien_type/lien_id (16/08/2026, demande Bourama) : rattache
+    optionnellement ce comportement à un emplacement du programme
+    ("programme"/"matiere"/"chapitre"/"document"/"exercice"/"examen").
+    L'appelant (core/bibliotheque_programme.py pour les outils MCP, ou
+    api/comportements_etudiants.py pour le REST) est responsable de
+    vérifier que cible_id appartient bien à cet étudiant AVANT
+    d'appeler cette fonction -- ce module ne revérifie pas la
+    propriété de la cible, même logique que le reste du fichier
+    (aucune vérification RLS/FK réelle, tout est fait côté code).
+    """
     texte = texte.strip()
     description = _generer_description(texte)
-    res = (
-        supabase.table("comportements_etudiants")
-        .insert({"agent_id": agent_id, "etudiant_id": etudiant_id, "texte": texte, "description": description})
-        .execute()
-    )
+    ligne_a_inserer = {
+        "agent_id": agent_id,
+        "etudiant_id": etudiant_id,
+        "texte": texte,
+        "description": description,
+        "lien_type": lien_type,
+        "lien_id": lien_id,
+    }
+    res = supabase.table("comportements_etudiants").insert(ligne_a_inserer).execute()
     ligne = res.data[0]
-    return {"id": ligne["id"], "texte": ligne["texte"], "description": ligne.get("description") or ""}
+    return {
+        "id": ligne["id"],
+        "texte": ligne["texte"],
+        "description": ligne.get("description") or "",
+        "lien_type": ligne.get("lien_type"),
+        "lien_id": ligne.get("lien_id"),
+    }
 
 
 def modifier_comportement(agent_id: str, etudiant_id: str, comportement_id: str, texte: str) -> dict | None:
+    """Modifie le texte -- ne touche jamais lien_type/lien_id (pas
+    demandé : un comportement lié le reste, seul son texte change)."""
     texte = texte.strip()
     description = _generer_description(texte)
     res = (
@@ -212,7 +243,13 @@ def modifier_comportement(agent_id: str, etudiant_id: str, comportement_id: str,
     if not res.data:
         return None
     ligne = res.data[0]
-    return {"id": ligne["id"], "texte": ligne["texte"], "description": ligne.get("description") or ""}
+    return {
+        "id": ligne["id"],
+        "texte": ligne["texte"],
+        "description": ligne.get("description") or "",
+        "lien_type": ligne.get("lien_type"),
+        "lien_id": ligne.get("lien_id"),
+    }
 
 
 def supprimer_comportement(agent_id: str, etudiant_id: str, comportement_id: str) -> bool:

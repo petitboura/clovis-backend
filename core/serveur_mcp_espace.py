@@ -27,7 +27,14 @@ Supabase est dupliquée ici plutôt qu'importée depuis les fichiers
 api/*.py -- seuls les modules core/*.py (jamais api/*.py) sont
 réutilisés, quand ils existent déjà (core/comportements_etudiants.py,
 core/bibliotheque_fichiers.py, core/bibliotheque_rag.py,
-core/codes_partage.py).
+core/codes_partage.py, core/bibliotheque_programme.py).
+
+Liens bibliothèque <-> programme <-> comportements (16/08/2026, demande
+Bourama) : voir core/bibliotheque_programme.py pour la logique
+(classement many-to-many bibliothèque/programme, propriétaire des liens
+de comportement). documents_programme (ancien mécanisme titre+lien
+rattaché uniquement à un chapitre) n'est pas touché ni remplacé -- ce
+qui suit s'ajoute en parallèle, la coexistence est assumée.
 
 Clovis est mono-agent (agent Lirinus de l'ancien système
 établissement/enseignant/étudiant : n'existe pas ici, résidu
@@ -81,6 +88,15 @@ from core.comportements_etudiants import (
     ajouter_comportement as _ajouter_comportement,
     modifier_comportement as _modifier_comportement,
     supprimer_comportement as _supprimer_comportement,
+)
+from core.bibliotheque_programme import (
+    classer_document as _classer_document,
+    declasser_document as _declasser_document,
+    lister_emplacements_document as _lister_emplacements_document,
+    proprietaire_lien_comportement as _proprietaire_lien_comportement,
+    libelle_emplacement as _libelle_emplacement,
+    TYPES_EMPLACEMENT_BIBLIOTHEQUE,
+    TYPES_LIEN_COMPORTEMENT,
 )
 
 _SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -145,11 +161,16 @@ def lister_bibliotheque(ctx: Context) -> str:
         return "Erreur : impossible de lister la bibliothèque, réessaie."
     if not fichiers:
         return "Bibliothèque vide pour l'instant."
-    lignes = [
-        f"- id={f['id']} | {f.get('description') or f.get('nom_fichier')} "
-        f"({f.get('type_mime', 'inconnu')}, ajouté le {f.get('created_at', '?')})"
-        for f in fichiers
-    ]
+    lignes = []
+    for f in fichiers:
+        ligne = (
+            f"- id={f['id']} | {f.get('description') or f.get('nom_fichier')} "
+            f"({f.get('type_mime', 'inconnu')}, ajouté le {f.get('created_at', '?')})"
+        )
+        emplacements = _lister_emplacements_document(f["id"])
+        if emplacements:
+            ligne += " | classé dans : " + ", ".join(e["libelle"] for e in emplacements)
+        lignes.append(ligne)
     return "\n".join(lignes)
 
 
@@ -227,7 +248,10 @@ def ajouter_texte_bibliotheque(contenu: str, titre: str, ctx: Context) -> str:
 
 
 @mcp_espace.tool()
-def ajouter_document_bibliotheque(nom_fichier: str, type_mime: str, contenu_base64: str, titre: str, description: str, ctx: Context) -> str:
+def ajouter_document_bibliotheque(
+    nom_fichier: str, type_mime: str, contenu_base64: str, titre: str, description: str, ctx: Context,
+    type_emplacement: str = "", emplacement_id: str = "",
+) -> str:
     """
     Ajoute un fichier (PDF, image, audio ou vidéo) à la bibliothèque
     personnelle de cet utilisateur -- même effet que s'il l'avait
@@ -238,6 +262,10 @@ def ajouter_document_bibliotheque(nom_fichier: str, type_mime: str, contenu_base
     MP4/WebM/MOV). `contenu_base64` : contenu du fichier encodé en
     base64 (jamais de contenu brut binaire). `titre`/`description` :
     optionnels, repli sur le nom du fichier si absents. Limite : 50 Mo.
+    `type_emplacement`/`emplacement_id` : optionnels -- si fournis
+    ("programme"/"matiere"/"chapitre" + son id), classe directement ce
+    document à cet endroit du programme dès l'ajout (équivalent à
+    appeler classer_document_dans_programme juste après).
     """
     user_id = _user_id_authentifie(ctx)
     if not user_id:
@@ -304,7 +332,18 @@ def ajouter_document_bibliotheque(nom_fichier: str, type_mime: str, contenu_base
     except Exception as e:
         logging.error(f"ERREUR propagation ajouter_document_bibliotheque : {e}")
 
-    return f"Fichier ajouté (id {ligne['id']})."
+    message = f"Fichier ajouté (id {ligne['id']})."
+    if type_emplacement and emplacement_id:
+        if type_emplacement not in TYPES_EMPLACEMENT_BIBLIOTHEQUE:
+            message += f" Attention : type d'emplacement invalide ({type_emplacement}), pas classé dans le programme."
+        else:
+            resultat = _classer_document(user_id, ligne["id"], type_emplacement, emplacement_id)
+            if resultat["ok"]:
+                libelle = _libelle_emplacement(type_emplacement, emplacement_id) or emplacement_id
+                message += f" Classé dans : {libelle}."
+            else:
+                message += f" Attention : pas classé dans le programme ({resultat['erreur']})"
+    return message
 
 
 @mcp_espace.tool(annotations=ToolAnnotations(destructive_hint=True))
@@ -339,6 +378,52 @@ def supprimer_document_bibliotheque(fichier_id: str, ctx: Context) -> str:
         logging.error(f"ERREUR outil supprimer_document_bibliotheque (suppression) : {e}")
         return "Erreur : impossible de supprimer ce document, réessaie."
     return "Document supprimé."
+
+
+# --- Classement des documents dans le programme (16/08, demande
+# Bourama) : un document de la bibliothèque peut être classé à un ou
+# plusieurs emplacements du programme (programme entier / matière /
+# chapitre) -- c'est ce classement qui fait qu'un document "ajouté dans
+# le programme" apparaît dans la bibliothèque avec un libellé, et
+# inversement qu'un document de la bibliothèque peut être rangé dans le
+# programme.
+
+@mcp_espace.tool()
+def classer_document_dans_programme(fichier_id: str, type_emplacement: str, emplacement_id: str, ctx: Context) -> str:
+    """
+    Classe un document de la bibliothèque personnelle à un emplacement
+    du programme de cet utilisateur. `type_emplacement` : "programme",
+    "matiere" ou "chapitre". `emplacement_id` : id de cet élément
+    précis du programme. Un même document peut être classé à plusieurs
+    emplacements (appeler cet outil plusieurs fois) ; reclasser au même
+    endroit ne crée pas de doublon.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    if type_emplacement not in TYPES_EMPLACEMENT_BIBLIOTHEQUE:
+        return f"Erreur : type d'emplacement invalide, utilise l'un de {TYPES_EMPLACEMENT_BIBLIOTHEQUE}."
+    resultat = _classer_document(user_id, fichier_id, type_emplacement, emplacement_id)
+    if not resultat["ok"]:
+        return f"Erreur : {resultat['erreur']}"
+    libelle = _libelle_emplacement(type_emplacement, emplacement_id) or emplacement_id
+    return f"Document classé dans : {libelle}."
+
+
+@mcp_espace.tool()
+def retirer_document_du_programme(fichier_id: str, type_emplacement: str, emplacement_id: str, ctx: Context) -> str:
+    """
+    Retire un document de la bibliothèque d'un emplacement du programme
+    (le document reste dans la bibliothèque, seul ce classement précis
+    disparaît). Mêmes paramètres que classer_document_dans_programme.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    resultat = _declasser_document(user_id, fichier_id, type_emplacement, emplacement_id)
+    if not resultat["ok"]:
+        return f"Erreur : {resultat['erreur']}"
+    return "Document retiré de cet emplacement du programme."
 
 
 # --- Mémoire (résumé long-terme, "Ma mémoire" de "Mon espace") --------
@@ -432,19 +517,27 @@ def lister_comportements(ctx: Context) -> str:
         return "Erreur : impossible de lister les comportements, réessaie."
     if not comportements:
         return "Aucun comportement enregistré pour l'instant."
-    lignes = [
-        f"- id={c['id']} | {c['description']}\n  texte : {c['texte']}"
-        for c in comportements
-    ]
+    lignes = []
+    for c in comportements:
+        ligne = f"- id={c['id']} | {c['description']}\n  texte : {c['texte']}"
+        if c.get("lien_type") and c.get("lien_id"):
+            libelle = _libelle_emplacement(c["lien_type"], c["lien_id"]) if c["lien_type"] in TYPES_EMPLACEMENT_BIBLIOTHEQUE else None
+            ligne += f"\n  lié à : {libelle or (c['lien_type'] + ' ' + c['lien_id'])}"
+        lignes.append(ligne)
     return "\n".join(lignes)
 
 
 @mcp_espace.tool()
-def ajouter_comportement_espace(texte: str, ctx: Context) -> str:
+def ajouter_comportement_espace(texte: str, ctx: Context, type_lien: str = "", lien_id: str = "") -> str:
     """
     Enregistre une nouvelle instruction personnelle pour cet utilisateur
     (section "Mes comportements"). S'ajoute EN PLUS des comportements
-    déjà existants, ne les remplace pas.
+    déjà existants, ne les remplace pas. `type_lien`/`lien_id` :
+    optionnels -- si fournis, rattache ce comportement à un endroit
+    précis du programme ("programme"/"matiere"/"chapitre"/"document"/
+    "exercice"/"examen" + son id), comme si l'utilisateur avait rempli
+    une section dédiée à cet endroit du programme. Sans ces deux
+    paramètres, comportement générique comme avant (s'applique partout).
     """
     user_id = _user_id_authentifie(ctx)
     if not user_id:
@@ -452,12 +545,23 @@ def ajouter_comportement_espace(texte: str, ctx: Context) -> str:
     texte = (texte or "").strip()
     if not texte:
         return "Erreur : texte requis."
+    type_lien_final, lien_id_final = None, None
+    if type_lien and lien_id:
+        if type_lien not in TYPES_LIEN_COMPORTEMENT:
+            return f"Erreur : type de lien invalide, utilise l'un de {TYPES_LIEN_COMPORTEMENT}."
+        if _proprietaire_lien_comportement(type_lien, lien_id) != user_id:
+            return "Erreur : cet emplacement du programme est introuvable ou ne t'appartient pas."
+        type_lien_final, lien_id_final = type_lien, lien_id
     try:
-        ligne = _ajouter_comportement(AGENT_ID_ESPACE, user_id, texte)
+        ligne = _ajouter_comportement(AGENT_ID_ESPACE, user_id, texte, type_lien_final, lien_id_final)
     except Exception as e:
         logging.error(f"ERREUR outil ajouter_comportement_espace : {e}")
         return "Erreur : impossible d'enregistrer ce comportement, réessaie."
-    return f"Comportement enregistré (id {ligne['id']}) : {ligne['description']}"
+    message = f"Comportement enregistré (id {ligne['id']}) : {ligne['description']}"
+    if type_lien_final:
+        libelle = _libelle_emplacement(type_lien_final, lien_id_final) if type_lien_final in TYPES_EMPLACEMENT_BIBLIOTHEQUE else None
+        message += f" (lié à : {libelle or (type_lien_final + ' ' + lien_id_final)})"
+    return message
 
 
 @mcp_espace.tool()
