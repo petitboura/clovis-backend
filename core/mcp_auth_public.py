@@ -140,8 +140,19 @@ def user_id_depuis_contexte(ctx: Context) -> str | None:
     depuis les query params (contrairement à l'ancien mécanisme interne
     user_id/agent_id de core/serveur_mcp_generation.py, propre aux
     serveurs internes en localhost, pas à ceux-ci).
+
+    CORRECTIF (16/08) -- retournait TOUJOURS None ("utilisateur non
+    authentifié" sur tous les outils Mon espace, capture d'écran
+    Bourama, ex. lire_memoire), même avec un jeton Supabase valide.
+    Cause : `request.auth` (rempli par AuthenticationMiddleware de
+    Starlette) est un `AuthCredentials` -- objet qui ne porte QUE
+    `.scopes`, jamais de `.subject`. Le vrai `subject` (voir
+    VerificateurJetonSupabase.verify_token ci-dessus, qui le renseigne
+    bien) vit sur l'AccessToken accroché à `request.user`
+    (AuthenticatedUser), pas sur `request.auth`.
     """
-    acces = ctx.request_context.request.auth
-    if acces is None or not hasattr(acces, "subject"):
+    utilisateur = ctx.request_context.request.user
+    jeton_acces = getattr(utilisateur, "access_token", None)
+    if jeton_acces is None:
         return None
-    return acces.subject
+    return jeton_acces.subject
