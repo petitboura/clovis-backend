@@ -75,6 +75,7 @@ from core.mcp_auth_public import (
     user_id_depuis_contexte as _user_id_verifie,
 )
 from core.programme_llm import (
+    lister_mes_programmes_legers as _lister_mes_programmes_legers,
     obtenir_structure_programme as _obtenir_structure_programme,
     obtenir_chapitres_matiere as _obtenir_chapitres_matiere,
     obtenir_contenu_chapitre as _obtenir_contenu_chapitre,
@@ -743,6 +744,35 @@ def lire_conversation_historique(conversation_id: str, ctx: Context) -> str:
 # (auth OAuth réelle via _user_id_authentifie au lieu du query param
 # interne user_id, décorateur @mcp_espace.tool()). Docstrings et
 # comportement des outils repris à l'identique de mcp_generation.
+
+@mcp_espace.tool()
+def lister_mes_programmes(ctx: Context) -> str:
+    """
+    Liste légère (id, niveau, nom) de TOUS les programmes de cet
+    utilisateur -- point de départ obligatoire avant tout autre outil
+    "programme" : ils ont tous besoin d'un programme_id/matiere_id/
+    chapitre_id en entrée, jamais à deviner. Appelle cet outil en premier
+    dès que l'utilisateur parle de son programme/ses matières/ses
+    chapitres sans te donner d'id, pour savoir quels programmes existent
+    et récupérer leurs ids. Ne contient PAS les matières/chapitres à
+    l'intérieur (voir consulter_programme une fois l'id du programme
+    choisi).
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        programmes = _lister_mes_programmes_legers(user_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil lister_mes_programmes : {e}")
+        return "Erreur : impossible de lister les programmes, réessaie."
+    if not programmes:
+        return "Aucun programme enregistré pour l'instant."
+    return "\n".join(
+        f"- {p['niveau']}" + (f" — {p['nom']}" if p.get("nom") else "") + f" (id: {p['id']})"
+        for p in programmes
+    )
+
 
 @mcp_espace.tool()
 def consulter_programme(programme_id: str, ctx: Context) -> str:
