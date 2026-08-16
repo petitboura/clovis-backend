@@ -42,7 +42,7 @@ import tempfile
 from supabase import create_client
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
-from comportements_etudiants import _generer_description  # noqa: E402
+from comportements_etudiants import _generer_skill  # noqa: E402
 from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien  # noqa: E402
 from bibliotheque_rag import indexer_pdf_bibliotheque, indexer_texte_bibliotheque  # noqa: E402
 
@@ -78,7 +78,7 @@ def _generer_code_unique() -> str:
     raise RuntimeError("Impossible de générer un code unique après plusieurs tentatives")
 
 
-_COLONNES_CODE = "id, code, nom, comportement_texte, comportement_description, programme_id, partage_bibliotheque, texte_libre, actif, created_at, updated_at"
+_COLONNES_CODE = "id, code, nom, comportement_texte, comportement_description, comportement_skill_md, programme_id, partage_bibliotheque, texte_libre, actif, created_at, updated_at"
 
 
 def lister_mes_codes(proprietaire_id: str) -> list[dict]:
@@ -105,14 +105,15 @@ def creer_code(
     texte_libre: str | None = None,
 ) -> dict:
     comportement_texte = (comportement_texte or "").strip() or None
-    comportement_description = _generer_description(comportement_texte) if comportement_texte else None
+    skill = _generer_skill(comportement_texte) if comportement_texte else None
 
     ligne = {
         "proprietaire_id": proprietaire_id,
         "code": _generer_code_unique(),
         "nom": (nom or "").strip() or None,
         "comportement_texte": comportement_texte,
-        "comportement_description": comportement_description,
+        "comportement_description": skill["description"] if skill else None,
+        "comportement_skill_md": skill["skill_md"] if skill else None,
         "programme_id": programme_id or None,
         "partage_bibliotheque": bool(partage_bibliotheque),
         "texte_libre": (texte_libre or "").strip() or None,
@@ -140,7 +141,9 @@ def modifier_code(
     if comportement_texte is not None:
         comportement_texte = comportement_texte.strip() or None
         patch["comportement_texte"] = comportement_texte
-        patch["comportement_description"] = _generer_description(comportement_texte) if comportement_texte else None
+        skill = _generer_skill(comportement_texte) if comportement_texte else None
+        patch["comportement_description"] = skill["description"] if skill else None
+        patch["comportement_skill_md"] = skill["skill_md"] if skill else None
     if programme_id is not None:
         patch["programme_id"] = programme_id or None
     if partage_bibliotheque is not None:
@@ -312,7 +315,7 @@ def lister_comportements_recus(receveur_id: str) -> list[dict]:
     jamais injecté d'office, comme pour les comportements propres).
     id = 'recu:<code_id>' (jamais de collision possible avec un id de
     comportements_etudiants, qui est un uuid nu) -- voir
-    obtenir_comportement_texte_recu pour la résolution inverse."""
+    obtenir_comportement_skill_recu pour la résolution inverse."""
     rattachements = lister_mes_rattachements(receveur_id)
     code_ids = [r["code_id"] for r in rattachements if r["a_comportement"]]
     if not code_ids:
@@ -335,13 +338,13 @@ def lister_comportements_recus(receveur_id: str) -> list[dict]:
     ]
 
 
-def obtenir_comportement_texte_recu(receveur_id: str, id_recu: str) -> str | None:
-    """Texte complet d'un comportement REÇU, à partir de l'id préfixé
-    'recu:<code_id>' -- utilisé par l'outil consulter_comportement quand
-    il reçoit un id de cette forme plutôt qu'un id de
-    comportements_etudiants classique. Vérifie que le rattachement
-    existe bien et que le code est toujours actif (jamais de fuite vers
-    un code qu'on n'a pas/plus)."""
+def obtenir_comportement_skill_recu(receveur_id: str, id_recu: str) -> str | None:
+    """Skill complet (frontmatter + corps markdown) d'un comportement
+    REÇU, à partir de l'id préfixé 'recu:<code_id>' -- utilisé par
+    l'outil consulter_comportement quand il reçoit un id de cette forme
+    plutôt qu'un id de comportements_etudiants classique. Vérifie que le
+    rattachement existe bien et que le code est toujours actif (jamais
+    de fuite vers un code qu'on n'a pas/plus)."""
     if not id_recu.startswith("recu:"):
         return None
     code_id = id_recu[len("recu:"):]
@@ -358,18 +361,18 @@ def obtenir_comportement_texte_recu(receveur_id: str, id_recu: str) -> str | Non
             return None
         ligne = (
             supabase.table("codes_partage")
-            .select("comportement_texte")
+            .select("comportement_skill_md")
             .eq("id", code_id)
             .eq("actif", True)
             .maybe_single()
             .execute()
         )
     except Exception as e:
-        logging.error(f"ERREUR SUPABASE (lecture comportement reçu {code_id}) : {e}")
+        logging.error(f"ERREUR SUPABASE (lecture skill comportement reçu {code_id}) : {e}")
         return None
     if not ligne or not ligne.data:
         return None
-    return ligne.data.get("comportement_texte")
+    return ligne.data.get("comportement_skill_md")
 
 
 def lister_programmes_recus_legers(receveur_id: str) -> list[dict]:

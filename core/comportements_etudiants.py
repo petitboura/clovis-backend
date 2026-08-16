@@ -6,17 +6,26 @@ s'applique EN PLUS du system_prompt déjà résolu (généraliste, matière
 d'un enseignant, ou "sans enseignant"), quel que soit l'agent -- pas
 seulement les agents à contenu dynamique par matière.
 
-Mécanisme "à la skill" (13/08/2026, demande Bourama) : chaque
-comportement a maintenant une DESCRIPTION courte (générée
-automatiquement à partir du texte, jamais saisie par l'étudiant) en plus
-du TEXTE long. Le texte complet n'est plus jamais injecté d'office --
-un petit routeur (même modèle/pattern que _router_outils dans
-core/main.py, voir choisir_comportements_pertinents ci-dessous) décide,
-à chaque message, quels comportements (id + description SEULEMENT) sont
-des candidats plausibles. Ces candidats sont annoncés au grand modèle
-comme un outil disponible (consulter_comportement, voir
-core/serveur_mcp_generation.py) -- c'est le grand modèle, jamais ce
-fichier, qui décide en dernier ressort s'il va lire le texte complet.
+Mécanisme "à la skill" (13/08/2026, demande Bourama), devenu un VRAI
+skill Claude (16/08/2026, demande Bourama : "exactement un skill claude,
+aucune différence") : chaque comportement a une DESCRIPTION courte
+(générée automatiquement, jamais saisie par l'étudiant) ET un skill
+complet au format SKILL.md (frontmatter name/description + corps
+d'instructions markdown, voir _generer_skill ci-dessous -- même méthode
+que le skill "skill-creator" d'Anthropic). Le texte brut de l'étudiant
+n'est jamais injecté d'office -- un petit routeur (même modèle/pattern
+que _router_outils dans core/main.py, voir choisir_comportements_pertinents
+ci-dessous) décide, à chaque message, quels comportements (id +
+description SEULEMENT) sont des candidats plausibles. Ces candidats sont
+annoncés au grand modèle comme un outil disponible (consulter_comportement,
+voir core/serveur_mcp_generation.py) -- c'est le grand modèle, jamais ce
+fichier, qui décide en dernier ressort s'il va lire le skill complet.
+
+Ce même mécanisme est repris à l'identique dans core/codes_partage.py
+pour les comportements partagés par code (établissement/enseignant vers
+étudiant) -- toute autre section qui écrit ou affiche un comportement
+doit, de la même façon, produire un vrai skill via _generer_skill, jamais
+retomber sur du texte brut.
 
 Voir l'injection dans core/main.py::_construire_system_prompt et les
 endpoints dans api/comportements_etudiants.py.
@@ -25,6 +34,8 @@ endpoints dans api/comportements_etudiants.py.
 import json
 import logging
 import os
+import re
+import unicodedata
 
 from groq import Groq
 from supabase import create_client
@@ -41,45 +52,100 @@ supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
 logging.basicConfig(level=logging.INFO)
 
 # Même petit modèle rapide que le routeur d'outils existant (voir
-# MODELE_ROUTEUR_OUTILS dans core/main.py) -- pas de raison d'en
-# introduire un deuxième pour un rôle équivalent.
+# MODELE_ROUTEUR_OUTILS dans core/main.py) -- utilisé seulement pour le
+# routeur ci-dessous (choisir_comportements_pertinents), pas pour la
+# génération du skill (voir MODELE_SKILL, plus costaud, plus bas).
 MODELE_PETIT = "llama-3.1-8b-instant"
 
+# Même modèle "costaud" que le modèle principal de la cascade de chat
+# (GROQ_PRIMARY, core/main.py) -- écrire un skill complet (16/08/2026,
+# demande Bourama : "un modèle costaud") est un travail plus lourd qu'un
+# résumé d'une phrase, pas de raison de se limiter à MODELE_PETIT ici.
+MODELE_SKILL = "openai/gpt-oss-120b"
 
-def _generer_description(texte: str) -> str:
+_RE_FRONTMATTER = re.compile(r"^---\s*\n(.*?)\n---\s*\n?(.*)$", re.DOTALL)
+
+
+def _slugifier(texte: str) -> str:
+    """Identifiant court en minuscules, tirets, sans accents -- même
+    convention que le champ `name` d'un vrai SKILL.md."""
+    normalise = unicodedata.normalize("NFKD", texte).encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^a-z0-9]+", "-", normalise.lower()).strip("-")
+    return slug[:64] or "comportement"
+
+
+def _skill_repli(texte: str) -> dict:
+    """Skill minimal construit sans appel LLM -- fail-safe utilisé
+    SEULEMENT si _generer_skill échoue, pour ne jamais bloquer la
+    création/modification d'un comportement (une description imparfaite
+    vaut mieux qu'un enregistrement qui échoue)."""
+    description = texte if len(texte) <= 120 else texte[:117] + "..."
+    skill_md = f"---\nname: {_slugifier(description)}\ndescription: {description}\n---\n\n{texte}\n"
+    return {"description": description, "skill_md": skill_md}
+
+
+def _generer_skill(texte: str) -> dict:
     """
-    Petit appel LLM qui résume `texte` (le comportement long écrit par
-    l'étudiant) en une description courte -- SEULE chose montrée au
-    routeur et au grand modèle avant qu'il ne décide de lire le texte
-    complet via l'outil consulter_comportement. Fail-safe (13/08) : si
-    l'appel échoue, on retombe sur une simple troncature plutôt que de
-    bloquer la création/modification du comportement -- une description
-    imparfaite vaut mieux qu'un enregistrement qui échoue.
+    Transforme l'instruction personnelle brute écrite par l'étudiant en un
+    vrai skill Claude (frontmatter name/description + corps d'instructions
+    markdown), en suivant la méthode du skill "skill-creator" (Anthropic) :
+    description à la troisième personne, qui dit CE QUE fait le skill ET
+    QUAND l'utiliser, riche en mots-clés de déclenchement ; corps en
+    instructions claires, impératives, structurées. Remplace totalement
+    l'ancien _generer_description (13/08) -- mêmes points d'appel
+    (ajouter_comportement/modifier_comportement ici, creer_code/
+    modifier_code dans core/codes_partage.py), donc toute façon de créer
+    un comportement -- l'IA elle-même via l'outil MCP, l'étudiant
+    directement dans "Mes comportements", ou un comportement partagé par
+    code -- produit désormais un skill, sans distinction (2026-08-16,
+    demande Bourama : "exactement un skill claude, aucune différence").
+
+    Fail-safe : toute erreur (appel LLM, format de réponse invalide) fait
+    retomber sur _skill_repli plutôt que de bloquer la création.
     """
-    repli = texte if len(texte) <= 120 else texte[:117] + "..."
     try:
-        client = Groq(api_key=get_secret("GROQ_API_KEY"), max_retries=0, timeout=10.0)
+        client = Groq(api_key=get_secret("GROQ_API_KEY"), max_retries=0, timeout=20.0)
         completion = client.chat.completions.create(
-            model=MODELE_PETIT,
+            model=MODELE_SKILL,
             messages=[{
                 "role": "user",
                 "content": (
-                    "Résume l'instruction personnelle suivante en UNE phrase courte "
-                    "(moins de 15 mots), qui servira à décider plus tard si cette "
-                    "instruction s'applique à une situation donnée -- sois concret et "
-                    "spécifique, jamais vague. Réponds UNIQUEMENT avec la phrase, "
-                    "rien d'autre autour.\n\n"
-                    f"Instruction :\n{texte}"
+                    "Transforme l'instruction personnelle suivante, écrite par un "
+                    "étudiant pour personnaliser son assistant IA, en un skill au "
+                    "format Anthropic (fichier SKILL.md) : un bloc frontmatter YAML "
+                    "avec exactement deux champs `name` (identifiant court en "
+                    "minuscules, mots séparés par des tirets, sans accents, max 64 "
+                    "caractères) et `description` (UNE phrase à la troisième "
+                    "personne, qui dit CE QUE fait ce comportement ET QUAND "
+                    "l'appliquer, avec des mots concrets qui déclenchent son usage, "
+                    "max 500 caractères), suivi d'un corps en Markdown qui détaille "
+                    "l'instruction de façon claire et directe, à la deuxième "
+                    "personne, comme des consignes que l'assistant doit suivre. Ne "
+                    "réponds QUE avec le contenu du fichier, rien d'autre autour, "
+                    "en commençant directement par ---.\n\n"
+                    f"Instruction de l'étudiant :\n{texte}"
                 ),
             }],
-            max_completion_tokens=60,
-            timeout=10.0,
+            max_completion_tokens=800,
+            timeout=20.0,
         )
-        description = (completion.choices[0].message.content or "").strip().strip('"')
-        return description or repli
+        brut = (completion.choices[0].message.content or "").strip()
+        correspondance = _RE_FRONTMATTER.match(brut)
+        if not correspondance:
+            raise ValueError("réponse sans frontmatter valide")
+        entete, corps = correspondance.group(1), correspondance.group(2).strip()
+        description = ""
+        for ligne in entete.splitlines():
+            if ligne.strip().lower().startswith("description:"):
+                description = ligne.split(":", 1)[1].strip().strip('"')
+                break
+        if not description or not corps:
+            raise ValueError("frontmatter ou corps manquant")
+        skill_md = brut if brut.endswith("\n") else brut + "\n"
+        return {"description": description, "skill_md": skill_md}
     except Exception as e:
-        logging.error(f"ERREUR génération description comportement : {e}")
-        return repli
+        logging.error(f"ERREUR génération skill comportement : {e}")
+        return _skill_repli(texte)
 
 
 def lister_comportements(agent_id: str, etudiant_id: str) -> list[dict]:
@@ -112,18 +178,18 @@ def lister_comportements(agent_id: str, etudiant_id: str) -> list[dict]:
     ]
 
 
-def obtenir_comportement_texte(agent_id: str, etudiant_id: str, comportement_id: str) -> str | None:
+def obtenir_comportement_skill(agent_id: str, etudiant_id: str, comportement_id: str) -> str | None:
     """
-    Texte complet d'UN comportement précis, vérifié comme appartenant
-    bien à cet (agent_id, etudiant_id) -- utilisé par l'outil
-    consulter_comportement (core/serveur_mcp_generation.py) quand le
-    grand modèle décide de le lire en entier. None si introuvable ou
-    n'appartenant pas à cette paire (jamais une fuite entre étudiants).
+    Skill complet (frontmatter + corps markdown) d'UN comportement précis,
+    vérifié comme appartenant bien à cet (agent_id, etudiant_id) --
+    utilisé par l'outil consulter_comportement (core/serveur_mcp_generation.py)
+    quand le grand modèle décide de le lire en entier. None si introuvable
+    ou n'appartenant pas à cette paire (jamais une fuite entre étudiants).
     """
     try:
         res = (
             supabase.table("comportements_etudiants")
-            .select("texte")
+            .select("skill_md")
             .eq("id", comportement_id)
             .eq("agent_id", agent_id)
             .eq("etudiant_id", etudiant_id)
@@ -131,11 +197,11 @@ def obtenir_comportement_texte(agent_id: str, etudiant_id: str, comportement_id:
             .execute()
         )
     except Exception as e:
-        logging.error(f"ERREUR SUPABASE (lecture texte comportement {comportement_id}) : {e}")
+        logging.error(f"ERREUR SUPABASE (lecture skill comportement {comportement_id}) : {e}")
         return None
     if not res.data:
         return None
-    return res.data.get("texte")
+    return res.data.get("skill_md")
 
 
 def choisir_comportements_pertinents(message_utilisateur: str, comportements: list[dict]) -> list[dict]:
@@ -207,12 +273,13 @@ def ajouter_comportement(
     (aucune vérification RLS/FK réelle, tout est fait côté code).
     """
     texte = texte.strip()
-    description = _generer_description(texte)
+    skill = _generer_skill(texte)
     ligne_a_inserer = {
         "agent_id": agent_id,
         "etudiant_id": etudiant_id,
         "texte": texte,
-        "description": description,
+        "description": skill["description"],
+        "skill_md": skill["skill_md"],
         "lien_type": lien_type,
         "lien_id": lien_id,
     }
@@ -231,10 +298,10 @@ def modifier_comportement(agent_id: str, etudiant_id: str, comportement_id: str,
     """Modifie le texte -- ne touche jamais lien_type/lien_id (pas
     demandé : un comportement lié le reste, seul son texte change)."""
     texte = texte.strip()
-    description = _generer_description(texte)
+    skill = _generer_skill(texte)
     res = (
         supabase.table("comportements_etudiants")
-        .update({"texte": texte, "description": description})
+        .update({"texte": texte, "description": skill["description"], "skill_md": skill["skill_md"]})
         .eq("id", comportement_id)
         .eq("agent_id", agent_id)
         .eq("etudiant_id", etudiant_id)

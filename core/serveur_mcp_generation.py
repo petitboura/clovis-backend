@@ -58,7 +58,7 @@ from api.roles import (
     _inserer_message,
 )
 from core.comportements_etudiants import (
-    obtenir_comportement_texte as _obtenir_comportement_texte,
+    obtenir_comportement_skill as _obtenir_comportement_skill,
     ajouter_comportement as _ajouter_comportement,
     modifier_comportement as _modifier_comportement,
     supprimer_comportement as _supprimer_comportement,
@@ -88,7 +88,7 @@ from core.programme_ecriture import (
     supprimer_examen as _supprimer_examen,
     annuler_derniere_modification as _annuler_derniere_modification,
 )
-from core.codes_partage import obtenir_comportement_texte_recu as _obtenir_comportement_texte_recu
+from core.codes_partage import obtenir_comportement_skill_recu as _obtenir_comportement_skill_recu
 from core.generation_site import (
     deployer_site as _deployer_site,
     site_deploiement_disponible,
@@ -465,14 +465,15 @@ def consulter_profil_utilisateur(ctx: Context) -> str:
 @mcp_generation.tool()
 def consulter_comportement(comportement_id: str, ctx: Context) -> str:
     """
-    Lit le texte COMPLET d'une instruction personnelle -- que cet
-    utilisateur l'ait écrite lui-même (section "Mes comportements"), ou
-    qu'il l'ait reçue d'un autre utilisateur via un code (id préfixé
-    "recu:", voir core/codes_partage.py) -- à partir de son id. Le
-    message système t'a déjà donné une courte description de ceux qui
-    semblent pertinents pour ce message -- utilise cet outil quand l'un
-    d'eux semble s'appliquer, AVANT de répondre, pour lire son contenu
-    réel plutôt que de deviner à partir de la description seule.
+    Lit le skill COMPLET (format Claude, frontmatter + instructions) d'une
+    instruction personnelle -- que cet utilisateur l'ait écrite lui-même
+    (section "Mes comportements"), ou qu'il l'ait reçue d'un autre
+    utilisateur via un code (id préfixé "recu:", voir
+    core/codes_partage.py) -- à partir de son id. Le message système t'a
+    déjà donné une courte description de ceux qui semblent pertinents
+    pour ce message -- utilise cet outil quand l'un d'eux semble
+    s'appliquer, AVANT de répondre, pour lire son contenu réel plutôt que
+    de deviner à partir de la description seule.
     """
     try:
         requete = ctx.request_context.request
@@ -481,12 +482,12 @@ def consulter_comportement(comportement_id: str, ctx: Context) -> str:
         if not user_id or not agent_id:
             return "Erreur : impossible d'identifier l'étudiant ou l'agent."
         if comportement_id.startswith("recu:"):
-            texte = _obtenir_comportement_texte_recu(user_id, comportement_id)
+            skill_md = _obtenir_comportement_skill_recu(user_id, comportement_id)
         else:
-            texte = _obtenir_comportement_texte(agent_id, user_id, comportement_id)
-        if texte is None:
+            skill_md = _obtenir_comportement_skill(agent_id, user_id, comportement_id)
+        if skill_md is None:
             return "Ce comportement est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
-        return texte
+        return skill_md
     except Exception as e:
         logging.error(f"ERREUR outil consulter_comportement : {e}")
         return "Erreur : impossible de consulter ce comportement, réessaie."
