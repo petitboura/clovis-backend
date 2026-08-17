@@ -38,7 +38,7 @@ from creation_agent import generer_id_depuis_nom  # noqa: E402
 from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien  # noqa: E402
 from storage import upload_document  # noqa: E402
 from index_documents import indexer_document  # noqa: E402
-from api.agents import TYPES_BIBLIOTHEQUE_AUTORISES, TAILLE_MAX_BIBLIOTHEQUE_OCTETS  # noqa: E402
+from api.agents import TAILLE_MAX_BIBLIOTHEQUE_OCTETS  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 
@@ -656,9 +656,14 @@ async def diffuser_document(
 
     if not (titre or "").strip() and not (description or "").strip():
         raise erreur_api(400, "DONNE_AU_MOINS_UNE_DESCRIPTION_OU")
-    if fichier.content_type not in TYPES_BIBLIOTHEQUE_AUTORISES:
-        raise erreur_api(400, "TYPE_DE_FICHIER_NON_SUPPORTE")
 
+    # 17/08 (Bourama, commit 9974ae9 : "il faut qu'on puisse uploader
+    # tout") -- whitelist de types retirée partout (bibliothèque perso/
+    # agent, MCP) le même jour ; cette vérification-ci avait été oubliée
+    # dans ce fichier (import de TYPES_BIBLIOTHEQUE_AUTORISES devenu
+    # invalide, api.agents ne la définit plus -- ImportError qui faisait
+    # planter TOUT le serveur au démarrage, pas seulement cette route).
+    # Seule la taille reste contrôlée, ci-dessous.
     contenu = await fichier.read()
     if len(contenu) == 0:
         raise erreur_api(400, "FICHIER_VIDE")
