@@ -26,6 +26,13 @@ def lister_registre_affichage_outils():
     -- `appli` absent si non pertinent. Le frontend (classgpt-frontend/
     lib/outils.ts) convertit `icone` (nom lucide-react en chaîne) en
     composant React lui-même ; cette route ne connaît rien du rendu.
+
+    `onglet` peut valoir None (17/08, demande Bourama) pour un outil qui
+    doit garder son icône/label ici -- utile pour la bulle "résultat
+    d'outil" côté frontend -- sans jamais apparaître comme bouton
+    cliquable dans aucun menu (ex : les outils d'édition de programme,
+    que le modèle appelle en autonomie). `.get("onglet")` plutôt qu'un
+    accès direct pour ne pas planter sur ces entrées-là.
     """
     return {
         "outils": [
@@ -33,7 +40,7 @@ def lister_registre_affichage_outils():
                 "nom": nom,
                 "label": entree["label"],
                 "icone": entree["icone"],
-                "onglet": entree["onglet"],
+                "onglet": entree.get("onglet"),
                 **({"appli": entree["appli"]} if "appli" in entree else {}),
             }
             for nom, entree in REGISTRE_AFFICHAGE_OUTILS.items()

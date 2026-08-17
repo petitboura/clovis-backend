@@ -282,41 +282,82 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "notion-update-view": {"label": "Modification d'une vue Notion", "icone": "SlidersHorizontal", "onglet": "action_app", "appli": "notion"},
 
     # --- Utilitaires ---
-    "planifier_rappel": {"label": "Planification d'un rappel", "icone": "Bell", "onglet": "utilitaires"},
+    # planifier_rappel RETIRE d'ici (17/08, demande Bourama : "enlève le
+    # bouton planifier rappel seulement") -- l'outil MCP reste défini côté
+    # serveur (core/serveur_mcp_generation.py) et gaté par les clés VAPID,
+    # mais il est désormais aussi désactivé au niveau plateforme
+    # (registre_outils_plateforme.disponible=False pour ce nom_outil), ce
+    # qui l'exclut à la fois du bouton (plus d'entrée d'affichage ici) ET
+    # du catalogue envoyé au routeur/modèle (lister_outils_autorises_pour_
+    # agent filtre toujours par ce flag, voir mcp_tools.py). Pour le
+    # réactiver un jour : remettre une entrée ici ET repasser disponible=
+    # True en base pour "planifier_rappel".
     "envoyer_message": {"label": "Envoi d'un message", "icone": "Send", "onglet": "utilitaires"},
     "consulter_memoire_utilisateur": {"label": "Consultation de ta mémoire", "icone": "Brain", "onglet": "utilitaires"},
     "mettre_a_jour_memoire_utilisateur": {"label": "Mise à jour de ta mémoire", "icone": "Brain", "onglet": "utilitaires"},
     "consulter_profil_utilisateur": {"label": "Consultation de ton profil", "icone": "UserCircle", "onglet": "utilitaires"},
     "mettre_a_jour_profil_utilisateur": {"label": "Mise à jour de ton profil", "icone": "UserCog", "onglet": "utilitaires"},
 
+    # --- Actions locales UI (préfixe "ui_") ---
+    # Ajoutées ici le 17/08 (bug signalé par Bourama) : ces 6 entrées
+    # existaient avant le 15/08 dans le bouton Utilitaires (venaient alors
+    # de l'ancienne liste statique OUTILS_DISPONIBLES côté frontend), mais
+    # ont disparu quand ce bouton est passé à ce registre backend comme
+    # source vivante -- elles n'y avaient jamais été migrées. PAS de vrais
+    # outils MCP (interceptées par le préfixe "ui_" dans BarreDeSaisie.tsx,
+    # estOutilActif/executerActionOutil -- jamais envoyées au routeur ni au
+    # modèle), donc aucun risque à les lister ici : ce registre est de
+    # l'affichage pur (label/icône/onglet), pas la liste réelle des outils
+    # exécutables. Autorisation par agent déjà en base (agents_actions_
+    # locales + registre_outils_plateforme catégorie 4, vérifié le 17/08
+    # pour "clovis" : les 6 y sont déjà cochées et disponibles).
+    "ui_localisation": {"label": "Joindre ma position", "icone": "MapPin", "onglet": "utilitaires"},
+    "ui_formule": {"label": "Insérer une formule / réaction chimique", "icone": "Sigma", "onglet": "utilitaires"},
+    "ui_editeur_maths": {"label": "Éditeur maths live (texte + formules)", "icone": "Calculator", "onglet": "utilitaires"},
+    "ui_recherche": {"label": "Forcer une recherche web", "icone": "Search", "onglet": "utilitaires"},
+    "ui_dessin": {"label": "Dessiner (géométrie, graphe, croquis)", "icone": "PenLine", "onglet": "utilitaires"},
+    "ui_mode_vocal": {"label": "Mode vocal (bientôt disponible)", "icone": "AudioLines", "onglet": "utilitaires"},
+
     # --- Programme adaptatif (interne) ---
-    "consulter_matiere_active": {"label": "Consultation de la matière active", "icone": "BookOpen", "onglet": "utilitaires"},
-    "consulter_matiere_programme": {"label": "Consultation des chapitres d'une matière", "icone": "BookOpen", "onglet": "utilitaires"},
-    "ajouter_programme": {"label": "Création d'un programme", "icone": "GraduationCap", "onglet": "utilitaires"},
-    "modifier_programme": {"label": "Modification d'un programme", "icone": "GraduationCap", "onglet": "utilitaires"},
-    "consulter_programme": {"label": "Consultation d'un programme", "icone": "GraduationCap", "onglet": "utilitaires"},
-    "supprimer_programme": {"label": "Suppression d'un programme", "icone": "Trash2", "onglet": "utilitaires"},
-    "ajouter_matiere": {"label": "Ajout d'une matière", "icone": "BookOpen", "onglet": "utilitaires"},
-    "modifier_matiere": {"label": "Modification d'une matière", "icone": "BookOpen", "onglet": "utilitaires"},
-    "supprimer_matiere": {"label": "Suppression d'une matière", "icone": "Trash2", "onglet": "utilitaires"},
-    "ajouter_chapitre": {"label": "Ajout d'un chapitre", "icone": "Layers", "onglet": "utilitaires"},
-    "modifier_chapitre": {"label": "Modification d'un chapitre", "icone": "Layers", "onglet": "utilitaires"},
-    "consulter_chapitre_programme": {"label": "Consultation d'un chapitre", "icone": "Layers", "onglet": "utilitaires"},
-    "supprimer_chapitre": {"label": "Suppression d'un chapitre", "icone": "Trash2", "onglet": "utilitaires"},
-    "ajouter_document_programme": {"label": "Ajout d'un document au programme", "icone": "FileText", "onglet": "utilitaires"},
-    "modifier_document_programme": {"label": "Modification d'un document du programme", "icone": "FileText", "onglet": "utilitaires"},
-    "supprimer_document_programme": {"label": "Suppression d'un document du programme", "icone": "Trash2", "onglet": "utilitaires"},
-    "ajouter_exercice_programme": {"label": "Ajout d'un exercice", "icone": "ListChecks", "onglet": "utilitaires"},
-    "modifier_exercice_programme": {"label": "Modification d'un exercice", "icone": "ListChecks", "onglet": "utilitaires"},
-    "supprimer_exercice_programme": {"label": "Suppression d'un exercice", "icone": "Trash2", "onglet": "utilitaires"},
-    "ajouter_examen": {"label": "Ajout d'un examen", "icone": "ClipboardList", "onglet": "utilitaires"},
-    "modifier_examen": {"label": "Modification d'un examen", "icone": "ClipboardList", "onglet": "utilitaires"},
-    "consulter_examens_programme": {"label": "Consultation des examens", "icone": "ClipboardList", "onglet": "utilitaires"},
-    "supprimer_examen": {"label": "Suppression d'un examen", "icone": "Trash2", "onglet": "utilitaires"},
-    "annuler_derniere_modification": {"label": "Annulation de la dernière modification", "icone": "Undo2", "onglet": "utilitaires"},
-    "ajouter_comportement": {"label": "Ajout d'un comportement", "icone": "Sparkles", "onglet": "utilitaires"},
-    "modifier_comportement": {"label": "Modification d'un comportement", "icone": "Sparkles", "onglet": "utilitaires"},
-    "consulter_comportement": {"label": "Consultation d'un comportement", "icone": "Sparkles", "onglet": "utilitaires"},
-    "supprimer_comportement": {"label": "Suppression d'un comportement", "icone": "Trash2", "onglet": "utilitaires"},
+    # onglet=None (17/08, bug signalé par Bourama) : ces 22 outils étaient
+    # étiquetés "utilitaires" comme les 6 vrais utilitaires juste
+    # au-dessus, ce qui les faisait apparaître comme boutons cliquables
+    # dans le bouton Utilitaires (jusqu'à 28 entrées au total). Ce sont
+    # des outils que le modèle appelle lui-même en autonomie pendant la
+    # conversation (édition de programme), jamais censés être des boutons
+    # que l'étudiant clique. onglet=None les garde dans ce registre (donc
+    # toujours une icône propre dans la bulle "résultat d'outil", voir
+    # OutilResultatBulle.tsx) sans les faire apparaître dans AUCUN menu
+    # (ni Outils, ni Utilitaires) -- voir api/outils_registre.py (.get()
+    # au lieu d'un accès direct) et lib/outils.ts (onglet optionnel) côté
+    # frontend pour la partie qui rend ça possible sans planter.
+    "consulter_matiere_active": {"label": "Consultation de la matière active", "icone": "BookOpen", "onglet": None},
+    "consulter_matiere_programme": {"label": "Consultation des chapitres d'une matière", "icone": "BookOpen", "onglet": None},
+    "ajouter_programme": {"label": "Création d'un programme", "icone": "GraduationCap", "onglet": None},
+    "modifier_programme": {"label": "Modification d'un programme", "icone": "GraduationCap", "onglet": None},
+    "consulter_programme": {"label": "Consultation d'un programme", "icone": "GraduationCap", "onglet": None},
+    "supprimer_programme": {"label": "Suppression d'un programme", "icone": "Trash2", "onglet": None},
+    "ajouter_matiere": {"label": "Ajout d'une matière", "icone": "BookOpen", "onglet": None},
+    "modifier_matiere": {"label": "Modification d'une matière", "icone": "BookOpen", "onglet": None},
+    "supprimer_matiere": {"label": "Suppression d'une matière", "icone": "Trash2", "onglet": None},
+    "ajouter_chapitre": {"label": "Ajout d'un chapitre", "icone": "Layers", "onglet": None},
+    "modifier_chapitre": {"label": "Modification d'un chapitre", "icone": "Layers", "onglet": None},
+    "consulter_chapitre_programme": {"label": "Consultation d'un chapitre", "icone": "Layers", "onglet": None},
+    "supprimer_chapitre": {"label": "Suppression d'un chapitre", "icone": "Trash2", "onglet": None},
+    "ajouter_document_programme": {"label": "Ajout d'un document au programme", "icone": "FileText", "onglet": None},
+    "modifier_document_programme": {"label": "Modification d'un document du programme", "icone": "FileText", "onglet": None},
+    "supprimer_document_programme": {"label": "Suppression d'un document du programme", "icone": "Trash2", "onglet": None},
+    "ajouter_exercice_programme": {"label": "Ajout d'un exercice", "icone": "ListChecks", "onglet": None},
+    "modifier_exercice_programme": {"label": "Modification d'un exercice", "icone": "ListChecks", "onglet": None},
+    "supprimer_exercice_programme": {"label": "Suppression d'un exercice", "icone": "Trash2", "onglet": None},
+    "ajouter_examen": {"label": "Ajout d'un examen", "icone": "ClipboardList", "onglet": None},
+    "modifier_examen": {"label": "Modification d'un examen", "icone": "ClipboardList", "onglet": None},
+    "consulter_examens_programme": {"label": "Consultation des examens", "icone": "ClipboardList", "onglet": None},
+    "supprimer_examen": {"label": "Suppression d'un examen", "icone": "Trash2", "onglet": None},
+    "annuler_derniere_modification": {"label": "Annulation de la dernière modification", "icone": "Undo2", "onglet": None},
+    "ajouter_comportement": {"label": "Ajout d'un comportement", "icone": "Sparkles", "onglet": None},
+    "modifier_comportement": {"label": "Modification d'un comportement", "icone": "Sparkles", "onglet": None},
+    "consulter_comportement": {"label": "Consultation d'un comportement", "icone": "Sparkles", "onglet": None},
+    "supprimer_comportement": {"label": "Suppression d'un comportement", "icone": "Trash2", "onglet": None},
 }
 
