@@ -37,12 +37,6 @@ from codes_partage import propager_fichier_bibliotheque, propager_lien_bibliothe
 
 router = APIRouter(prefix="/api/bibliotheque", tags=["bibliotheque-utilisateur"])
 
-TYPES_AUTORISES = {
-    "application/pdf",
-    "image/jpeg", "image/png", "image/webp",
-    "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4",
-    "video/mp4", "video/webm", "video/quicktime",
-}
 TAILLE_MAX_OCTETS = 50 * 1024 * 1024  # 50 Mo, même limite que la bibliothèque niveau agent
 
 
@@ -67,9 +61,12 @@ async def uploader_document(
     # fichier quand on en envoie plusieurs d'un coup. chercher_fichier
     # (recherche par nom/description) reste utilisable, juste moins
     # fin sans description écrite à la main.
-    if fichier.content_type not in TYPES_AUTORISES:
-        raise erreur_api(400, "TYPE_DE_FICHIER_NON_SUPPORTE")
-
+    # 17/08 (Bourama : "il faut qu'on puisse uploader tout") -- la
+    # whitelist de types (pdf/image/audio/vidéo) a été retirée : seule
+    # la taille est encore contrôlée. enregistrer_fichier ci-dessous
+    # accepte déjà n'importe quel type_mime (voir sa docstring), la
+    # vectorisation PDF plus bas ne dépend que du type réel du fichier,
+    # pas d'une liste fermée.
     contenu = await fichier.read()
     if len(contenu) == 0:
         raise erreur_api(400, "FICHIER_VIDE")

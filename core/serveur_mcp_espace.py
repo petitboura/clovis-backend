@@ -140,14 +140,9 @@ _supabase = create_client(_SUPABASE_URL, _SUPABASE_SECRET)
 # paramètre exposé aux outils ci-dessous.
 AGENT_ID_ESPACE = "clovis"
 
-# Mêmes contraintes que api/bibliotheque_utilisateur.py (à garder en
-# phase si elles changent là-bas).
-_TYPES_AUTORISES = {
-    "application/pdf",
-    "image/jpeg", "image/png", "image/webp",
-    "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4",
-    "video/mp4", "video/webm", "video/quicktime",
-}
+# 17/08 (Bourama : "il faut qu'on puisse uploader tout") -- whitelist
+# retirée, comme côté api/bibliotheque_utilisateur.py (à garder en
+# phase si ça change là-bas). Seule la taille reste contrôlée.
 _TAILLE_MAX_OCTETS = 50 * 1024 * 1024  # 50 Mo
 
 mcp_espace = FastMCP(
@@ -288,8 +283,8 @@ def ajouter_document_bibliotheque(
     uploadé lui-même depuis "Mon espace". `nom_fichier` : nom du fichier
     avec son extension (ex. "cours_svt.pdf"). `type_mime` : type MIME
     exact du fichier (ex. "application/pdf", "image/png", "audio/mpeg",
-    "video/mp4" -- types autorisés : PDF, JPEG/PNG/WebP, MP3/WAV/OGG/M4A,
-    MP4/WebM/MOV). `contenu_base64` : contenu du fichier encodé en
+    "video/mp4", ou tout autre type MIME -- n'importe quel type de
+    fichier est accepté). `contenu_base64` : contenu du fichier encodé en
     base64 (jamais de contenu brut binaire). `titre`/`description` :
     optionnels, repli sur le nom du fichier si absents. Limite : 50 Mo.
     `type_emplacement`/`emplacement_id` : optionnels -- si fournis
@@ -302,8 +297,8 @@ def ajouter_document_bibliotheque(
         return "Erreur : utilisateur non authentifié."
 
     type_mime = (type_mime or "").strip().lower()
-    if type_mime not in _TYPES_AUTORISES:
-        return f"Erreur : type de fichier non supporté ({type_mime or 'absent'})."
+    if not type_mime:
+        return "Erreur : type de fichier manquant."
 
     import base64
     try:

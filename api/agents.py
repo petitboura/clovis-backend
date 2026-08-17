@@ -1328,12 +1328,6 @@ def supprimer_document(agent_id: str, nom_stockage: str, request: Request, utili
     )
 
 
-TYPES_BIBLIOTHEQUE_AUTORISES = {
-    "application/pdf",
-    "image/jpeg", "image/png", "image/webp",
-    "audio/mpeg", "audio/wav", "audio/ogg", "audio/mp4",
-    "video/mp4", "video/webm", "video/quicktime",
-}
 TAILLE_MAX_BIBLIOTHEQUE_OCTETS = 50 * 1024 * 1024  # 50 Mo
 
 
@@ -1365,8 +1359,8 @@ async def uploader_fichier_bibliotheque(
     if not (titre or "").strip() and not (description or "").strip():
         raise erreur_api(400, "DONNE_AU_MOINS_UNE_DESCRIPTION_OU")
 
-    if fichier.content_type not in TYPES_BIBLIOTHEQUE_AUTORISES:
-        raise erreur_api(400, "TYPE_DE_FICHIER_NON_SUPPORTE")
+    # 17/08 (Bourama : "il faut qu'on puisse uploader tout") -- whitelist
+    # retirée, comme côté api/bibliotheque_utilisateur.py.
 
     try:
         res = (
