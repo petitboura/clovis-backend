@@ -20,26 +20,39 @@ comme programme_ecriture.py qui suit déjà ce même choix.
 Ne touche PAS à documents_programme (ancien mécanisme titre+lien
 rattaché uniquement à un chapitre) : coexistence assumée, voir
 migration 2026_08_16_liens_bibliotheque_comportements_programme.sql.
+
+Étendu le 17/08 (demande Bourama : "il faut même en ajouter si ça ne
+suffit pas") aux types "exercice" et "examen" -- voir migration
+2026_08_17_extension_emplacements_bibliotheque_exercice_examen.sql.
+Un exercice/examen peut donc désormais recevoir un document de la
+bibliothèque exactement comme un programme/matière/chapitre.
 """
 
 import logging
 
 from api.auth import supabase
-from api.contenu_programme import _lire_chapitre, _lire_matiere, _lire_programme
+from api.contenu_programme import (
+    _lire_chapitre,
+    _lire_examen,
+    _lire_exercice,
+    _lire_matiere,
+    _lire_programme,
+    _proprietaire_du_chapitre,
+)
 
 logging.basicConfig(level=logging.INFO)
 
-TYPES_EMPLACEMENT_BIBLIOTHEQUE = ("programme", "matiere", "chapitre")
+TYPES_EMPLACEMENT_BIBLIOTHEQUE = ("programme", "matiere", "chapitre", "exercice", "examen")
 
 
 def proprietaire_emplacement(type_cible: str, cible_id: str) -> str | None:
     """
     Renvoie l'id du propriétaire (utilisateur) d'un emplacement du
     programme, quel que soit son niveau ("programme"/"matiere"/
-    "chapitre"). None si l'emplacement n'existe pas. Fonction commune
-    utilisée pour vérifier la propriété avant toute liaison (bibliothèque
-    ou comportement) -- jamais de confiance dans un cible_id fourni tel
-    quel par l'appelant.
+    "chapitre"/"exercice"/"examen"). None si l'emplacement n'existe pas.
+    Fonction commune utilisée pour vérifier la propriété avant toute
+    liaison (bibliothèque ou comportement) -- jamais de confiance dans
+    un cible_id fourni tel quel par l'appelant.
     """
     if type_cible == "programme":
         programme = _lire_programme(cible_id)
@@ -59,6 +72,12 @@ def proprietaire_emplacement(type_cible: str, cible_id: str) -> str | None:
             return None
         programme = _lire_programme(matiere["programme_id"])
         return programme["proprietaire_id"] if programme else None
+    if type_cible == "exercice":
+        exercice = _lire_exercice(cible_id)
+        return _proprietaire_du_chapitre(exercice["chapitre_id"]) if exercice else None
+    if type_cible == "examen":
+        examen = _lire_examen(cible_id)
+        return examen["proprietaire_id"] if examen else None
     return None
 
 
@@ -77,6 +96,15 @@ def libelle_emplacement(type_cible: str, cible_id: str) -> str | None:
         if type_cible == "chapitre":
             res = supabase.table("chapitres").select("nom").eq("id", cible_id).maybe_single().execute()
             return res.data["nom"] if res and res.data else None
+        if type_cible == "exercice":
+            res = supabase.table("exercices_programme").select("enonce").eq("id", cible_id).maybe_single().execute()
+            if not res or not res.data:
+                return None
+            enonce = (res.data.get("enonce") or "").strip()
+            return (enonce[:60] + "…") if len(enonce) > 60 else (enonce or "Exercice")
+        if type_cible == "examen":
+            res = supabase.table("examens_programme").select("titre").eq("id", cible_id).maybe_single().execute()
+            return res.data["titre"] if res and res.data else None
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (libellé emplacement {type_cible}={cible_id}) : {e}")
         return None

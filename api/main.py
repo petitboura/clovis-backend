@@ -33,6 +33,7 @@ from api.comportements_etudiants import router as comportements_etudiants_router
 from api.programmes import router_programmes, router_matieres, router_chapitres
 from api.audits_programme import router_audits_programme
 from api.contenu_programme import router as contenu_programme_router
+from api.emplacements_bibliotheque_programme import router as emplacements_bibliotheque_programme_router
 from api.plugins_programme import router as plugins_router, router_programmes as plugins_programmes_router
 from api.codes_partage import router_mes_codes, router_rattachements
 from api.outils_registre import router as outils_registre_router
@@ -368,6 +369,7 @@ app.include_router(router_matieres)
 app.include_router(router_chapitres)
 app.include_router(router_audits_programme)
 app.include_router(contenu_programme_router)
+app.include_router(emplacements_bibliotheque_programme_router)
 app.include_router(plugins_router)
 app.include_router(plugins_programmes_router)
 app.include_router(router_mes_codes)

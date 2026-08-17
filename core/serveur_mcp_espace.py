@@ -423,8 +423,8 @@ def classer_document_dans_programme(fichier_id: str, type_emplacement: str, empl
     """
     Classe un document de la bibliothèque personnelle à un emplacement
     du programme de cet utilisateur. `type_emplacement` : "programme",
-    "matiere" ou "chapitre". `emplacement_id` : id de cet élément
-    précis du programme. Un même document peut être classé à plusieurs
+    "matiere", "chapitre", "exercice" ou "examen". `emplacement_id` : id
+    de cet élément précis du programme. Un même document peut être classé à plusieurs
     emplacements (appeler cet outil plusieurs fois) ; reclasser au même
     endroit ne crée pas de doublon.
     """

@@ -319,11 +319,16 @@ def supprimer_document(document_id: str, request: Request, utilisateur=Depends(u
 
 
 class ExercicePayload(BaseModel):
-    enonce: str
+    # Optionnel depuis le 17/08 (demande Bourama : "les deux cohabitent
+    # (fichier OU texte au choix)") -- un exercice peut n'avoir qu'une
+    # pièce jointe classée via /api/emplacements/exercice/{id}/documents,
+    # sans énoncé tapé. Le frontend garde la responsabilité de ne pas
+    # soumettre un exercice totalement vide (ni texte ni fichier prévu).
+    enonce: str = ""
 
 
 class ExerciceModificationPayload(BaseModel):
-    enonce: str
+    enonce: str = ""
 
 
 class ExerciceReponse(BaseModel):
@@ -356,9 +361,6 @@ def creer_exercice(
     chapitre_id: str, payload: ExercicePayload, request: Request, utilisateur=Depends(utilisateur_courant)
 ):
     _verifier_acces_chapitre(chapitre_id, utilisateur.id)
-
-    if not payload.enonce.strip():
-        raise erreur_api(422, "ENONCE_REQUIS")
 
     try:
         res = (
@@ -393,9 +395,6 @@ def modifier_exercice(
     if not exercice:
         raise erreur_api(404, "EXERCICE_INTROUVABLE")
     _verifier_acces_chapitre(exercice["chapitre_id"], utilisateur.id)
-
-    if not payload.enonce.strip():
-        raise erreur_api(422, "ENONCE_REQUIS")
 
     try:
         res = (
