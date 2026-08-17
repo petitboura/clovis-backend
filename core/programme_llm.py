@@ -308,6 +308,25 @@ def obtenir_contenu_chapitre(user_id: str, chapitre_id: str) -> str | None:
         logging.error(f"ERREUR SUPABASE (lecture documents chapitre {chapitre_id}) : {e}")
         documents = []
 
+    # 17/08, Bourama : deux systèmes coexistent pour "ajouter un
+    # document à un chapitre" -- l'ancien ci-dessus (titre + lien/texte
+    # tapé à la main, table documents_programme), et le classement d'un
+    # document de la Bibliothèque personnelle (bouton "classer", table
+    # bibliotheque_emplacements_programme, voir core/bibliotheque_
+    # programme.py::lister_documents_emplacement). Avant cette
+    # correction, cette fonction ne lisait QUE l'ancien système : un
+    # PDF/image/audio/vidéo classé dans ce chapitre via la Bibliothèque
+    # restait invisible pour l'IA quand elle consultait "le contenu de
+    # ce chapitre" (sauf coup de chance via consulter_bibliotheque, qui
+    # cherche par pertinence de contenu, pas par emplacement). Les deux
+    # listes sont fusionnées ici, sans rien retirer à l'ancien système.
+    try:
+        from bibliotheque_programme import lister_documents_emplacement
+        docs_bibliotheque = lister_documents_emplacement("chapitre", chapitre_id)
+    except Exception as e:
+        logging.error(f"ERREUR (lecture documents bibliothèque classés chapitre {chapitre_id}) : {e}")
+        docs_bibliotheque = []
+
     try:
         exercices = (
             supabase.table("exercices_programme")
@@ -327,10 +346,20 @@ def obtenir_contenu_chapitre(user_id: str, chapitre_id: str) -> str | None:
         lignes.append(f"Cadre/limites : {chapitre['limites']}")
 
     lignes.append("\nDocuments :")
-    if not documents:
+    if not documents and not docs_bibliotheque:
         lignes.append("  (aucun document pour l'instant)")
     for d in documents:
         lignes.append(f"  - {d['titre']} : {d['url_ou_contenu']}")
+    for d in docs_bibliotheque:
+        etiquette = d.get("description") or d["nom_fichier"]
+        lignes.append(f"  - {etiquette} : {d['url_publique']}")
+    if docs_bibliotheque:
+        lignes.append(
+            "  (si tu juges utile de montrer un de ces documents en entier plutôt que "
+            "de le décrire, inclus son lien dans ta réponse -- ![...](url) pour une "
+            "image, [...](url) pour les autres types -- il s'affichera alors "
+            "correctement selon son type)"
+        )
 
     lignes.append("\nExercices :")
     if not exercices:

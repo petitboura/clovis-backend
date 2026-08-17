@@ -175,7 +175,7 @@ def lister_documents_emplacement(type_cible: str, cible_id: str) -> list[dict]:
         ids = [l["fichier_id"] for l in liens]
         fichiers = (
             supabase.table("fichiers_uploades")
-            .select("id, nom_fichier, description, type_mime, created_at")
+            .select("id, nom_fichier, description, type_mime, url_publique, created_at")
             .in_("id", ids)
             .execute()
         ).data or []
