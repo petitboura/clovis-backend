@@ -33,6 +33,7 @@ from core.erreurs import erreur_api
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "core"))
 from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien, lister_fichiers, supprimer_fichier  # noqa: E402
 from bibliotheque_rag import indexer_pdf_bibliotheque, indexer_texte_bibliotheque  # noqa: E402
+from description_multimedia import decrire_image_bibliotheque, transcrire_audio_bibliotheque  # noqa: E402
 from codes_partage import propager_fichier_bibliotheque, propager_lien_bibliotheque  # noqa: E402
 
 router = APIRouter(prefix="/api/bibliotheque", tags=["bibliotheque-utilisateur"])
@@ -110,6 +111,23 @@ async def uploader_document(
                 os.remove(chemin_temp)
             except OSError:
                 pass
+    elif (fichier.content_type or "").startswith("image/"):
+        # 17/08, Bourama : une image (photo de feuille d'exercice, etc.)
+        # doit être retrouvable par son contenu réel, pas seulement par
+        # son nom de fichier. Best-effort comme le PDF ci-dessus.
+        try:
+            description_image = decrire_image_bibliotheque(contenu, fichier.content_type)
+            if description_image:
+                indexer_texte_bibliotheque(description_image, fichier_id=ligne["id"], user_id=utilisateur.id)
+        except Exception as e:
+            logging.error(f"ERREUR vectorisation image bibliothèque perso (fichier_id={ligne['id']}) : {e}")
+    elif (fichier.content_type or "").startswith("audio/"):
+        try:
+            transcription_audio = transcrire_audio_bibliotheque(contenu, nom_original)
+            if transcription_audio:
+                indexer_texte_bibliotheque(transcription_audio, fichier_id=ligne["id"], user_id=utilisateur.id)
+        except Exception as e:
+            logging.error(f"ERREUR vectorisation audio bibliothèque perso (fichier_id={ligne['id']}) : {e}")
 
     journaliser(
         action="bibliotheque_perso.ajoute",

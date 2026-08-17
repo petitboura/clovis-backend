@@ -95,8 +95,8 @@ def lire_document_bibliotheque_en_entier(fichier_id: str, user_id: str) -> str |
     en recollant tous ses chunks dans l'ordre d'insertion (id croissant
     == ordre d'origine, voir indexer_texte_bibliotheque qui insère les
     morceaux dans l'ordre). None si le document n'appartient pas à
-    user_id ou n'a aucun chunk indexé (image/audio/vidéo par exemple --
-    non vectorisés aujourd'hui).
+    user_id ou n'a aucun chunk indexé (vidéo par exemple -- pas encore
+    vectorisée aujourd'hui, contrairement à PDF/texte/image/audio).
     """
     try:
         res = (

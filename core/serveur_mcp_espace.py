@@ -112,6 +112,10 @@ from core.bibliotheque_rag import (
     indexer_pdf_bibliotheque as _indexer_pdf_bibliotheque,
     indexer_texte_bibliotheque as _indexer_texte_bibliotheque,
 )
+from core.description_multimedia import (
+    decrire_image_bibliotheque as _decrire_image_bibliotheque,
+    transcrire_audio_bibliotheque as _transcrire_audio_bibliotheque,
+)
 from core.codes_partage import (
     propager_fichier_bibliotheque as _propager_fichier_bibliotheque,
     propager_lien_bibliotheque as _propager_lien_bibliotheque,
@@ -352,6 +356,20 @@ def ajouter_document_bibliotheque(
                     os.remove(chemin_temp)
                 except OSError:
                     pass
+    elif type_mime.startswith("image/"):
+        try:
+            description_image = _decrire_image_bibliotheque(contenu, type_mime)
+            if description_image:
+                _indexer_texte_bibliotheque(description_image, fichier_id=ligne["id"], user_id=user_id)
+        except Exception as e:
+            logging.error(f"ERREUR vectorisation image ajouter_document_bibliotheque (fichier_id={ligne['id']}) : {e}")
+    elif type_mime.startswith("audio/"):
+        try:
+            transcription_audio = _transcrire_audio_bibliotheque(contenu, nom_original)
+            if transcription_audio:
+                _indexer_texte_bibliotheque(transcription_audio, fichier_id=ligne["id"], user_id=user_id)
+        except Exception as e:
+            logging.error(f"ERREUR vectorisation audio ajouter_document_bibliotheque (fichier_id={ligne['id']}) : {e}")
 
     try:
         _propager_fichier_bibliotheque(user_id, contenu, nom_original, type_mime, description_finale)
