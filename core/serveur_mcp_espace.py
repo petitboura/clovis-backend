@@ -64,6 +64,7 @@ pour demander confirmation à l'utilisateur avant d'appeler l'outil.
 import logging
 import os
 import tempfile
+import uuid
 
 from mcp.server.mcpserver import MCPServer as FastMCP, Context
 from mcp.types import ToolAnnotations
@@ -134,6 +135,12 @@ from core.bibliotheque_programme import (
     libelle_emplacement as _libelle_emplacement,
     TYPES_EMPLACEMENT_BIBLIOTHEQUE,
     TYPES_LIEN_COMPORTEMENT,
+)
+from main import chat as _chat_generateur  # core/main.py:chat() -- import bare comme dans api/chat.py (core/ deja sur sys.path a ce point, voir api/main.py : api.chat importe avant core.serveur_mcp_espace)
+from core.confirmations_mcp import (
+    creer_confirmation as _creer_confirmation,
+    recuperer_confirmation as _recuperer_confirmation,
+    supprimer_confirmation as _supprimer_confirmation,
 )
 
 _SUPABASE_URL = os.environ.get("SUPABASE_URL")
@@ -1286,3 +1293,178 @@ def consulter_examens_programme(programme_id: str, ctx: Context) -> str:
     except Exception as e:
         logging.error(f"ERREUR outil consulter_examens_programme : {e}")
         return "Erreur : impossible de consulter les examens de ce programme, réessaie."
+
+
+# --- Discuter avec Clovis ------------------------------------------------
+# Ajouté le 17/08/2026 (demande Bourama) : jusqu'ici ce fichier ne gérait
+# que les données annexes de Clovis (bibliothèque/mémoire/comportements/
+# historique/programme) -- rien ne permettait à Claude d'envoyer un
+# message dans une conversation et de voir la réponse réelle de Clovis,
+# comme le ferait l'utilisateur depuis l'app. C'est ce que couvrent
+# discuter_avec_clovis et confirmer_action_clovis ci-dessous, en
+# réutilisant tel quel core.main.chat() (même fonction que api/chat.py,
+# aucune logique dupliquée).
+#
+# Point d'attention traité ici (voir migrations/2026_08_17_confirmations_mcp_espace.sql
+# et core/confirmations_mcp.py) : quand Clovis veut utiliser un outil
+# sensible en répondant, chat() s'arrête et renvoie un evenement
+# "confirmation_requise" contenant etat_reprise -- qui embarque
+# table_routage, donc des secrets en clair (clé API Tavily, jetons
+# Notion/GitHub). Cet état ne sort JAMAIS de ce fichier : il est stocké
+# côté serveur (confirmations_mcp_espace), et seul un id + un résumé
+# lisible sont renvoyés à Claude.
+#
+# LIMITE CONNUE (héritée de core/main.py, pas propre à ce fichier) : le
+# chemin de reprise après confirmation ne persiste PAS l'échange dans
+# historique_conversations/conversations (voir docstring de chat(),
+# paramètre reprise) -- une conversation qui passe par une confirmation
+# n'apparaîtra donc pas complètement dans lister_conversations_historique/
+# lire_conversation_historique pour son dernier échange.
+
+def _historique_pour_conversation(conversation_id: str, user_id: str) -> list[dict]:
+    """
+    Recharge l'historique d'un fil au format attendu par chat()
+    (liste de {"role", "content"}) -- même requête que
+    lire_conversation_historique, sans le formatage texte.
+    """
+    try:
+        requete = (
+            _supabase.table("historique_conversations")
+            .select("role, content, created_at")
+            .eq("user_id", user_id)
+            .eq("agent_id", AGENT_ID_ESPACE)
+        )
+        if conversation_id == "legacy":
+            requete = requete.is_("conversation_id", "null")
+        else:
+            requete = requete.eq("conversation_id", conversation_id)
+        lignes = requete.order("created_at").execute().data or []
+    except Exception as e:
+        logging.error(f"ERREUR _historique_pour_conversation : {e}")
+        return []
+    return [{"role": l["role"], "content": l["content"]} for l in lignes]
+
+
+def _derouler_chat(**kwargs_chat) -> tuple[str, dict | None]:
+    """
+    Consomme entièrement le générateur chat() et renvoie soit
+    (texte_final, None), soit ("", evenement_confirmation) si Clovis
+    s'est arrêté pour demander une confirmation avant d'aller plus loin.
+    """
+    reponse = []
+    for evenement in _chat_generateur(**kwargs_chat):
+        if evenement.get("type") == "reponse":
+            reponse.append(evenement.get("texte", ""))
+        elif evenement.get("type") == "confirmation_requise":
+            return "", evenement
+        # les autres types (statut, outil_resultat, raisonnement, sources,
+        # meta...) ne sont pas utiles à Claude ici, volontairement ignorés
+    return "".join(reponse), None
+
+
+@mcp_espace.tool()
+def discuter_avec_clovis(message: str, ctx: Context, conversation_id: str = "") -> str:
+    """
+    Envoie un message à Clovis et renvoie sa vraie réponse, exactement
+    comme si cet utilisateur avait tapé ce message dans l'app -- pas une
+    simulation. `conversation_id` optionnel : fourni, continue ce fil
+    précis (l'historique est rechargé automatiquement, inutile d'appeler
+    lire_conversation_historique avant) ; absent, démarre un nouveau fil
+    (son id est indiqué au début de la réponse pour pouvoir continuer la
+    discussion ensuite).
+
+    Si Clovis veut utiliser un outil sensible pour répondre, cet outil
+    s'arrête et te demande de confirmer via confirmer_action_clovis avant
+    de continuer -- toujours redemander confirmation à l'utilisateur
+    humain dans ce cas, ne jamais décider seul.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    message = (message or "").strip()
+    if not message:
+        return "Erreur : message vide."
+
+    nouveau_fil = not conversation_id
+    conv_id = conversation_id or str(uuid.uuid4())
+    historique = [] if nouveau_fil else _historique_pour_conversation(conv_id, user_id)
+
+    try:
+        texte, confirmation = _derouler_chat(
+            message_utilisateur=message,
+            historique=historique,
+            user_id=user_id,
+            agent_id=AGENT_ID_ESPACE,
+            conversation_id=conv_id,
+        )
+    except Exception as e:
+        logging.error(f"ERREUR outil discuter_avec_clovis : {e}")
+        return "Erreur : Clovis n'a pas pu répondre, réessaie."
+
+    entete = f"[conversation_id: {conv_id}{' (nouveau fil)' if nouveau_fil else ''}]\n\n"
+
+    if confirmation:
+        id_confirmation = _creer_confirmation(
+            proprietaire_id=user_id,
+            nom_outil=confirmation.get("nom_outil", ""),
+            message=confirmation.get("message", ""),
+            arguments=confirmation.get("arguments", {}),
+            etat_reprise=confirmation.get("etat_reprise", {}),
+        )
+        if not id_confirmation:
+            return entete + "Erreur : Clovis voulait demander une confirmation mais elle n'a pas pu être enregistrée, réessaie."
+        return (
+            entete
+            + f"{confirmation.get('message', 'Clovis veut effectuer une action.')}\n"
+            + f"Arguments : {confirmation.get('arguments', {})}\n\n"
+            + f"Demande confirmation à l'utilisateur, puis utilise confirmer_action_clovis "
+            + f"avec id_confirmation=\"{id_confirmation}\" et approuve=true/false."
+        )
+
+    return entete + (texte or "(Clovis n'a rien répondu.)")
+
+
+@mcp_espace.tool()
+def confirmer_action_clovis(id_confirmation: str, approuve: bool, ctx: Context) -> str:
+    """
+    Confirme ou annule une action que Clovis voulait effectuer, signalée
+    par discuter_avec_clovis (id_confirmation fourni à ce moment-là).
+    `approuve` : true pour laisser Clovis exécuter l'action et continuer
+    sa réponse, false pour l'annuler (Clovis répond alors sans
+    l'utiliser). Ne jamais mettre approuve=true sans confirmation
+    explicite de l'utilisateur humain.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+
+    ligne = _recuperer_confirmation(id_confirmation, user_id)
+    if not ligne:
+        return "Erreur : cette confirmation est introuvable, déjà traitée, ou a expiré (15 min)."
+
+    try:
+        texte, confirmation = _derouler_chat(reprise={"etat_reprise": ligne["etat_reprise"], "approuve": approuve})
+    except Exception as e:
+        logging.error(f"ERREUR outil confirmer_action_clovis : {e}")
+        return "Erreur : la reprise a échoué, réessaie."
+    finally:
+        _supprimer_confirmation(id_confirmation)  # usage unique, dans tous les cas
+
+    if confirmation:
+        id_suivant = _creer_confirmation(
+            proprietaire_id=user_id,
+            nom_outil=confirmation.get("nom_outil", ""),
+            message=confirmation.get("message", ""),
+            arguments=confirmation.get("arguments", {}),
+            etat_reprise=confirmation.get("etat_reprise", {}),
+        )
+        if not id_suivant:
+            return "Erreur : Clovis voulait redemander une confirmation mais elle n'a pas pu être enregistrée, réessaie."
+        return (
+            f"{confirmation.get('message', 'Clovis veut effectuer une autre action.')}\n"
+            + f"Arguments : {confirmation.get('arguments', {})}\n\n"
+            + f"Demande confirmation à l'utilisateur, puis utilise confirmer_action_clovis "
+            + f"avec id_confirmation=\"{id_suivant}\" et approuve=true/false."
+        )
+
+    return texte or "(Clovis n'a rien répondu.)"

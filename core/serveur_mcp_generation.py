@@ -18,6 +18,8 @@ optionnelle -- voir generation_images.py, mis à jour le 21/07/2026).
 
 import os
 import logging
+import tempfile
+import base64
 
 from mcp.server.mcpserver import MCPServer as FastMCP, Context
 
@@ -59,6 +61,7 @@ from api.roles import (
 )
 from core.comportements_etudiants import (
     obtenir_comportement_skill as _obtenir_comportement_skill,
+    lister_comportements as _lister_comportements,
     ajouter_comportement as _ajouter_comportement,
     modifier_comportement as _modifier_comportement,
     supprimer_comportement as _supprimer_comportement,
@@ -67,6 +70,7 @@ from core.programme_llm import obtenir_structure_programme as _obtenir_structure
 from core.programme_llm import obtenir_chapitres_matiere as _obtenir_chapitres_matiere
 from core.programme_llm import obtenir_contenu_chapitre as _obtenir_contenu_chapitre
 from core.programme_llm import obtenir_examens_programme as _obtenir_examens_programme
+from core.programme_llm import lister_mes_programmes_legers as _lister_mes_programmes_legers
 from core.programme_ecriture import (
     ajouter_programme as _ajouter_programme,
     modifier_programme as _modifier_programme,
@@ -88,14 +92,39 @@ from core.programme_ecriture import (
     supprimer_examen as _supprimer_examen,
     annuler_derniere_modification as _annuler_derniere_modification,
 )
-from core.codes_partage import obtenir_comportement_skill_recu as _obtenir_comportement_skill_recu
+from core.codes_partage import (
+    obtenir_comportement_skill_recu as _obtenir_comportement_skill_recu,
+    propager_fichier_bibliotheque as _propager_fichier_bibliotheque,
+    propager_lien_bibliotheque as _propager_lien_bibliotheque,
+)
 from core.generation_site import (
     deployer_site as _deployer_site,
     site_deploiement_disponible,
 )
-from core.bibliotheque_fichiers import chercher_fichiers as _chercher_fichiers
-from core.bibliotheque_rag import chercher_bibliotheque as _chercher_bibliotheque
-from core.bibliotheque_rag import lire_document_bibliotheque_en_entier as _lire_document_bibliotheque_en_entier
+from core.bibliotheque_fichiers import (
+    chercher_fichiers as _chercher_fichiers,
+    enregistrer_fichier as _enregistrer_fichier,
+    enregistrer_lien as _enregistrer_lien,
+    lister_fichiers as _lister_fichiers,
+    supprimer_fichier as _supprimer_fichier,
+)
+from core.bibliotheque_rag import (
+    chercher_bibliotheque as _chercher_bibliotheque,
+    lire_document_bibliotheque_en_entier as _lire_document_bibliotheque_en_entier,
+    indexer_pdf_bibliotheque as _indexer_pdf_bibliotheque,
+    indexer_texte_bibliotheque as _indexer_texte_bibliotheque,
+)
+from core.bibliotheque_programme import (
+    classer_document as _classer_document,
+    declasser_document as _declasser_document,
+    lister_emplacements_document as _lister_emplacements_document,
+    libelle_emplacement as _libelle_emplacement,
+    TYPES_EMPLACEMENT_BIBLIOTHEQUE,
+)
+from core.description_multimedia import (
+    decrire_image_bibliotheque as _decrire_image_bibliotheque,
+    transcrire_audio_bibliotheque as _transcrire_audio_bibliotheque,
+)
 
 # Clovis (12/08) : memoire/profil/RAG/matiere ne sont plus pre-fetches et
 # injectes systematiquement dans le system prompt (voir core/main.py,
@@ -112,6 +141,14 @@ _SUPABASE_SECRET = os.environ.get("SUPABASE_SECRET")
 _supabase_memoire = create_client(_SUPABASE_URL, _SUPABASE_SECRET)
 
 mcp_generation = FastMCP(name="generation")
+
+# Même limite que core/serveur_mcp_espace.py et
+# api/bibliotheque_utilisateur.py (à garder en phase si elle change).
+# Pas de liste blanche de type MIME : retirée du reste du dépôt le 17/08
+# (Bourama, "retrait des whitelists de type de fichier"), voir
+# core/serveur_mcp_espace.py::ajouter_document_bibliotheque pour la même
+# évolution côté serveur externe.
+_TAILLE_MAX_OCTETS_BIBLIOTHEQUE = 50 * 1024 * 1024  # 50 Mo
 
 
 @mcp_generation.tool()
@@ -375,6 +412,301 @@ def consulter_bibliotheque(question: str, ctx: Context) -> str:
     return "\n\n---\n\n".join(blocs)
 
 
+# --- Bibliothèque (gestion en écriture) ---------------------------------
+# Ajouté le 17/08/2026 (demande Bourama : "ajoute à Clovis tout ce que
+# Claude peut faire") -- jusqu'ici seule la recherche par contenu
+# (consulter_bibliotheque, ci-dessus) existait côté agent interne, la
+# gestion (lister/ajouter/supprimer) n'existait que côté MCP externe
+# (core/serveur_mcp_espace.py). Même logique réutilisée telle quelle
+# (core/bibliotheque_fichiers.py, core/bibliotheque_rag.py,
+# core/codes_partage.py), seule l'enveloppe MCP change.
+
+@mcp_generation.tool()
+def lister_bibliotheque(ctx: Context) -> str:
+    """
+    Liste les documents/liens/notes de la bibliothèque personnelle de
+    CET utilisateur (section "Bibliothèque" de "Mon espace"), sans
+    recherche par contenu (voir consulter_bibliotheque pour ça).
+    Renvoie pour chaque entrée : id, description, type, date d'ajout.
+    """
+    user_id = ctx.request_context.request.query_params.get("user_id")
+    if not user_id:
+        return "Aucune bibliothèque disponible : utilisateur non connecté."
+    try:
+        fichiers = _lister_fichiers("utilisateur", user_id=user_id, origine="bibliotheque")
+    except Exception as e:
+        logging.error(f"ERREUR outil lister_bibliotheque : {e}")
+        return "Erreur : impossible de lister la bibliothèque, réessaie."
+    if not fichiers:
+        return "Bibliothèque vide pour l'instant."
+    lignes = []
+    for f in fichiers:
+        ligne = (
+            f"- id={f['id']} | {f.get('description') or f.get('nom_fichier')} "
+            f"({f.get('type_mime', 'inconnu')}, ajouté le {f.get('created_at', '?')})"
+        )
+        emplacements = _lister_emplacements_document(f["id"])
+        if emplacements:
+            ligne += " | classé dans : " + ", ".join(e["libelle"] for e in emplacements)
+        lignes.append(ligne)
+    return "\n".join(lignes)
+
+
+@mcp_generation.tool()
+def ajouter_lien_bibliotheque(url: str, titre: str, ctx: Context) -> str:
+    """
+    Ajoute un lien à la bibliothèque personnelle de CET utilisateur.
+    `url` : l'adresse à enregistrer. `titre` : nom donné à cette entrée
+    (utilise l'URL elle-même si aucun titre pertinent n'est fourni).
+    """
+    user_id = ctx.request_context.request.query_params.get("user_id")
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    url = (url or "").strip()
+    if not url:
+        return "Erreur : url manquante."
+    titre_final = (titre or url).strip()
+    try:
+        ligne = _enregistrer_lien(
+            url=url,
+            nom_fichier=titre_final,
+            niveau="utilisateur",
+            uploade_par=user_id,
+            user_id=user_id,
+            description=titre_final,
+        )
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_lien_bibliotheque : {e}")
+        return "Erreur : impossible d'enregistrer ce lien, réessaie."
+    try:
+        _propager_lien_bibliotheque(user_id, url, titre_final, titre_final)
+    except Exception as e:
+        logging.error(f"ERREUR propagation ajouter_lien_bibliotheque : {e}")
+    return f"Lien ajouté (id {ligne['id']})."
+
+
+@mcp_generation.tool()
+def ajouter_texte_bibliotheque(contenu: str, titre: str, ctx: Context) -> str:
+    """
+    Ajoute une note de texte libre à la bibliothèque personnelle de CET
+    utilisateur (immédiatement consultable par consulter_bibliotheque).
+    `contenu` : le texte à enregistrer. `titre` : nom donné à cette note.
+    """
+    user_id = ctx.request_context.request.query_params.get("user_id")
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    contenu = (contenu or "").strip()
+    if not contenu:
+        return "Erreur : contenu vide."
+    titre = (titre or "").strip()
+    nom_fichier = f"{titre or 'Note'}.txt"
+    description = titre or (contenu[:80] + ("…" if len(contenu) > 80 else ""))
+    try:
+        ligne = _enregistrer_fichier(
+            contenu=contenu.encode("utf-8"),
+            nom_fichier=nom_fichier,
+            type_mime="text/plain",
+            niveau="utilisateur",
+            uploade_par=user_id,
+            user_id=user_id,
+            description=description,
+        )
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_texte_bibliotheque : {e}")
+        return "Erreur : impossible d'enregistrer cette note, réessaie."
+    try:
+        _indexer_texte_bibliotheque(contenu, fichier_id=ligne["id"], user_id=user_id)
+    except Exception as e:
+        logging.error(f"ERREUR vectorisation ajouter_texte_bibliotheque : {e}")
+    try:
+        _propager_fichier_bibliotheque(user_id, contenu.encode("utf-8"), nom_fichier, "text/plain", titre or None)
+    except Exception as e:
+        logging.error(f"ERREUR propagation ajouter_texte_bibliotheque : {e}")
+    return f"Note ajoutée (id {ligne['id']})."
+
+
+@mcp_generation.tool()
+def ajouter_document_bibliotheque(
+    nom_fichier: str, type_mime: str, contenu_base64: str, titre: str, description: str, ctx: Context,
+    type_emplacement: str = "", emplacement_id: str = "",
+) -> str:
+    """
+    Ajoute un fichier (PDF, image, audio ou vidéo) à la bibliothèque
+    personnelle de CET utilisateur -- même effet que s'il l'avait
+    uploadé lui-même depuis "Mon espace". `nom_fichier` : nom du fichier
+    avec son extension (ex. "cours_svt.pdf"). `type_mime` : type MIME
+    exact du fichier (ex. "application/pdf", "image/png", "audio/mpeg",
+    "video/mp4", ou tout autre type MIME -- n'importe quel type de
+    fichier est accepté). `contenu_base64` : contenu du fichier encodé en
+    base64 (jamais de contenu brut binaire). `titre`/`description` :
+    optionnels, repli sur le nom du fichier si absents. Limite : 50 Mo.
+    `type_emplacement`/`emplacement_id` : optionnels -- si fournis
+    ("programme"/"matiere"/"chapitre"/"exercice"/"examen" + son id),
+    classe directement ce document à cet endroit du programme dès
+    l'ajout.
+    """
+    user_id = ctx.request_context.request.query_params.get("user_id")
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+
+    type_mime = (type_mime or "").strip().lower()
+    if not type_mime:
+        return "Erreur : type de fichier manquant."
+
+    try:
+        contenu = base64.b64decode(contenu_base64, validate=True)
+    except Exception:
+        return "Erreur : contenu_base64 invalide (doit être du base64 valide)."
+
+    if len(contenu) == 0:
+        return "Erreur : fichier vide."
+    if len(contenu) > _TAILLE_MAX_OCTETS_BIBLIOTHEQUE:
+        return "Erreur : fichier trop lourd (50 Mo max)."
+
+    nom_original = (nom_fichier or "fichier").strip()
+    titre = (titre or "").strip()
+    description = (description or "").strip()
+    description_finale = (
+        f"{titre} — {description}" if titre and description
+        else (description or titre or nom_original)
+    )
+
+    try:
+        ligne = _enregistrer_fichier(
+            contenu=contenu,
+            nom_fichier=nom_original,
+            type_mime=type_mime,
+            niveau="utilisateur",
+            uploade_par=user_id,
+            user_id=user_id,
+            description=description_finale,
+        )
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_document_bibliotheque : {e}")
+        return "Erreur : impossible d'enregistrer ce fichier, réessaie."
+
+    if type_mime == "application/pdf":
+        chemin_temp = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                tmp.write(contenu)
+                chemin_temp = tmp.name
+            _indexer_pdf_bibliotheque(chemin_temp, fichier_id=ligne["id"], user_id=user_id)
+        except Exception as e:
+            logging.error(f"ERREUR vectorisation ajouter_document_bibliotheque (fichier_id={ligne['id']}) : {e}")
+        finally:
+            if chemin_temp:
+                try:
+                    os.remove(chemin_temp)
+                except OSError:
+                    pass
+    elif type_mime.startswith("image/"):
+        try:
+            description_image = _decrire_image_bibliotheque(contenu, type_mime)
+            if description_image:
+                _indexer_texte_bibliotheque(description_image, fichier_id=ligne["id"], user_id=user_id)
+        except Exception as e:
+            logging.error(f"ERREUR vectorisation image ajouter_document_bibliotheque (fichier_id={ligne['id']}) : {e}")
+    elif type_mime.startswith("audio/"):
+        try:
+            transcription_audio = _transcrire_audio_bibliotheque(contenu, nom_original)
+            if transcription_audio:
+                _indexer_texte_bibliotheque(transcription_audio, fichier_id=ligne["id"], user_id=user_id)
+        except Exception as e:
+            logging.error(f"ERREUR vectorisation audio ajouter_document_bibliotheque (fichier_id={ligne['id']}) : {e}")
+
+    try:
+        _propager_fichier_bibliotheque(user_id, contenu, nom_original, type_mime, description_finale)
+    except Exception as e:
+        logging.error(f"ERREUR propagation ajouter_document_bibliotheque : {e}")
+
+    message = f"Fichier ajouté (id {ligne['id']})."
+    if type_emplacement and emplacement_id:
+        if type_emplacement not in TYPES_EMPLACEMENT_BIBLIOTHEQUE:
+            message += f" Attention : type d'emplacement invalide ({type_emplacement}), pas classé dans le programme."
+        else:
+            resultat = _classer_document(user_id, ligne["id"], type_emplacement, emplacement_id)
+            if resultat["ok"]:
+                libelle = _libelle_emplacement(type_emplacement, emplacement_id) or emplacement_id
+                message += f" Classé dans : {libelle}."
+            else:
+                message += f" Attention : pas classé dans le programme ({resultat['erreur']})"
+    return message
+
+
+@mcp_generation.tool()
+def supprimer_document_bibliotheque(fichier_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT un document/lien/note de la bibliothèque
+    personnelle de CET utilisateur, à partir de son id (voir
+    lister_bibliotheque). SENSIBLE : demande toujours confirmation à
+    l'utilisateur avant d'être exécuté, quelle que soit la formulation
+    de sa demande.
+    """
+    user_id = ctx.request_context.request.query_params.get("user_id")
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        res = (
+            _supabase_memoire.table("fichiers_uploades")
+            .select("user_id")
+            .eq("id", fichier_id)
+            .maybe_single()
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_document_bibliotheque (lecture) : {e}")
+        return "Erreur : impossible de supprimer ce document, réessaie."
+    if not res or not res.data:
+        return "Ce document est introuvable."
+    if res.data["user_id"] != user_id:
+        return "Ce document ne t'appartient pas."
+    try:
+        _supprimer_fichier(fichier_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_document_bibliotheque (suppression) : {e}")
+        return "Erreur : impossible de supprimer ce document, réessaie."
+    return "Document supprimé."
+
+
+@mcp_generation.tool()
+def classer_document_dans_programme(fichier_id: str, type_emplacement: str, emplacement_id: str, ctx: Context) -> str:
+    """
+    Classe un document de la bibliothèque personnelle à un emplacement
+    du programme de CET utilisateur. `type_emplacement` : "programme",
+    "matiere", "chapitre", "exercice" ou "examen". `emplacement_id` : id
+    de cet élément précis du programme. Un même document peut être
+    classé à plusieurs emplacements (appeler cet outil plusieurs fois) ;
+    reclasser au même endroit ne crée pas de doublon.
+    """
+    user_id = ctx.request_context.request.query_params.get("user_id")
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    if type_emplacement not in TYPES_EMPLACEMENT_BIBLIOTHEQUE:
+        return f"Erreur : type d'emplacement invalide, utilise l'un de {TYPES_EMPLACEMENT_BIBLIOTHEQUE}."
+    resultat = _classer_document(user_id, fichier_id, type_emplacement, emplacement_id)
+    if not resultat["ok"]:
+        return f"Erreur : {resultat['erreur']}"
+    libelle = _libelle_emplacement(type_emplacement, emplacement_id) or emplacement_id
+    return f"Document classé dans : {libelle}."
+
+
+@mcp_generation.tool()
+def retirer_document_du_programme(fichier_id: str, type_emplacement: str, emplacement_id: str, ctx: Context) -> str:
+    """
+    Retire un document de la bibliothèque d'un emplacement du programme
+    (le document reste dans la bibliothèque, seul ce classement précis
+    disparaît). Mêmes paramètres que classer_document_dans_programme.
+    """
+    user_id = ctx.request_context.request.query_params.get("user_id")
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    resultat = _declasser_document(user_id, fichier_id, type_emplacement, emplacement_id)
+    if not resultat["ok"]:
+        return f"Erreur : {resultat['erreur']}"
+    return "Document retiré de cet emplacement du programme."
+
+
 @mcp_generation.tool()
 def lire_document_bibliotheque_en_entier(fichier_id: str, ctx: Context) -> str:
     """
@@ -479,6 +811,110 @@ def mettre_a_jour_memoire_utilisateur(champs_json: str, ctx: Context) -> str:
 
 
 @mcp_generation.tool()
+def effacer_memoire(ctx: Context) -> str:
+    """
+    Efface DÉFINITIVEMENT le résumé long-terme que Clovis garde de CET
+    utilisateur ("oublie tout ce que tu sais de moi"). SENSIBLE :
+    demande toujours confirmation à l'utilisateur avant d'être exécuté,
+    quelle que soit la formulation de sa demande.
+    """
+    user_id = ctx.request_context.request.query_params.get("user_id")
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        _supabase_memoire.table("conversation_summaries").delete().eq("user_id", user_id).execute()
+    except Exception as e:
+        logging.error(f"ERREUR outil effacer_memoire : {e}")
+        return "Erreur : impossible d'effacer la mémoire, réessaie."
+    return "Mémoire effacée."
+
+
+@mcp_generation.tool()
+def lister_conversations_historique(ctx: Context) -> str:
+    """
+    Liste les fils de discussion distincts entre CET utilisateur et
+    Clovis (section "Historique"), le plus récemment actif en premier.
+    Renvoie pour chacun : conversation_id ("legacy" pour les échanges
+    d'avant l'historique par fil), titre (début du premier message),
+    dernière activité.
+    """
+    requete = ctx.request_context.request
+    user_id = requete.query_params.get("user_id")
+    agent_id = requete.query_params.get("agent_id")
+    if not user_id or not agent_id:
+        return "Erreur : impossible d'identifier l'utilisateur ou l'agent."
+    try:
+        lignes = (
+            _supabase_memoire.table("historique_conversations")
+            .select("conversation_id, role, content, created_at")
+            .eq("user_id", user_id)
+            .eq("agent_id", agent_id)
+            .order("created_at")
+            .execute()
+        ).data or []
+    except Exception as e:
+        logging.error(f"ERREUR outil lister_conversations_historique : {e}")
+        return "Erreur : impossible de charger l'historique, réessaie."
+
+    if not lignes:
+        return "Aucune conversation dans l'historique pour l'instant."
+
+    fils: dict = {}
+    for ligne in lignes:
+        cle = ligne["conversation_id"] or "legacy"
+        if cle not in fils:
+            fils[cle] = {"premier_message_user": None, "derniere_activite": ligne["created_at"]}
+        if ligne["role"] == "user" and fils[cle]["premier_message_user"] is None:
+            fils[cle]["premier_message_user"] = ligne["content"]
+        fils[cle]["derniere_activite"] = ligne["created_at"]
+
+    resultats = []
+    for cle, fil in fils.items():
+        if cle == "legacy":
+            titre = "Avant l'historique par conversation"
+        else:
+            titre = (fil["premier_message_user"] or "(sans titre)")[:80]
+        resultats.append((fil["derniere_activite"], f"- conversation_id={cle} | {titre} | dernière activité : {fil['derniere_activite']}"))
+    resultats.sort(reverse=True)
+    return "\n".join(l for _, l in resultats)
+
+
+@mcp_generation.tool()
+def lire_conversation_historique(conversation_id: str, ctx: Context) -> str:
+    """
+    Contenu complet d'un fil de discussion précis entre CET utilisateur
+    et Clovis, à partir de son conversation_id (voir
+    lister_conversations_historique -- utilise littéralement "legacy"
+    pour recharger les échanges d'avant l'historique par fil).
+    """
+    requete = ctx.request_context.request
+    user_id = requete.query_params.get("user_id")
+    agent_id = requete.query_params.get("agent_id")
+    if not user_id or not agent_id:
+        return "Erreur : impossible d'identifier l'utilisateur ou l'agent."
+    try:
+        req = (
+            _supabase_memoire.table("historique_conversations")
+            .select("role, content, created_at")
+            .eq("user_id", user_id)
+            .eq("agent_id", agent_id)
+        )
+        if conversation_id == "legacy":
+            req = req.is_("conversation_id", "null")
+        else:
+            req = req.eq("conversation_id", conversation_id)
+        lignes = req.order("created_at").execute().data or []
+    except Exception as e:
+        logging.error(f"ERREUR outil lire_conversation_historique : {e}")
+        return "Erreur : impossible de charger cette conversation, réessaie."
+
+    if not lignes:
+        return "Cette conversation est introuvable ou vide."
+
+    return "\n".join(f"[{l['role']}] {l['content']}" for l in lignes)
+
+
+@mcp_generation.tool()
 def consulter_profil_utilisateur(ctx: Context) -> str:
     """
     Consulte le profil connu de CET utilisateur pour Clovis (données
@@ -507,6 +943,35 @@ def consulter_profil_utilisateur(ctx: Context) -> str:
     except Exception as e:
         logging.error(f"ERREUR outil consulter_profil_utilisateur : {e}")
         return "Erreur : impossible de consulter le profil, réessaie."
+
+
+@mcp_generation.tool()
+def lister_comportements(ctx: Context) -> str:
+    """
+    Liste les instructions personnelles que CET utilisateur a écrites
+    lui-même (section "Mes comportements" de "Mon espace") pour Clovis.
+    Renvoie pour chacune : id, description courte, texte complet.
+    """
+    requete = ctx.request_context.request
+    user_id = requete.query_params.get("user_id")
+    agent_id = requete.query_params.get("agent_id")
+    if not user_id or not agent_id:
+        return "Erreur : impossible d'identifier l'étudiant ou l'agent."
+    try:
+        comportements = _lister_comportements(agent_id, user_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil lister_comportements : {e}")
+        return "Erreur : impossible de lister les comportements, réessaie."
+    if not comportements:
+        return "Aucun comportement enregistré pour l'instant."
+    lignes = []
+    for c in comportements:
+        ligne = f"- id={c['id']} | {c['description']}\n  texte : {c['texte']}"
+        if c.get("lien_type") and c.get("lien_id"):
+            libelle = _libelle_emplacement(c["lien_type"], c["lien_id"]) if c["lien_type"] in TYPES_EMPLACEMENT_BIBLIOTHEQUE else None
+            ligne += f"\n  lié à : {libelle or (c['lien_type'] + ' ' + c['lien_id'])}"
+        lignes.append(ligne)
+    return "\n".join(lignes)
 
 
 @mcp_generation.tool()
@@ -618,6 +1083,32 @@ def supprimer_comportement(comportement_id: str, ctx: Context) -> str:
     except Exception as e:
         logging.error(f"ERREUR outil supprimer_comportement : {e}")
         return "Erreur : impossible de supprimer ce comportement, réessaie."
+
+
+@mcp_generation.tool()
+def lister_mes_programmes(ctx: Context) -> str:
+    """
+    Liste légère (id, niveau, nom) de TOUS les programmes de CET
+    utilisateur -- point de départ obligatoire avant tout autre outil
+    "programme" s'il n'a pas déjà d'id précis en tête : ils ont tous
+    besoin d'un programme_id/matiere_id/chapitre_id en entrée, jamais à
+    deviner. Ne contient PAS les matières/chapitres à l'intérieur (voir
+    consulter_programme une fois l'id du programme choisi).
+    """
+    user_id = ctx.request_context.request.query_params.get("user_id")
+    if not user_id:
+        return "Erreur : impossible d'identifier l'étudiant."
+    try:
+        programmes = _lister_mes_programmes_legers(user_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil lister_mes_programmes : {e}")
+        return "Erreur : impossible de lister les programmes, réessaie."
+    if not programmes:
+        return "Aucun programme enregistré pour l'instant."
+    return "\n".join(
+        f"- {p['niveau']}" + (f" — {p['nom']}" if p.get("nom") else "") + f" (id: {p['id']})"
+        for p in programmes
+    )
 
 
 @mcp_generation.tool()

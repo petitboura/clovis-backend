@@ -191,6 +191,13 @@ OUTILS_SENSIBLES = {
     "supprimer_exercice_programme",
     "supprimer_examen",
     "supprimer_comportement",
+    # Portés depuis core/serveur_mcp_espace.py le 17/08 (demande Bourama :
+    # "ajoute à Clovis tout ce que Claude peut faire") -- mêmes garanties
+    # que côté MCP externe (destructive_hint=True là-bas), transposées
+    # ici via OUTILS_SENSIBLES puisque c'est le mécanisme propre à
+    # l'agent interne.
+    "supprimer_document_bibliotheque",
+    "effacer_memoire",
 }
 
 
@@ -295,6 +302,7 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "envoyer_message": {"label": "Envoi d'un message", "icone": "Send", "onglet": "utilitaires"},
     "consulter_memoire_utilisateur": {"label": "Consultation de ta mémoire", "icone": "Brain", "onglet": "utilitaires"},
     "mettre_a_jour_memoire_utilisateur": {"label": "Mise à jour de ta mémoire", "icone": "Brain", "onglet": "utilitaires"},
+    "effacer_memoire": {"label": "Effacement de ta mémoire", "icone": "Trash2", "onglet": "utilitaires"},
     "consulter_profil_utilisateur": {"label": "Consultation de ton profil", "icone": "UserCircle", "onglet": "utilitaires"},
     "mettre_a_jour_profil_utilisateur": {"label": "Mise à jour de ton profil", "icone": "UserCog", "onglet": "utilitaires"},
 
@@ -318,6 +326,28 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "ui_dessin": {"label": "Dessiner (géométrie, graphe, croquis)", "icone": "PenLine", "onglet": "utilitaires"},
     "ui_mode_vocal": {"label": "Mode vocal (bientôt disponible)", "icone": "AudioLines", "onglet": "utilitaires"},
 
+    # --- Bibliothèque (gestion, portée le 17/08 depuis serveur_mcp_espace.py) ---
+    # onglet=None comme le bloc "Programme adaptatif" juste en dessous et
+    # pour la même raison (bug corrigé le 17/08, voir son commentaire) :
+    # ce sont des outils que le modèle appelle lui-même en autonomie
+    # pendant la conversation, jamais des boutons à cliquer. Seule
+    # exception : consulter_bibliotheque (recherche par contenu, dans
+    # serveur_mcp_generation.py) reste "rechercher", inchangé, pas
+    # concerné par ce bloc.
+    "lister_bibliotheque": {"label": "Liste de la bibliothèque", "icone": "Library", "onglet": None},
+    "ajouter_lien_bibliotheque": {"label": "Ajout d'un lien à la bibliothèque", "icone": "Link", "onglet": None},
+    "ajouter_texte_bibliotheque": {"label": "Ajout d'une note à la bibliothèque", "icone": "FileText", "onglet": None},
+    "ajouter_document_bibliotheque": {"label": "Ajout d'un fichier à la bibliothèque", "icone": "FileUp", "onglet": None},
+    "supprimer_document_bibliotheque": {"label": "Suppression d'un document de la bibliothèque", "icone": "Trash2", "onglet": None},
+    "classer_document_dans_programme": {"label": "Classement d'un document dans le programme", "icone": "FolderInput", "onglet": None},
+    "retirer_document_du_programme": {"label": "Retrait d'un document du programme", "icone": "FolderOutput", "onglet": None},
+
+    # --- Historique (porté le 17/08 depuis serveur_mcp_espace.py) ---
+    # Même onglet=None : section "Historique" à part entière de "Mon
+    # espace", pas un bouton du menu Outils du chat.
+    "lister_conversations_historique": {"label": "Liste des conversations passées", "icone": "History", "onglet": None},
+    "lire_conversation_historique": {"label": "Lecture d'une conversation passée", "icone": "History", "onglet": None},
+
     # --- Programme adaptatif (interne) ---
     # onglet=None (17/08, bug signalé par Bourama) : ces 22 outils étaient
     # étiquetés "utilitaires" comme les 6 vrais utilitaires juste
@@ -331,6 +361,7 @@ REGISTRE_AFFICHAGE_OUTILS = {
     # (ni Outils, ni Utilitaires) -- voir api/outils_registre.py (.get()
     # au lieu d'un accès direct) et lib/outils.ts (onglet optionnel) côté
     # frontend pour la partie qui rend ça possible sans planter.
+    "lister_mes_programmes": {"label": "Liste de tes programmes", "icone": "GraduationCap", "onglet": None},
     "consulter_matiere_active": {"label": "Consultation de la matière active", "icone": "BookOpen", "onglet": None},
     "consulter_matiere_programme": {"label": "Consultation des chapitres d'une matière", "icone": "BookOpen", "onglet": None},
     "ajouter_programme": {"label": "Création d'un programme", "icone": "GraduationCap", "onglet": None},
@@ -356,6 +387,7 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "supprimer_examen": {"label": "Suppression d'un examen", "icone": "Trash2", "onglet": None},
     "annuler_derniere_modification": {"label": "Annulation de la dernière modification", "icone": "Undo2", "onglet": None},
     "ajouter_comportement": {"label": "Ajout d'un comportement", "icone": "Sparkles", "onglet": None},
+    "lister_comportements": {"label": "Liste de tes comportements", "icone": "Sparkles", "onglet": None},
     "modifier_comportement": {"label": "Modification d'un comportement", "icone": "Sparkles", "onglet": None},
     "consulter_comportement": {"label": "Consultation d'un comportement", "icone": "Sparkles", "onglet": None},
     "supprimer_comportement": {"label": "Suppression d'un comportement", "icone": "Trash2", "onglet": None},
