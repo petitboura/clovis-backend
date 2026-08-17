@@ -95,6 +95,7 @@ from core.generation_site import (
 )
 from core.bibliotheque_fichiers import chercher_fichiers as _chercher_fichiers
 from core.bibliotheque_rag import chercher_bibliotheque as _chercher_bibliotheque
+from core.bibliotheque_rag import lire_document_bibliotheque_en_entier as _lire_document_bibliotheque_en_entier
 
 # Clovis (12/08) : memoire/profil/RAG/matiere ne sont plus pre-fetches et
 # injectes systematiquement dans le system prompt (voir core/main.py,
@@ -372,6 +373,29 @@ def consulter_bibliotheque(question: str, ctx: Context) -> str:
         blocs.append(bloc)
 
     return "\n\n---\n\n".join(blocs)
+
+
+@mcp_generation.tool()
+def lire_document_bibliotheque_en_entier(fichier_id: str, ctx: Context) -> str:
+    """
+    Renvoie le texte intégral d'un document PDF/texte déjà indexé dans
+    la bibliothèque personnelle de CET utilisateur (obtiens `fichier_id`
+    via consulter_bibliotheque ou chercher_fichier). À utiliser quand
+    les extraits de consulter_bibliotheque ne suffisent pas et qu'il te
+    faut vraiment tout le contenu (17/08, demande Bourama). Ne
+    fonctionne que pour les documents PDF/texte (les images/audio/vidéo
+    ne sont pas vectorisés aujourd'hui, donc rien à recoller pour eux --
+    utilise leur lien pour les afficher plutôt).
+    """
+    requete = ctx.request_context.request
+    user_id = requete.query_params.get("user_id")
+    if not user_id:
+        return "Aucune bibliothèque disponible : utilisateur non connecté."
+
+    texte = _lire_document_bibliotheque_en_entier(fichier_id, user_id=user_id)
+    if texte is None:
+        return "Rien à lire pour ce fichier : soit il n'existe pas ou ne t'appartient pas, soit ce n'est pas un PDF/texte indexé."
+    return texte
 
 
 @mcp_generation.tool()

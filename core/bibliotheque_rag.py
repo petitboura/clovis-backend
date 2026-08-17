@@ -89,6 +89,33 @@ def indexer_pdf_bibliotheque(chemin_pdf: str, fichier_id: str, user_id: str) -> 
     return indexer_texte_bibliotheque(extraire_texte_pdf(chemin_pdf), fichier_id, user_id)
 
 
+def lire_document_bibliotheque_en_entier(fichier_id: str, user_id: str) -> str | None:
+    """
+    Reconstruit le texte intégral d'un document déjà indexé (PDF/texte),
+    en recollant tous ses chunks dans l'ordre d'insertion (id croissant
+    == ordre d'origine, voir indexer_texte_bibliotheque qui insère les
+    morceaux dans l'ordre). None si le document n'appartient pas à
+    user_id ou n'a aucun chunk indexé (image/audio/vidéo par exemple --
+    non vectorisés aujourd'hui).
+    """
+    try:
+        res = (
+            supabase.table("documents_bibliotheque")
+            .select("contenu")
+            .eq("fichier_id", fichier_id)
+            .eq("user_id", user_id)
+            .order("id")
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture intégrale fichier_id={fichier_id}) : {e}")
+        return None
+
+    if not res.data:
+        return None
+    return "\n\n".join(ligne["contenu"] for ligne in res.data)
+
+
 def chercher_bibliotheque(question: str, user_id: str, match_count: int = 5) -> list:
     """
     Recherche sémantique dans la bibliothèque personnelle de `user_id`.

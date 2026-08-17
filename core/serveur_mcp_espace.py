@@ -288,9 +288,10 @@ def ajouter_document_bibliotheque(
     base64 (jamais de contenu brut binaire). `titre`/`description` :
     optionnels, repli sur le nom du fichier si absents. Limite : 50 Mo.
     `type_emplacement`/`emplacement_id` : optionnels -- si fournis
-    ("programme"/"matiere"/"chapitre" + son id), classe directement ce
-    document à cet endroit du programme dès l'ajout (équivalent à
-    appeler classer_document_dans_programme juste après).
+    ("programme"/"matiere"/"chapitre"/"exercice"/"examen" + son id),
+    classe directement ce document à cet endroit du programme dès
+    l'ajout (équivalent à appeler classer_document_dans_programme
+    juste après).
     """
     user_id = _user_id_authentifie(ctx)
     if not user_id:
