@@ -55,7 +55,8 @@ logging.basicConfig(level=logging.INFO)
 # MODELE_ROUTEUR_OUTILS dans core/main.py) -- utilisé seulement pour le
 # routeur ci-dessous (choisir_comportements_pertinents), pas pour la
 # génération du skill (voir MODELE_SKILL, plus costaud, plus bas).
-MODELE_PETIT = "llama-3.1-8b-instant"
+# 17/08 : llama-3.1-8b-instant decommissionne par Groq (404 en prod).
+MODELE_PETIT = "openai/gpt-oss-20b"
 
 # Même modèle "costaud" que le modèle principal de la cascade de chat
 # (GROQ_PRIMARY, core/main.py) -- écrire un skill complet (16/08/2026,

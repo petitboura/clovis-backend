@@ -42,19 +42,24 @@ supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
 GROQ_PRIMARY = "openai/gpt-oss-120b"
 GOOGLE_MODEL = "gemini-2.5-flash"
 GROQ_FALLBACKS = [
-    "llama-3.3-70b-versatile",
     "qwen/qwen3.6-27b",
     "openai/gpt-oss-20b",
     # llama-4-scout-17b-16e-instruct et qwen3-32b retires par Groq le
     # 17/06/2026 (voir console.groq.com/docs/deprecations) -- 404
-    # systematique, retires de la chaine le 26/07/2026. llama-3.1-8b-instant
-    # les remplace en TOUT dernier recours Groq (avant Gemini) : c'est le
-    # modele le plus permissif du plan gratuit (le moins susceptible d'etre
-    # a court de quota quand tout le reste sature), mais nettement moins
-    # capable -- voir MODELES_QUALITE_REDUITE plus bas, qui sert a prevenir
-    # l'utilisateur quand CE modele precis a genere la reponse, pour ne pas
-    # laisser juger la qualite de la plateforme sur lui.
-    "llama-3.1-8b-instant",
+    # systematique, retires de la chaine le 26/07/2026.
+    #
+    # 17/08 : llama-3.3-70b-versatile (1er maillon) et llama-3.1-8b-instant
+    # (dernier recours Groq avant Gemini) retires a leur tour -- 404
+    # "model_not_found" constate en prod sur les deux. Coherence avec
+    # l'annonce Groq du 17/06/2026 : shutdown officiel de ces deux modeles
+    # au 16/08/2026 (voir console.groq.com/docs/deprecations), la veille
+    # de ce correctif. Pas de remplacement 1:1 ajoute pour le dernier
+    # recours -- openai/gpt-oss-20b (deja present juste au-dessus) ferme
+    # desormais la cascade Groq avant Gemini. A REVERIFIER : Bourama n'a
+    # pas encore confirme via console.groq.com/dashboard/limits si ces
+    # deux modeles sont bien morts pour sa cle precise (la doc publique
+    # Groq les liste encore comme "Production Models" au moment de ce
+    # correctif, contrairement aux 404 observes en prod).
 ]
 
 # Modeles de secours dont la qualite de reponse est nettement en retrait par
@@ -110,7 +115,7 @@ AGENT_ID_PAR_DEFAUT = "clovis"  # 12/08 : ce depot isole ne sert plus que Clovis
 # redemande un resume condense au modele plutot que d'empiler indefiniment
 # l'historique brut dans conversation_summaries.
 SEUIL_RESUME_MESSAGES = 20
-MODELE_RESUME = "llama-3.1-8b-instant"  # quota TPM separe de la cascade principale (llama-3.3-70b-versatile), evite la contention
+MODELE_RESUME = "openai/gpt-oss-20b"  # 17/08 : llama-3.1-8b-instant decommissionne par Groq (404 en prod) -- quota TPM separe de la cascade principale, evite la contention
 
 # Profil utilisateur dynamique par agent (2026-07-21, voir
 # agents.profil_utilisateur_schema et _mettre_a_jour_profil_utilisateur_si_besoin
@@ -121,7 +126,7 @@ MODELE_RESUME = "llama-3.1-8b-instant"  # quota TPM separe de la cascade princip
 # potentiellement des semaines a se declencher pour un agent utilise
 # occasionnellement.
 SEUIL_PROFIL_MESSAGES = 10
-MODELE_PROFIL = "llama-3.1-8b-instant"  # meme raison que MODELE_RESUME : quota TPM separe
+MODELE_PROFIL = "openai/gpt-oss-20b"  # 17/08 : llama-3.1-8b-instant decommissionne par Groq (404 en prod) -- meme raison que MODELE_RESUME : quota TPM separe
 
 # Routeur d'outils (2026-07-28, demande Bourama) : premier appel LLM
 # séparé, rapide, qui juge quels outils seraient pertinents pour la
@@ -129,22 +134,16 @@ MODELE_PROFIL = "llama-3.1-8b-instant"  # meme raison que MODELE_RESUME : quota 
 # simple (pas besoin de raisonnement) -- un petit modèle rapide et open
 # source plutôt que MODELE_PROFIL/MODELE_RESUME (llama-3.3-70b-versatile).
 #
-# 15/08 (demande Bourama, option 2 de la discussion sur le 413 TPM) :
-# gemma2-9b-it au lieu de llama-3.1-8b-instant -- même tier Groq gratuit,
-# mais limite spéciale de 15 000 TPM au lieu de 6 000 (2,5x), largement
-# suffisant pour le catalogue actuel (~31 outils, Notion/GitHub déjà
-# exclus, voir plus bas _tache_routeur) sans avoir à passer sur un plan
-# payant. Contexte plus court (8K vs 128K) mais sans impact ici, le
-# prompt du routeur ne s'en approche pas.
-#
-# ÉTAPE SUIVANTE PRÉVUE (pas encore faite, demande Bourama : "meilleure
-# et moins cher") : migrer vers openai/gpt-oss-20b dès que le budget
-# Groq passe sur le plan payant Developer -- meilleure qualité de
-# classification que gemma2-9b-it, et moins cher au token que
-# llama-3.3-70b-versatile si jamais un modèle plus costaud était
-# nécessaire. Ne PAS l'activer tant qu'on est sur le tier gratuit :
-# gpt-oss-20b n'y a que 8 000 TPM, un gain plus faible que gemma2-9b-it.
-MODELE_ROUTEUR_OUTILS = "gemma2-9b-it"
+# 17/08 : gemma2-9b-it (choisi le 15/08 pour ses 15 000 TPM) a été
+# décommissionné par Groq -- constaté en prod (400 "model_decommissioned"
+# à CHAQUE appel, donc plus AUCUNE suggestion automatique possible, quelle
+# que soit la question, le fail-safe de _router_outils renvoyant
+# systématiquement une liste vide). Remplacé par openai/gpt-oss-20b, la
+# recommandation officielle actuelle de Groq -- 8 000 TPM sur le tier
+# gratuit (moins que les 15 000 de gemma2-9b-it, mais suffisant pour le
+# catalogue actuel, ~31 outils, Notion/GitHub déjà exclus, voir plus bas
+# _tache_routeur), et surtout un modèle qui existe encore.
+MODELE_ROUTEUR_OUTILS = "openai/gpt-oss-20b"
 
 # D'apres la doc Groq (console.groq.com/docs/reasoning), le parametre
 # reasoning_effort n'est reconnu que par certains modeles (GPT-OSS 20B/120B,

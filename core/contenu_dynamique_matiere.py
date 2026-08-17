@@ -48,7 +48,7 @@ SUPABASE_URL = get_secret("SUPABASE_URL")
 SUPABASE_SECRET = get_secret("SUPABASE_SECRET")
 supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
 
-MODELE_ROUTEUR_MATIERE = "llama-3.1-8b-instant"
+MODELE_ROUTEUR_MATIERE = "openai/gpt-oss-20b"  # 17/08 : llama-3.1-8b-instant decommissionne par Groq (404 en prod)
 DELAI_MAX_ROUTEUR = 8  # secondes, même valeur que les autres routeurs rapides
 
 # Cache léger du flag "cet agent a du contenu dynamique par matière ?" --
