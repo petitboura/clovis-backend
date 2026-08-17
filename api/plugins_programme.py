@@ -446,6 +446,40 @@ def _cloner_programme(
         except Exception as e:
             logging.error(f"ERREUR clone classements_transversaux (source {programme_source_id}) : {e}")
 
+        # --------- Documents bibliothèque classés (17/08/2026) ---------
+        # Jusqu'ici absents du clone : un programme publié comme plugin
+        # perdait silencieusement tous les documents classés via la
+        # bibliothèque (voir core/bibliotheque_programme.py, 16/08).
+        # Best-effort comme le reste de cette fonction -- ne fait
+        # jamais échouer le clone du squelette si ça rate. On ne
+        # duplique PAS le fichier lui-même (fichiers_uploades reste la
+        # propriété de l'auteur source) : seul le lien de classement
+        # est recréé, comme pour classement_transversal_items ci-dessus.
+        try:
+            cibles_clonables["programme"] = {programme_source_id: nouveau_programme_id}
+            tous_ids_emplacements = [
+                cid for correspondance in cibles_clonables.values() for cid in correspondance.keys()
+            ]
+            if tous_ids_emplacements:
+                emplacements = (
+                    supabase.table("bibliotheque_emplacements_programme")
+                    .select("fichier_id, type_cible, cible_id")
+                    .in_("cible_id", tous_ids_emplacements)
+                    .execute()
+                )
+                for emplacement in (emplacements.data or []):
+                    correspondance = cibles_clonables.get(emplacement["type_cible"], {})
+                    nouvelle_cible_id = correspondance.get(emplacement["cible_id"])
+                    if nouvelle_cible_id is None:
+                        continue
+                    supabase.table("bibliotheque_emplacements_programme").insert({
+                        "fichier_id": emplacement["fichier_id"],
+                        "type_cible": emplacement["type_cible"],
+                        "cible_id": nouvelle_cible_id,
+                    }).execute()
+        except Exception as e:
+            logging.error(f"ERREUR clone bibliotheque_emplacements_programme (source {programme_source_id}) : {e}")
+
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (clone programme {programme_source_id}) : {e}")
         raise erreur_api(500, "ERREUR_INCONNUE")

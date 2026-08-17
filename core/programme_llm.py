@@ -330,7 +330,7 @@ def obtenir_contenu_chapitre(user_id: str, chapitre_id: str) -> str | None:
     try:
         exercices = (
             supabase.table("exercices_programme")
-            .select("enonce")
+            .select("id, enonce")
             .eq("chapitre_id", chapitre_id)
             .order("created_at")
             .execute()
@@ -340,6 +340,19 @@ def obtenir_contenu_chapitre(user_id: str, chapitre_id: str) -> str | None:
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (lecture exercices chapitre {chapitre_id}) : {e}")
         exercices = []
+
+    # 17/08, Bourama : un exercice peut désormais n'avoir aucun énoncé
+    # tapé (juste une pièce jointe classée via la Bibliothèque, voir
+    # SectionDocumentsBibliotheque côté frontend) -- sans ce complément,
+    # cette fonction montrerait une ligne vide à l'IA pour cet exercice.
+    try:
+        for ex in exercices:
+            from bibliotheque_programme import lister_documents_emplacement
+            ex["pieces_jointes"] = lister_documents_emplacement("exercice", ex["id"])
+    except Exception as e:
+        logging.error(f"ERREUR (lecture pièces jointes exercices chapitre {chapitre_id}) : {e}")
+        for ex in exercices:
+            ex.setdefault("pieces_jointes", [])
 
     lignes = [f"Chapitre : {matiere['nom']} — {chapitre['nom']}"]
     if chapitre.get("limites"):
@@ -365,7 +378,11 @@ def obtenir_contenu_chapitre(user_id: str, chapitre_id: str) -> str | None:
     if not exercices:
         lignes.append("  (aucun exercice pour l'instant)")
     for i, ex in enumerate(exercices, start=1):
-        lignes.append(f"  {i}. {ex['enonce']}")
+        enonce = ex["enonce"].strip() if ex["enonce"] else "(sans énoncé tapé, voir pièce jointe ci-dessous)"
+        lignes.append(f"  {i}. {enonce}")
+        for pj in ex.get("pieces_jointes") or []:
+            etiquette = pj.get("description") or pj["nom_fichier"]
+            lignes.append(f"     pièce jointe : {etiquette} -- {pj['url_publique']}")
 
     return "\n".join(lignes)
 
@@ -481,5 +498,12 @@ def obtenir_examens_programme(user_id: str, programme_id: str) -> str | None:
     for e in examens:
         chs = [noms_chapitres.get(cid, "?") for cid in chapitres_par_examen.get(e["id"], [])]
         lignes.append(f"- [{e['type']}] {e['titre']} -- chapitres couverts : {', '.join(chs) or '?'}")
+        try:
+            from bibliotheque_programme import lister_documents_emplacement
+            for pj in lister_documents_emplacement("examen", e["id"]):
+                etiquette = pj.get("description") or pj["nom_fichier"]
+                lignes.append(f"     sujet/pièce jointe : {etiquette} -- {pj['url_publique']}")
+        except Exception as ex:
+            logging.error(f"ERREUR (lecture pièces jointes examen {e['id']}) : {ex}")
 
     return "\n".join(lignes)
