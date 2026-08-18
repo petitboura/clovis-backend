@@ -2739,6 +2739,19 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 if not o["function"]["name"].startswith("notion-")
                 and "depot_github" not in o["function"]["name"]
             ]
+            # Outils de génération (PDF, Word, Excel, PowerPoint, LaTeX, code,
+            # site, image, audio, vidéo, 3D, signature, export, calcul
+            # symbolique...) exclus eux aussi du CATALOGUE envoyé au routeur
+            # automatique (18/08, demande Bourama). Filtre dynamique basé sur
+            # REGISTRE_AFFICHAGE_OUTILS (onglet == "generer"), pas de liste en
+            # dur -- tout nouvel outil ajouté à l'onglet "generer" sera exclu
+            # automatiquement ici. Comme pour Notion/GitHub : seule la
+            # sélection MANUELLE (bouton Outils, outil_force) reste
+            # inchangée, ces outils restent entièrement utilisables ainsi.
+            outils_disponibles_agent = [
+                o for o in outils_disponibles_agent
+                if REGISTRE_AFFICHAGE_OUTILS.get(o["function"]["name"], {}).get("onglet") != "generer"
+            ]
             return _router_outils(message_utilisateur, outils_disponibles_agent, historique)
 
         def _tache_prompt_optimiste():
