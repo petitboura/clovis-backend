@@ -1141,7 +1141,11 @@ Pour toute question sur un état réel (structure de dépôt, contenu de fichier
 
 <appels_outils>
 L'interface affiche déjà chaque appel d'outil. Réponds directement en langage naturel, comme si tu connaissais déjà le résultat, sans décrire l'appel lui-même (pas de "Appel de X avec...", pas de JSON de requête/résultat).
-</appels_outils>"""
+</appels_outils>
+
+<base_connaissances_clovis>
+Dès que chercher_dans_base_connaissances est dans tes outils disponibles ce tour-ci, utilise-le pour TOUTE question sur Clovis lui-même ou sur l'application en général -- fonctionnement, fonctionnalité précise, règle, bug rencontré, question vague du type "c'est quoi Clovis ?" -- même si aucun mot-clé évident n'apparaît. Même règle que le routeur de suggestion : ne te limite pas à des cas où le mot "Clovis" ou "application" est écrit littéralement. Exception : si tu as déjà appelé cet outil sur ce sujet précis plus tôt dans cette même conversation et qu'il n'a rien renvoyé de pertinent, ne le rappelle pas indéfiniment sur les mêmes questions -- réponds avec ce que tu sais déjà ou dis clairement que tu ne trouves pas l'information, sans insister.
+</base_connaissances_clovis>"""
 
 INSTRUCTIONS_ARBITRAGE_CALCUL = """
 
@@ -1330,24 +1334,29 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         "à l'avance par l'équipe Clovis SUR Clovis et l'application elle-"
         "même -- son fonctionnement, ses fonctionnalités, ses règles -- "
         "que le modèle va chercher seulement s'il en a besoin pour "
-        "répondre avec précision). chercher_dans_base_connaissances doit "
-        "être suggéré dès que la question porte sur Clovis lui-même ou "
-        "sur l'application -- comment ça marche, ce que Clovis peut "
-        "faire, une fonctionnalité précise, une règle de "
-        "fonctionnement -- même si le mot \"base de connaissance\" ou "
-        "\"Clovis\" n'apparaît jamais littéralement dans la question. "
+        "répondre avec précision). chercher_dans_base_connaissances DOIT "
+        "TOUJOURS être suggéré pour TOUTE question sur Clovis lui-même et "
+        "TOUTE question sur l'application/l'appli en général -- peu "
+        "importe l'angle : comment ça marche, ce que Clovis peut faire, "
+        "une fonctionnalité précise, une règle de fonctionnement, un "
+        "problème rencontré dans l'appli, une question vague sur Clovis -- "
+        "même si le mot \"base de connaissance\", \"Clovis\" ou "
+        "\"application\" n'apparaît jamais littéralement dans la question. "
+        "Ne restreins pas cette règle aux quelques exemples ci-dessous, ce "
+        "sont des illustrations, pas une liste exhaustive de cas valides. "
         "Exemples qui DOIVENT suggérer cet outil : \"comment fonctionne "
         "le partage de code sur Clovis ?\", \"est-ce que tu peux "
         "générer un PDF ?\", \"c'est quoi la bibliothèque dans "
-        "l'appli ?\", \"comment je crée un programme ?\". Si la "
+        "l'appli ?\", \"comment je crée un programme ?\", \"ça bug chez "
+        "moi, tu peux m'aider ?\", \"c'est quoi Clovis ?\". Si la "
         "question demande le contenu ENTIER d'un article déjà identifié "
         "plutôt qu'une recherche par mots-clés, suggère plutôt "
         "lire_article_connaissance ; si le nom exact de l'article n'est "
         "pas connu, suggère liste_articles_connaissance en complément. "
         "Règle de tri simple entre les deux mondes : \"mes documents à "
         "moi\" (mon cours, mon exercice, mon fichier) -> "
-        "consulter_bibliotheque ; \"comment fonctionne Clovis / "
-        "l'application\" -> chercher_dans_base_connaissances.\n\n"
+        "consulter_bibliotheque ; \"Clovis / l'application\" (même "
+        "vaguement) -> chercher_dans_base_connaissances.\n\n"
         f"Outils disponibles :\n{catalogue}\n\n"
         f"{contexte}"
         f"Question de l'utilisateur : {message_utilisateur}\n\n"
