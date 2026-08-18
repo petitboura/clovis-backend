@@ -142,6 +142,13 @@ _supabase_memoire = create_client(_SUPABASE_URL, _SUPABASE_SECRET)
 
 mcp_generation = FastMCP(name="generation")
 
+# RAPPEL NON NEGOCIABLE (Bourama, 18/08) -- POUR NE PAS OUBLIER :
+# tout NOUVEL outil ajoute ici (ou ailleurs dans le depot) doit
+# systematiquement faire l'objet d'une question explicite a Bourama :
+# "cet outil doit-il aussi etre expose sur le serveur MCP PUBLIC
+# (core/serveur_mcp_espace.py, mcp_espace) ?" -- jamais suppose oui,
+# jamais suppose non, jamais ajoute la-bas sans validation prealable.
+
 # Même limite que core/serveur_mcp_espace.py et
 # api/bibliotheque_utilisateur.py (à garder en phase si elle change).
 # Pas de liste blanche de type MIME : retirée du reste du dépôt le 17/08

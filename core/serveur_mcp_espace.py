@@ -172,6 +172,15 @@ mcp_espace = FastMCP(
     auth=construire_auth_settings("/mcp/espace"),
 )
 
+# RAPPEL NON NEGOCIABLE (Bourama, 18/08) -- POUR NE PAS OUBLIER :
+# tout NOUVEL outil ajoute n'importe ou dans ce depot (ici, dans
+# core/serveur_mcp_generation.py, ou ailleurs) doit systematiquement
+# faire l'objet d'une question explicite a Bourama : "cet outil doit-il
+# aussi etre expose sur le serveur MCP PUBLIC (ce fichier, mcp_espace) ?"
+# -- jamais suppose oui, jamais suppose non, jamais ajoute ici sans
+# validation prealable. Objectif : ne jamais en oublier un par
+# inattention au fil des sessions futures.
+
 
 def _user_id_authentifie(ctx: Context) -> str | None:
     """
@@ -922,6 +931,34 @@ def liste_articles_connaissance(ctx: Context) -> str:
     if not noms:
         return "Aucun article dans la base de connaissances pour l'instant."
     return "\n".join(noms)
+
+
+@mcp_espace.tool()
+def obtenir_fichier_connaissance(nom: str, ctx: Context) -> str:
+    """
+    Renvoie le FICHIER original (pas son texte recopié) d'un article de
+    la base de connaissances, sous forme d'un lien vers le fichier tel
+    qu'il a été déposé -- à utiliser quand l'utilisateur veut le fichier
+    lui-même en pièce jointe, pas juste lire son contenu (pour ça,
+    lire_article_connaissance). Si `nom` est inconnu, utilise
+    liste_articles_connaissance pour voir les noms disponibles.
+    """
+    try:
+        res = (
+            _supabase.table("documents")
+            .select("nom")
+            .eq("agent_id", AGENT_ID_ESPACE)
+            .eq("nom", nom)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR outil obtenir_fichier_connaissance : {e}")
+        return "Erreur : la récupération du fichier a échoué, réessaie."
+    if not res.data:
+        return f"Aucun article nommé '{nom}' trouvé dans la base de connaissances."
+    url = f"{_SUPABASE_URL}/storage/v1/object/public/documents-agents/{AGENT_ID_ESPACE}/{nom}"
+    return f"Fichier : {url}"
 
 
 # --- Contenu pédagogique débloqué (matière active) -----------------------
