@@ -1760,10 +1760,11 @@ def obtenir_fichier_connaissance(nom: str, ctx: Context) -> str:
     """
     Renvoie le FICHIER original (pas son texte recopié) d'un article de
     la base de connaissances, sous forme d'un lien vers le fichier tel
-    qu'il a été déposé -- utilise cet outil quand l'utilisateur veut le
-    fichier lui-même en pièce jointe dans la conversation (ex : "montre
-    le fichier", "envoie-moi l'article tel quel", "je veux le .md"), pas
-    juste lire son contenu (pour ça, lire_article_connaissance).
+    qu'il a été déposé -- à utiliser quand tu juges que le fichier lui-même
+    aide réellement la réponse (l'utilisateur ne sait généralement pas
+    qu'il existe, donc ne le demandera pas explicitement), pas
+    systématiquement à chaque question. Pas juste lire son contenu (pour
+    ça, lire_article_connaissance).
     Si `nom` est inconnu, utilise liste_articles_connaissance pour voir
     les noms disponibles.
     """
