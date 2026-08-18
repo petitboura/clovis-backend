@@ -44,13 +44,17 @@ paramètre fourni par l'appelant, cohérent avec AGENT_ID_PAR_DEFAUT déjà
 en dur ailleurs (core/main.py, core/diagnostic.py, core/configuration.py,
 core/retriever.py).
 
-consulter_bibliotheque (recherche RAG dans la bibliothèque perso) existe
-déjà dans core/serveur_mcp_generation.py et reste LA SEULE porte
-d'entrée en lecture par contenu -- volontairement PAS dupliqué ici. Ce
-fichier ne couvre que ce qui manquait : gestion (lister/ajouter/
-supprimer) de la bibliothèque, mémoire (lire/modifier/effacer),
-comportements (lister/ajouter/modifier/supprimer), historique (lecture
-seule, fils de conversation).
+consulter_bibliotheque (recherche RAG dans la bibliothèque perso) et
+lire_document_bibliotheque_en_entier existaient déjà côté agent interne
+(core/serveur_mcp_generation.py) -- dupliqués ici le 18/08/2026 (demande
+explicite de Bourama), même chose pour consulter_comportement,
+chercher_dans_base_connaissances, lire_article_connaissance,
+liste_articles_connaissance et consulter_matiere_active. Ce fichier
+couvre donc désormais : bibliothèque (recherche + gestion complète),
+mémoire (lire/modifier/effacer), comportements (lister/consulter/
+ajouter/modifier/supprimer), historique (lecture seule, fils de
+conversation), base de connaissances de l'agent (lecture seule), et
+matière active débloquée par l'utilisateur.
 
 Outils sensibles (écriture/suppression) : pas de boucle LLM interne ici
 pour intercepter un appel avant exécution comme le fait core/main.py
@@ -112,6 +116,8 @@ from core.bibliotheque_fichiers import (
 from core.bibliotheque_rag import (
     indexer_pdf_bibliotheque as _indexer_pdf_bibliotheque,
     indexer_texte_bibliotheque as _indexer_texte_bibliotheque,
+    chercher_bibliotheque as _chercher_bibliotheque,
+    lire_document_bibliotheque_en_entier as _lire_document_bibliotheque_en_entier,
 )
 from core.description_multimedia import (
     decrire_image_bibliotheque as _decrire_image_bibliotheque,
@@ -120,12 +126,14 @@ from core.description_multimedia import (
 from core.codes_partage import (
     propager_fichier_bibliotheque as _propager_fichier_bibliotheque,
     propager_lien_bibliotheque as _propager_lien_bibliotheque,
+    obtenir_comportement_skill_recu as _obtenir_comportement_skill_recu,
 )
 from core.comportements_etudiants import (
     lister_comportements as _lister_comportements,
     ajouter_comportement as _ajouter_comportement,
     modifier_comportement as _modifier_comportement,
     supprimer_comportement as _supprimer_comportement,
+    obtenir_comportement_skill as _obtenir_comportement_skill,
 )
 from core.bibliotheque_programme import (
     classer_document as _classer_document,
@@ -142,6 +150,8 @@ from core.confirmations_mcp import (
     recuperer_confirmation as _recuperer_confirmation,
     supprimer_confirmation as _supprimer_confirmation,
 )
+from retriever import chercher_candidats as _chercher_candidats
+from contenu_dynamique_matiere import resoudre_system_prompt as _resoudre_system_prompt_matiere
 
 _SUPABASE_URL = os.environ.get("SUPABASE_URL")
 _SUPABASE_SECRET = os.environ.get("SUPABASE_SECRET")
@@ -176,8 +186,64 @@ def _user_id_authentifie(ctx: Context) -> str | None:
 
 
 # --- Bibliothèque personnelle -----------------------------------------
-# consulter_bibliotheque (recherche RAG) existe déjà dans
-# core/serveur_mcp_generation.py, volontairement pas dupliqué ici.
+# consulter_bibliotheque et lire_document_bibliotheque_en_entier
+# existaient déjà côté agent interne (core/serveur_mcp_generation.py),
+# dupliqués ici le 18/08 (demande explicite de Bourama) pour qu'un
+# client MCP externe puisse aussi chercher par contenu dans la
+# bibliothèque, pas seulement lister/gérer ses entrées.
+
+@mcp_espace.tool()
+def consulter_bibliotheque(question: str, ctx: Context) -> str:
+    """
+    Cherche dans la bibliothèque personnelle de documents de cet
+    utilisateur (section "Bibliothèque" de "Mon espace") les passages
+    les plus pertinents pour répondre à `question`. Renvoie les extraits
+    trouvés, chacun accompagné du nom et du lien de son document
+    d'origine -- si tu juges utile de montrer un document en entier
+    plutôt que de le résumer, inclus son lien dans ta réponse
+    (![...](url) pour une image, [...](url) pour les autres types).
+    Renvoie un message si rien de pertinent n'a été trouvé.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        resultats = _chercher_bibliotheque(question, user_id=user_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_bibliotheque : {e}")
+        return "Erreur : la recherche dans la bibliothèque a échoué, réessaie."
+    if not resultats:
+        return "Rien de pertinent trouvé dans la bibliothèque pour cette question."
+    blocs = []
+    for r in resultats:
+        bloc = r["contenu"]
+        if r.get("nom_fichier") and r.get("url_publique"):
+            bloc += f"\n(Source : {r['nom_fichier']} -- {r['url_publique']})"
+        blocs.append(bloc)
+    return "\n\n---\n\n".join(blocs)
+
+
+@mcp_espace.tool()
+def lire_document_bibliotheque_en_entier(fichier_id: str, ctx: Context) -> str:
+    """
+    Renvoie le texte COMPLET d'un document de la bibliothèque
+    personnelle, identifié par son `fichier_id` (vu via
+    consulter_bibliotheque ou lister_bibliotheque). À utiliser quand les
+    extraits de consulter_bibliotheque ne suffisent pas et qu'il te faut
+    le contenu intégral du document.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        texte = _lire_document_bibliotheque_en_entier(fichier_id, user_id=user_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil lire_document_bibliotheque_en_entier : {e}")
+        return "Erreur : impossible de lire ce document, réessaie."
+    if texte is None:
+        return "Document introuvable, ou ne t'appartient pas."
+    return texte
+
 
 @mcp_espace.tool()
 def lister_bibliotheque(ctx: Context) -> str:
@@ -552,6 +618,31 @@ def effacer_memoire(ctx: Context) -> str:
 # --- Mes comportements (agent_id fixe "clovis") ------------------------
 
 @mcp_espace.tool()
+def consulter_comportement(comportement_id: str, ctx: Context) -> str:
+    """
+    Lit le contenu COMPLET (frontmatter + instructions) d'une instruction
+    personnelle -- que cet utilisateur l'ait écrite lui-même (section
+    "Mes comportements"), ou qu'il l'ait reçue d'un autre utilisateur via
+    un code (id préfixé "recu:") -- à partir de son id, vu via
+    lister_comportements.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        if comportement_id.startswith("recu:"):
+            skill_md = _obtenir_comportement_skill_recu(user_id, comportement_id)
+        else:
+            skill_md = _obtenir_comportement_skill(AGENT_ID_ESPACE, user_id, comportement_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_comportement : {e}")
+        return "Erreur : impossible de consulter ce comportement, réessaie."
+    if skill_md is None:
+        return "Ce comportement est introuvable (id invalide, ou ne t'appartient pas)."
+    return skill_md
+
+
+@mcp_espace.tool()
 def lister_comportements(ctx: Context) -> str:
     """
     Liste les instructions personnelles que cet utilisateur a écrites
@@ -751,6 +842,111 @@ def lire_conversation_historique(conversation_id: str, ctx: Context) -> str:
         return "Cette conversation est introuvable ou vide."
 
     return "\n".join(f"[{l['role']}] {l['content']}" for l in lignes)
+
+
+# --- Base de connaissances de l'agent (lecture seule) -------------------
+# Ajouté le 18/08/2026 (demande Bourama) : mêmes outils que côté agent
+# interne (core/serveur_mcp_generation.py), pour qu'un client MCP
+# externe puisse aussi chercher dans le contenu préparé à l'avance par
+# l'équipe Clovis (pas propre à un utilisateur -- agent_id fixe
+# "clovis" comme partout ailleurs dans ce fichier).
+
+@mcp_espace.tool()
+def chercher_dans_base_connaissances(question: str, ctx: Context) -> str:
+    """
+    Cherche dans la base de connaissances de l'agent (documents et
+    instructions spécifiques préparés par l'équipe Clovis) les passages
+    pertinents pour répondre à `question`. À utiliser quand la question
+    touche un sujet précis où un contenu de référence a pu être préparé
+    à l'avance. Renvoie les extraits trouvés ou un message si rien de
+    pertinent.
+    """
+    try:
+        candidats = _chercher_candidats(question, agent_id=AGENT_ID_ESPACE)
+        morceaux = [c["contenu"] for c in candidats.get("prompts", [])] + [
+            c["contenu"] for c in candidats.get("documents", [])
+        ]
+    except Exception as e:
+        logging.error(f"ERREUR outil chercher_dans_base_connaissances : {e}")
+        return "Erreur : la recherche a échoué, réessaie."
+    if not morceaux:
+        return "Rien de pertinent trouvé dans la base de connaissances pour cette question."
+    return "\n\n---\n\n".join(morceaux)
+
+
+@mcp_espace.tool()
+def lire_article_connaissance(nom: str, ctx: Context) -> str:
+    """
+    Renvoie le texte COMPLET (pas juste des extraits) d'un article de la
+    base de connaissances de l'agent, identifié par son `nom` exact. Si
+    `nom` est inconnu, utilise d'abord chercher_dans_base_connaissances
+    pour l'identifier, ou liste_articles_connaissance pour voir les noms
+    disponibles.
+    """
+    try:
+        res = (
+            _supabase.table("documents")
+            .select("contenu, position")
+            .eq("agent_id", AGENT_ID_ESPACE)
+            .eq("nom", nom)
+            .order("position", desc=False, nullsfirst=False)
+            .execute()
+        )
+        morceaux = res.data or []
+    except Exception as e:
+        logging.error(f"ERREUR outil lire_article_connaissance : {e}")
+        return "Erreur : la lecture de l'article a échoué, réessaie."
+    if not morceaux:
+        return f"Aucun article nommé '{nom}' trouvé dans la base de connaissances."
+    return " ".join(m["contenu"] for m in morceaux)
+
+
+@mcp_espace.tool()
+def liste_articles_connaissance(ctx: Context) -> str:
+    """
+    Liste les noms de tous les articles disponibles dans la base de
+    connaissances de l'agent -- à utiliser avant lire_article_connaissance
+    si le nom exact de l'article recherché n'est pas connu.
+    """
+    try:
+        res = (
+            _supabase.table("documents")
+            .select("nom")
+            .eq("agent_id", AGENT_ID_ESPACE)
+            .execute()
+        )
+        noms = sorted({r["nom"] for r in (res.data or [])})
+    except Exception as e:
+        logging.error(f"ERREUR outil liste_articles_connaissance : {e}")
+        return "Erreur : la liste des articles a échoué, réessaie."
+    if not noms:
+        return "Aucun article dans la base de connaissances pour l'instant."
+    return "\n".join(noms)
+
+
+# --- Contenu pédagogique débloqué (matière active) -----------------------
+# Ajouté le 18/08/2026 (demande Bourama), même logique que côté agent
+# interne (core/serveur_mcp_generation.py).
+
+@mcp_espace.tool()
+def consulter_matiere_active(message_utilisateur: str, ctx: Context) -> str:
+    """
+    Consulte le contenu pédagogique spécifique (cours, consignes d'un
+    enseignant) débloqué par cet utilisateur pour la matière la plus
+    pertinente par rapport à `message_utilisateur`. À utiliser si la
+    question ressemble à une question de cours et que l'utilisateur a pu
+    débloquer une matière avec un code. Ce contenu est un COMPLÉMENT aux
+    instructions habituelles, pas un remplacement. Peut renvoyer un
+    message générique si aucune matière n'est débloquée.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        return _resoudre_system_prompt_matiere(message_utilisateur, AGENT_ID_ESPACE, user_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_matiere_active : {e}")
+        return "Erreur : impossible de consulter le contenu de la matière, réessaie."
 
 
 # --- Programme académique ----------------------------------------------
