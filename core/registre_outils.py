@@ -291,22 +291,37 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "notion-update-view": {"label": "Modification d'une vue Notion", "icone": "SlidersHorizontal", "onglet": "action_app", "appli": "notion"},
 
     # --- Utilitaires ---
-    # planifier_rappel RETIRE d'ici (17/08, demande Bourama : "enlève le
-    # bouton planifier rappel seulement") -- l'outil MCP reste défini côté
-    # serveur (core/serveur_mcp_generation.py) et gaté par les clés VAPID,
-    # mais il est désormais aussi désactivé au niveau plateforme
-    # (registre_outils_plateforme.disponible=False pour ce nom_outil), ce
-    # qui l'exclut à la fois du bouton (plus d'entrée d'affichage ici) ET
-    # du catalogue envoyé au routeur/modèle (lister_outils_autorises_pour_
-    # agent filtre toujours par ce flag, voir mcp_tools.py). Pour le
-    # réactiver un jour : remettre une entrée ici ET repasser disponible=
-    # True en base pour "planifier_rappel".
-    "envoyer_message": {"label": "Envoi d'un message", "icone": "Send", "onglet": "utilitaires"},
-    "consulter_memoire_utilisateur": {"label": "Consultation de ta mémoire", "icone": "Brain", "onglet": "utilitaires"},
-    "mettre_a_jour_memoire_utilisateur": {"label": "Mise à jour de ta mémoire", "icone": "Brain", "onglet": "utilitaires"},
-    "effacer_memoire": {"label": "Effacement de ta mémoire", "icone": "Trash2", "onglet": "utilitaires"},
-    "consulter_profil_utilisateur": {"label": "Consultation de ton profil", "icone": "UserCircle", "onglet": "utilitaires"},
-    "mettre_a_jour_profil_utilisateur": {"label": "Mise à jour de ton profil", "icone": "UserCog", "onglet": "utilitaires"},
+    #
+    # !!! LIRE AVANT DE TOUCHER À CETTE SECTION (18/08, consigne explicite
+    # de Bourama, à respecter systématiquement, séance après séance) !!!
+    # Ce bouton s'est déjà fait polluer/casser plusieurs fois sans qu'on
+    # le lui demande : le 17/08, 22 outils de programme s'y sont
+    # retrouvés étiquetés "utilitaires" par erreur (28 entrées au lieu de
+    # 6), et un simple crash de prod ailleurs dans le backend a suffi à le
+    # faire disparaître entièrement. Consigne : NE JAMAIS ajouter un
+    # outil ici (nouveau ou existant) juste parce qu'il EXISTE ou qu'il
+    # semble "logique" de l'y mettre -- onglet="utilitaires" est une
+    # décision consciente à chaque fois, prise avec Bourama, jamais un
+    # défaut. Un nouvel outil backend (programme, bibliothèque, mémoire,
+    # profil, etc.) doit être onglet=None SAUF instruction explicite du
+    # contraire. Avant toute modif de ce fichier : relire ce bloc en
+    # entier, et vérifier après coup que ce bouton affiche encore
+    # exactement ce qu'il doit afficher (ne jamais faire confiance à un
+    # "ça devrait marcher" sans revérifier la liste réelle).
+    #
+    # Mémoire/profil/message RETIRES d'ici le 18/08 (demande Bourama :
+    # "enlève tout ce qui a lien avec mémoire ou profil et envoi d'un
+    # message aussi") -- onglet=None comme les blocs Programme/
+    # Bibliothèque plus bas : gardent leur icône pour la bulle "résultat
+    # d'outil", mais ne sont plus des boutons cliquables ici. planifier_
+    # rappel, lui, avait déjà été retiré le 17/08 (voir plus bas dans
+    # l'historique git de ce fichier).
+    "envoyer_message": {"label": "Envoi d'un message", "icone": "Send", "onglet": None},
+    "consulter_memoire_utilisateur": {"label": "Consultation de ta mémoire", "icone": "Brain", "onglet": None},
+    "mettre_a_jour_memoire_utilisateur": {"label": "Mise à jour de ta mémoire", "icone": "Brain", "onglet": None},
+    "effacer_memoire": {"label": "Effacement de ta mémoire", "icone": "Trash2", "onglet": None},
+    "consulter_profil_utilisateur": {"label": "Consultation de ton profil", "icone": "UserCircle", "onglet": None},
+    "mettre_a_jour_profil_utilisateur": {"label": "Mise à jour de ton profil", "icone": "UserCog", "onglet": None},
 
     # --- Actions locales UI (préfixe "ui_") ---
     # Ajoutées ici le 17/08 (bug signalé par Bourama) : ces 6 entrées
@@ -321,6 +336,10 @@ REGISTRE_AFFICHAGE_OUTILS = {
     # exécutables. Autorisation par agent déjà en base (agents_actions_
     # locales + registre_outils_plateforme catégorie 4, vérifié le 17/08
     # pour "clovis" : les 6 y sont déjà cochées et disponibles).
+    #
+    # Depuis le 18/08 (voir avertissement en tête de section), CE SONT
+    # LES 6 SEULES ENTRÉES QUE CE BOUTON DOIT AFFICHER. Si tu envisages
+    # d'en ajouter une 7e, relis d'abord l'avertissement ci-dessus.
     "ui_localisation": {"label": "Joindre ma position", "icone": "MapPin", "onglet": "utilitaires"},
     "ui_formule": {"label": "Insérer une formule / réaction chimique", "icone": "Sigma", "onglet": "utilitaires"},
     "ui_editeur_maths": {"label": "Éditeur maths live (texte + formules)", "icone": "Calculator", "onglet": "utilitaires"},
