@@ -1316,6 +1316,38 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         "intégrales\", \"qu'est-ce que dit mon document sur la "
         "photosynthèse ?\", \"aide-moi avec l'exercice 4\". Ne te fie "
         "jamais au mot \"bibliothèque\" lui-même.\n\n"
+        # AJOUT 2026-08-18 (demande Bourama, test réel : confusion entre
+        # consulter_bibliotheque et chercher_dans_base_connaissances sur
+        # la question "où trouve-tu dans ma base de connaissance ?") : le
+        # routeur n'avait aucune règle pour ces outils, seul
+        # consulter_bibliotheque en avait une -- il retombait donc par
+        # défaut sur la bibliothèque à chaque fois qu'un utilisateur
+        # disait "base de connaissance", alors que ce sont deux choses
+        # différentes.
+        "IMPORTANT : ne confonds jamais consulter_bibliotheque (documents "
+        "PERSONNELS que l'étudiant a lui-même uploadés) avec "
+        "chercher_dans_base_connaissances (contenu de référence préparé "
+        "à l'avance par l'équipe Clovis SUR Clovis et l'application elle-"
+        "même -- son fonctionnement, ses fonctionnalités, ses règles -- "
+        "que le modèle va chercher seulement s'il en a besoin pour "
+        "répondre avec précision). chercher_dans_base_connaissances doit "
+        "être suggéré dès que la question porte sur Clovis lui-même ou "
+        "sur l'application -- comment ça marche, ce que Clovis peut "
+        "faire, une fonctionnalité précise, une règle de "
+        "fonctionnement -- même si le mot \"base de connaissance\" ou "
+        "\"Clovis\" n'apparaît jamais littéralement dans la question. "
+        "Exemples qui DOIVENT suggérer cet outil : \"comment fonctionne "
+        "le partage de code sur Clovis ?\", \"est-ce que tu peux "
+        "générer un PDF ?\", \"c'est quoi la bibliothèque dans "
+        "l'appli ?\", \"comment je crée un programme ?\". Si la "
+        "question demande le contenu ENTIER d'un article déjà identifié "
+        "plutôt qu'une recherche par mots-clés, suggère plutôt "
+        "lire_article_connaissance ; si le nom exact de l'article n'est "
+        "pas connu, suggère liste_articles_connaissance en complément. "
+        "Règle de tri simple entre les deux mondes : \"mes documents à "
+        "moi\" (mon cours, mon exercice, mon fichier) -> "
+        "consulter_bibliotheque ; \"comment fonctionne Clovis / "
+        "l'application\" -> chercher_dans_base_connaissances.\n\n"
         f"Outils disponibles :\n{catalogue}\n\n"
         f"{contexte}"
         f"Question de l'utilisateur : {message_utilisateur}\n\n"
