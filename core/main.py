@@ -1362,7 +1362,19 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
             model=MODELE_ROUTEUR_OUTILS,
             messages=[{"role": "user", "content": prompt_routeur}],
             response_format={"type": "json_object"},
-            max_completion_tokens=200,
+            # 18/08 : MODELE_ROUTEUR_OUTILS (openai/gpt-oss-20b) est un
+            # modele de raisonnement -- sans reasoning_effort explicite, il
+            # tourne par defaut en "medium" (doc Groq), et ce raisonnement
+            # est compte DANS max_completion_tokens. Avec l'ancienne valeur
+            # (200), le modele epuisait son budget en raisonnement avant
+            # meme d'ecrire le JSON final -> erreur "max completion tokens
+            # reached before generating a valid document", quelle que soit
+            # la taille du catalogue envoye (c'est un budget de SORTIE, pas
+            # d'entree -- reduire le catalogue n'y changeait donc rien).
+            # reasoning_effort="low" limite ce raisonnement, et 500 (au
+            # lieu de 200) laisse une marge de securite pour le JSON final.
+            reasoning_effort="low",
+            max_completion_tokens=500,
             timeout=DELAI_MAX_PAR_APPEL,
         )
         brut = completion.choices[0].message.content.strip()
@@ -2739,19 +2751,13 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 if not o["function"]["name"].startswith("notion-")
                 and "depot_github" not in o["function"]["name"]
             ]
-            # Outils de génération (PDF, Word, Excel, PowerPoint, LaTeX, code,
-            # site, image, audio, vidéo, 3D, signature, export, calcul
-            # symbolique...) exclus eux aussi du CATALOGUE envoyé au routeur
-            # automatique (18/08, demande Bourama). Filtre dynamique basé sur
-            # REGISTRE_AFFICHAGE_OUTILS (onglet == "generer"), pas de liste en
-            # dur -- tout nouvel outil ajouté à l'onglet "generer" sera exclu
-            # automatiquement ici. Comme pour Notion/GitHub : seule la
-            # sélection MANUELLE (bouton Outils, outil_force) reste
-            # inchangée, ces outils restent entièrement utilisables ainsi.
-            outils_disponibles_agent = [
-                o for o in outils_disponibles_agent
-                if REGISTRE_AFFICHAGE_OUTILS.get(o["function"]["name"], {}).get("onglet") != "generer"
-            ]
+            # 18/08 : filtre "onglet == generer" retire. La vraie cause de
+            # l'echec du routeur etait le budget de SORTIE
+            # (max_completion_tokens + reasoning_effort implicite, voir
+            # _router_outils plus haut), pas la taille du catalogue
+            # d'ENTREE -- retirer les outils de generation ne corrigeait
+            # donc rien sur ce point precis. Les outils de generation
+            # restent dans le catalogue automatique.
             return _router_outils(message_utilisateur, outils_disponibles_agent, historique)
 
         def _tache_prompt_optimiste():
