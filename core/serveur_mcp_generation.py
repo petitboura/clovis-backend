@@ -1689,12 +1689,16 @@ def chercher_dans_base_connaissances(question: str, ctx: Context) -> str:
 @mcp_generation.tool()
 def lire_article_connaissance(nom: str, ctx: Context) -> str:
     """
-    Renvoie le texte COMPLET (pas juste des extraits pertinents) d'un
-    article de la base de connaissances de l'agent, identifié par son
-    `nom` exact -- à utiliser quand la question porte sur l'ensemble
-    d'un article plutôt que sur un point précis (ex : "explique-moi
-    toute la section Bibliothèque"), en complément de
+    Renvoie le texte COMPLET et EXACT (pas un résumé, pas une
+    reformulation -- le contenu tel qu'il est stocké dans la base de
+    connaissances, mot pour mot) d'un article, identifié par son `nom`
+    exact -- à utiliser quand la question porte sur l'ensemble d'un
+    article plutôt que sur un point précis (ex : "montre-moi l'article
+    Bibliothèque", "affiche le fichier tel qu'il est"), en complément de
     chercher_dans_base_connaissances qui ne renvoie que des passages.
+    Quand tu restitues ce résultat à l'utilisateur, recopie-le
+    intégralement et tel quel (verbatim) -- ne le résume pas, ne le
+    reformule pas, ne le raccourcis pas.
     Si `nom` est inconnu, utilise d'abord chercher_dans_base_connaissances
     pour identifier le bon nom, ou liste_articles_connaissance pour voir
     les noms disponibles.
@@ -1742,6 +1746,38 @@ def liste_articles_connaissance(ctx: Context) -> str:
     except Exception as e:
         logging.error(f"ERREUR outil liste_articles_connaissance : {e}")
         return "Erreur : la liste des articles a échoué, réessaie."
+
+
+@mcp_generation.tool()
+def obtenir_fichier_connaissance(nom: str, ctx: Context) -> str:
+    """
+    Renvoie le FICHIER original (pas son texte recopié) d'un article de
+    la base de connaissances, sous forme d'un lien vers le fichier tel
+    qu'il a été déposé -- utilise cet outil quand l'utilisateur veut le
+    fichier lui-même en pièce jointe dans la conversation (ex : "montre
+    le fichier", "envoie-moi l'article tel quel", "je veux le .md"), pas
+    juste lire son contenu (pour ça, lire_article_connaissance).
+    Si `nom` est inconnu, utilise liste_articles_connaissance pour voir
+    les noms disponibles.
+    """
+    try:
+        requete = ctx.request_context.request
+        agent_id = requete.query_params.get("agent_id")
+        res = (
+            _supabase_memoire.table("documents")
+            .select("nom")
+            .eq("agent_id", agent_id)
+            .eq("nom", nom)
+            .limit(1)
+            .execute()
+        )
+        if not res.data:
+            return f"Aucun article nommé '{nom}' trouvé dans la base de connaissances."
+        url = f"{_SUPABASE_URL}/storage/v1/object/public/documents-agents/{agent_id}/{nom}"
+        return f"Fichier : {url}"
+    except Exception as e:
+        logging.error(f"ERREUR outil obtenir_fichier_connaissance : {e}")
+        return "Erreur : la récupération du fichier a échoué, réessaie."
 
 
 @mcp_generation.tool()

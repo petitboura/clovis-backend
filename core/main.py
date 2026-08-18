@@ -1905,7 +1905,7 @@ def _extraire_sources(appel, resultat_brut):
 # -- si une extension est ajoutée d'un côté, l'ajouter aussi de l'autre.
 EXTENSIONS_FICHIER_GENERE = (
     "pdf", "docx", "doc", "xlsx", "xls", "csv", "pptx", "ppt", "zip", "json",
-    "xml", "png", "jpg", "jpeg", "webp", "glb", "tex",
+    "xml", "png", "jpg", "jpeg", "webp", "glb", "tex", "md",
 )
 REGEX_FICHIER_GENERE = re.compile(
     r"https?://[^\s<>\"'\)\]]+\.(?:" + "|".join(EXTENSIONS_FICHIER_GENERE) + r")\b",
