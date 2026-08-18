@@ -260,6 +260,8 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "chercher_fichier": {"label": "Recherche d'un fichier", "icone": "FolderSearch", "onglet": "rechercher"},
     "consulter_bibliotheque": {"label": "Consultation de la bibliothèque", "icone": "Library", "onglet": "rechercher"},
     "chercher_dans_base_connaissances": {"label": "Recherche dans la base de connaissances", "icone": "BookMarked", "onglet": "rechercher"},
+    "lire_article_connaissance": {"label": "Lecture complète d'un article de la base de connaissances", "icone": "BookMarked", "onglet": "rechercher"},
+    "liste_articles_connaissance": {"label": "Liste des articles de la base de connaissances", "icone": "BookMarked", "onglet": "rechercher"},
 
     # --- Action dans l'app : GitHub ---
     "explorer_depot_github": {"label": "Exploration d'un dépôt GitHub", "icone": "FolderTree", "onglet": "action_app", "appli": "github"},

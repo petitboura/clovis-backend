@@ -1687,6 +1687,64 @@ def chercher_dans_base_connaissances(question: str, ctx: Context) -> str:
 
 
 @mcp_generation.tool()
+def lire_article_connaissance(nom: str, ctx: Context) -> str:
+    """
+    Renvoie le texte COMPLET (pas juste des extraits pertinents) d'un
+    article de la base de connaissances de l'agent, identifié par son
+    `nom` exact -- à utiliser quand la question porte sur l'ensemble
+    d'un article plutôt que sur un point précis (ex : "explique-moi
+    toute la section Bibliothèque"), en complément de
+    chercher_dans_base_connaissances qui ne renvoie que des passages.
+    Si `nom` est inconnu, utilise d'abord chercher_dans_base_connaissances
+    pour identifier le bon nom, ou liste_articles_connaissance pour voir
+    les noms disponibles.
+    """
+    try:
+        requete = ctx.request_context.request
+        agent_id = requete.query_params.get("agent_id")
+        res = (
+            _supabase_memoire.table("documents")
+            .select("contenu, position")
+            .eq("agent_id", agent_id)
+            .eq("nom", nom)
+            .order("position", desc=False, nullsfirst=False)
+            .execute()
+        )
+        morceaux = res.data or []
+        if not morceaux:
+            return f"Aucun article nommé '{nom}' trouvé dans la base de connaissances."
+        return " ".join(m["contenu"] for m in morceaux)
+    except Exception as e:
+        logging.error(f"ERREUR outil lire_article_connaissance : {e}")
+        return "Erreur : la lecture de l'article a échoué, réessaie."
+
+
+@mcp_generation.tool()
+def liste_articles_connaissance(ctx: Context) -> str:
+    """
+    Liste les noms de tous les articles disponibles dans la base de
+    connaissances de l'agent -- à utiliser avant lire_article_connaissance
+    si le nom exact de l'article recherché n'est pas connu.
+    """
+    try:
+        requete = ctx.request_context.request
+        agent_id = requete.query_params.get("agent_id")
+        res = (
+            _supabase_memoire.table("documents")
+            .select("nom")
+            .eq("agent_id", agent_id)
+            .execute()
+        )
+        noms = sorted({r["nom"] for r in (res.data or [])})
+        if not noms:
+            return "Aucun article dans la base de connaissances pour l'instant."
+        return "\n".join(noms)
+    except Exception as e:
+        logging.error(f"ERREUR outil liste_articles_connaissance : {e}")
+        return "Erreur : la liste des articles a échoué, réessaie."
+
+
+@mcp_generation.tool()
 def consulter_matiere_active(message_utilisateur: str, ctx: Context) -> str:
     """
     Consulte le contenu pédagogique spécifique (cours, consignes d'un
