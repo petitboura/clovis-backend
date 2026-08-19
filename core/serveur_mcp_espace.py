@@ -1744,9 +1744,9 @@ def generer_image(prompt: str) -> list[Image | str] | str:
     """
     Génère une image à partir d'une description textuelle. Renvoie
     l'image elle-même (vraie pièce jointe affichée directement) ET
-    son URL publique en texte juste après (miniature d'aperçu petite
-    et sans téléchargement côté client MCP -- le lien permet d'ouvrir
-    l'image en taille réelle et de la télécharger).
+    un lien de téléchargement direct juste après (miniature d'aperçu
+    petite et sans téléchargement côté client MCP -- le lien force le
+    téléchargement au clic, en taille réelle).
     """
     try:
         url = _generer_image(prompt)
@@ -1754,14 +1754,30 @@ def generer_image(prompt: str) -> list[Image | str] | str:
         logging.error(f"ERREUR outil generer_image (mcp_espace) : {e}")
         return "Erreur : la génération de l'image a échoué, réessaie."
 
+    # CORRECTIF 19/08/2026 (3) : url (renvoyée par
+    # generation_images.get_public_url) est un lien public "inline" --
+    # cliqué, il ouvre l'image dans le navigateur au lieu de la
+    # télécharger. Supabase Storage force le téléchargement
+    # (Content-Disposition: attachment) via le paramètre de requête
+    # ?download=<nom> -- vérifié dans storage3 (SyncBucketProxy.
+    # get_public_url, options={"download": ...}), reproduit ici par
+    # simple concaténation plutôt que de rappeler get_public_url pour
+    # ne pas dépendre du chemin de stockage interne. url ne contient
+    # jamais de "?" existant (chemin uuid.png simple, voir
+    # generation_images.py), donc l'ajout est sûr sans parsing. Ne
+    # touche pas à generation_images.py : ses autres appelants
+    # (frontend, PDF, etc.) ont besoin du lien inline normal, pas d'un
+    # téléchargement forcé.
+    url_telechargement = f"{url}?download=image_clovis.png"
+
     try:
         reponse = requests.get(url, timeout=30)
         reponse.raise_for_status()
-        return [Image(data=reponse.content, format="png"), url]
+        return [Image(data=reponse.content, format="png"), url_telechargement]
     except Exception as e:
         # L'image a bien été générée et uploadée (on a l'URL), seul le
         # re-téléchargement pour l'afficher a échoué -- on retombe sur
         # le lien texte plutôt que de faire échouer tout l'outil pour
         # rien, l'image reste consultable via l'URL.
         logging.error(f"ERREUR re-téléchargement image pour affichage (mcp_espace) : {e}")
-        return url
+        return url_telechargement
