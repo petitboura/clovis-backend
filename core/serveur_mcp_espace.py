@@ -206,6 +206,7 @@ def _user_id_authentifie(ctx: Context) -> str | None:
 
 @mcp_espace.tool(
     name="clovis_consulter_bibliotheque",
+    title="Consulter la bibliothèque",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def consulter_bibliotheque(question: str, ctx: Context) -> str:
@@ -240,6 +241,7 @@ def consulter_bibliotheque(question: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_lire_document_bibliotheque_en_entier",
+    title="Lire un document en entier",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def lire_document_bibliotheque_en_entier(fichier_id: str, ctx: Context) -> str:
@@ -265,6 +267,7 @@ def lire_document_bibliotheque_en_entier(fichier_id: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_lister_bibliotheque",
+    title="Lister la bibliothèque",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def lister_bibliotheque(ctx: Context, limit: int = 20, offset: int = 0) -> str:
@@ -312,6 +315,7 @@ def lister_bibliotheque(ctx: Context, limit: int = 20, offset: int = 0) -> str:
 
 @mcp_espace.tool(
     name="clovis_ajouter_lien_bibliotheque",
+    title="Ajouter un lien à la bibliothèque",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
 )
 def ajouter_lien_bibliotheque(url: str, titre: str, ctx: Context) -> str:
@@ -348,6 +352,7 @@ def ajouter_lien_bibliotheque(url: str, titre: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_ajouter_texte_bibliotheque",
+    title="Ajouter une note à la bibliothèque",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
 )
 def ajouter_texte_bibliotheque(contenu: str, titre: str, ctx: Context) -> str:
@@ -391,6 +396,7 @@ def ajouter_texte_bibliotheque(contenu: str, titre: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_ajouter_document_bibliotheque",
+    title="Ajouter un fichier à la bibliothèque",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
 )
 def ajouter_document_bibliotheque(
@@ -508,6 +514,7 @@ def ajouter_document_bibliotheque(
 
 @mcp_espace.tool(
     name="clovis_supprimer_document_bibliotheque",
+    title="Supprimer un document de la bibliothèque",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
 )
 def supprimer_document_bibliotheque(fichier_id: str, ctx: Context) -> str:
@@ -553,6 +560,7 @@ def supprimer_document_bibliotheque(fichier_id: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_classer_document_dans_programme",
+    title="Classer un document dans le programme",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def classer_document_dans_programme(fichier_id: str, type_emplacement: str, emplacement_id: str, ctx: Context) -> str:
@@ -578,6 +586,7 @@ def classer_document_dans_programme(fichier_id: str, type_emplacement: str, empl
 
 @mcp_espace.tool(
     name="clovis_retirer_document_du_programme",
+    title="Retirer un document du programme",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def retirer_document_du_programme(fichier_id: str, type_emplacement: str, emplacement_id: str, ctx: Context) -> str:
@@ -607,6 +616,7 @@ def retirer_document_du_programme(fichier_id: str, type_emplacement: str, emplac
 
 @mcp_espace.tool(
     name="clovis_lire_memoire",
+    title="Lire la mémoire",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def lire_memoire(ctx: Context) -> str:
@@ -634,6 +644,7 @@ def lire_memoire(ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_modifier_memoire",
+    title="Modifier la mémoire",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def modifier_memoire(resume: str, ctx: Context) -> str:
@@ -657,6 +668,7 @@ def modifier_memoire(resume: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_effacer_memoire",
+    title="Effacer la mémoire",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
 )
 def effacer_memoire(ctx: Context) -> str:
@@ -680,6 +692,7 @@ def effacer_memoire(ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_consulter_comportement",
+    title="Consulter un comportement",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def consulter_comportement(comportement_id: str, ctx: Context) -> str:
@@ -708,6 +721,7 @@ def consulter_comportement(comportement_id: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_lister_comportements",
+    title="Lister les comportements",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def lister_comportements(ctx: Context, limit: int = 20, offset: int = 0) -> str:
@@ -751,6 +765,7 @@ def lister_comportements(ctx: Context, limit: int = 20, offset: int = 0) -> str:
 
 @mcp_espace.tool(
     name="clovis_ajouter_comportement_espace",
+    title="Ajouter un comportement",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
 )
 def ajouter_comportement_espace(texte: str, ctx: Context, type_lien: str = "", lien_id: str = "") -> str:
@@ -791,6 +806,7 @@ def ajouter_comportement_espace(texte: str, ctx: Context, type_lien: str = "", l
 
 @mcp_espace.tool(
     name="clovis_modifier_comportement_espace",
+    title="Modifier un comportement",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def modifier_comportement_espace(comportement_id: str, texte: str, ctx: Context) -> str:
@@ -816,6 +832,7 @@ def modifier_comportement_espace(comportement_id: str, texte: str, ctx: Context)
 
 @mcp_espace.tool(
     name="clovis_supprimer_comportement_espace",
+    title="Supprimer un comportement",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
 )
 def supprimer_comportement_espace(comportement_id: str, ctx: Context) -> str:
@@ -848,6 +865,7 @@ _LONGUEUR_MAX_TITRE = 42
 
 @mcp_espace.tool(
     name="clovis_lister_conversations_historique",
+    title="Lister les conversations passées",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def lister_conversations_historique(ctx: Context, limit: int = 20, offset: int = 0) -> str:
@@ -918,6 +936,7 @@ def lister_conversations_historique(ctx: Context, limit: int = 20, offset: int =
 
 @mcp_espace.tool(
     name="clovis_lire_conversation_historique",
+    title="Lire une conversation passée",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def lire_conversation_historique(conversation_id: str, ctx: Context) -> str:
@@ -961,6 +980,7 @@ def lire_conversation_historique(conversation_id: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_chercher_dans_base_connaissances",
+    title="Chercher dans la base de connaissances",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def chercher_dans_base_connaissances(question: str, ctx: Context) -> str:
@@ -987,6 +1007,7 @@ def chercher_dans_base_connaissances(question: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_lire_article_connaissance",
+    title="Lire un article de connaissance",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def lire_article_connaissance(nom: str, ctx: Context) -> str:
@@ -1017,6 +1038,7 @@ def lire_article_connaissance(nom: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_liste_articles_connaissance",
+    title="Lister les articles de connaissance",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def liste_articles_connaissance(ctx: Context) -> str:
@@ -1043,6 +1065,7 @@ def liste_articles_connaissance(ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_obtenir_fichier_connaissance",
+    title="Obtenir le fichier d'un article",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def obtenir_fichier_connaissance(nom: str, ctx: Context) -> str:
@@ -1078,6 +1101,7 @@ def obtenir_fichier_connaissance(nom: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_consulter_matiere_active",
+    title="Consulter la matière active",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def consulter_matiere_active(message_utilisateur: str, ctx: Context) -> str:
@@ -1115,6 +1139,7 @@ def consulter_matiere_active(message_utilisateur: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_lister_mes_programmes",
+    title="Lister les programmes",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def lister_mes_programmes(ctx: Context) -> str:
@@ -1147,6 +1172,7 @@ def lister_mes_programmes(ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_consulter_programme",
+    title="Consulter un programme",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def consulter_programme(programme_id: str, ctx: Context) -> str:
@@ -1175,6 +1201,7 @@ def consulter_programme(programme_id: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_ajouter_programme",
+    title="Ajouter un programme",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
 )
 def ajouter_programme(niveau: str, ctx: Context, nom: str = "") -> str:
@@ -1201,6 +1228,7 @@ def ajouter_programme(niveau: str, ctx: Context, nom: str = "") -> str:
 
 @mcp_espace.tool(
     name="clovis_modifier_programme",
+    title="Modifier un programme",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def modifier_programme(programme_id: str, ctx: Context, niveau: str = "", nom: str = "") -> str:
@@ -1225,6 +1253,7 @@ def modifier_programme(programme_id: str, ctx: Context, niveau: str = "", nom: s
 
 @mcp_espace.tool(
     name="clovis_supprimer_programme",
+    title="Supprimer un programme",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
 )
 def supprimer_programme(programme_id: str, ctx: Context) -> str:
@@ -1249,6 +1278,7 @@ def supprimer_programme(programme_id: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_ajouter_matiere",
+    title="Ajouter une matière",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
 )
 def ajouter_matiere(programme_id: str, nom: str, ctx: Context, limites: str = "") -> str:
@@ -1275,6 +1305,7 @@ def ajouter_matiere(programme_id: str, nom: str, ctx: Context, limites: str = ""
 
 @mcp_espace.tool(
     name="clovis_modifier_matiere",
+    title="Modifier une matière",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def modifier_matiere(matiere_id: str, ctx: Context, nom: str = "", limites: str = "") -> str:
@@ -1298,6 +1329,7 @@ def modifier_matiere(matiere_id: str, ctx: Context, nom: str = "", limites: str 
 
 @mcp_espace.tool(
     name="clovis_supprimer_matiere",
+    title="Supprimer une matière",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
 )
 def supprimer_matiere(matiere_id: str, ctx: Context) -> str:
@@ -1321,6 +1353,7 @@ def supprimer_matiere(matiere_id: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_ajouter_chapitre",
+    title="Ajouter un chapitre",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
 )
 def ajouter_chapitre(matiere_id: str, nom: str, ctx: Context, ordre: int = 0, limites: str = "") -> str:
@@ -1347,6 +1380,7 @@ def ajouter_chapitre(matiere_id: str, nom: str, ctx: Context, ordre: int = 0, li
 
 @mcp_espace.tool(
     name="clovis_modifier_chapitre",
+    title="Modifier un chapitre",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def modifier_chapitre(chapitre_id: str, ctx: Context, nom: str = "", ordre: int = -1, limites: str = "") -> str:
@@ -1370,6 +1404,7 @@ def modifier_chapitre(chapitre_id: str, ctx: Context, nom: str = "", ordre: int 
 
 @mcp_espace.tool(
     name="clovis_supprimer_chapitre",
+    title="Supprimer un chapitre",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
 )
 def supprimer_chapitre(chapitre_id: str, ctx: Context) -> str:
@@ -1393,6 +1428,7 @@ def supprimer_chapitre(chapitre_id: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_ajouter_document_programme",
+    title="Ajouter un document au programme",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
 )
 def ajouter_document_programme(chapitre_id: str, titre: str, url_ou_contenu: str, ctx: Context) -> str:
@@ -1418,6 +1454,7 @@ def ajouter_document_programme(chapitre_id: str, titre: str, url_ou_contenu: str
 
 @mcp_espace.tool(
     name="clovis_modifier_document_programme",
+    title="Modifier un document du programme",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def modifier_document_programme(document_id: str, ctx: Context, titre: str = "", url_ou_contenu: str = "") -> str:
@@ -1441,6 +1478,7 @@ def modifier_document_programme(document_id: str, ctx: Context, titre: str = "",
 
 @mcp_espace.tool(
     name="clovis_supprimer_document_programme",
+    title="Supprimer un document du programme",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
 )
 def supprimer_document_programme(document_id: str, ctx: Context) -> str:
@@ -1463,6 +1501,7 @@ def supprimer_document_programme(document_id: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_ajouter_exercice_programme",
+    title="Ajouter un exercice",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
 )
 def ajouter_exercice_programme(chapitre_id: str, enonce: str, ctx: Context) -> str:
@@ -1486,6 +1525,7 @@ def ajouter_exercice_programme(chapitre_id: str, enonce: str, ctx: Context) -> s
 
 @mcp_espace.tool(
     name="clovis_modifier_exercice_programme",
+    title="Modifier un exercice",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def modifier_exercice_programme(exercice_id: str, enonce: str, ctx: Context) -> str:
@@ -1508,6 +1548,7 @@ def modifier_exercice_programme(exercice_id: str, enonce: str, ctx: Context) -> 
 
 @mcp_espace.tool(
     name="clovis_supprimer_exercice_programme",
+    title="Supprimer un exercice",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
 )
 def supprimer_exercice_programme(exercice_id: str, ctx: Context) -> str:
@@ -1530,6 +1571,7 @@ def supprimer_exercice_programme(exercice_id: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_ajouter_examen",
+    title="Ajouter un examen",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
 )
 def ajouter_examen(titre: str, type: str, chapitre_ids: list[str], ctx: Context) -> str:
@@ -1558,6 +1600,7 @@ def ajouter_examen(titre: str, type: str, chapitre_ids: list[str], ctx: Context)
 
 @mcp_espace.tool(
     name="clovis_modifier_examen",
+    title="Modifier un examen",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def modifier_examen(examen_id: str, ctx: Context, titre: str = "", type: str = "", chapitre_ids: list[str] | None = None) -> str:
@@ -1585,6 +1628,7 @@ def modifier_examen(examen_id: str, ctx: Context, titre: str = "", type: str = "
 
 @mcp_espace.tool(
     name="clovis_supprimer_examen",
+    title="Supprimer un examen",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
 )
 def supprimer_examen(examen_id: str, ctx: Context) -> str:
@@ -1609,6 +1653,7 @@ def supprimer_examen(examen_id: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_annuler_derniere_modification",
+    title="Annuler la dernière modification",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
 )
 def annuler_derniere_modification(ctx: Context) -> str:
@@ -1635,6 +1680,7 @@ def annuler_derniere_modification(ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_consulter_matiere_programme",
+    title="Consulter les chapitres d'une matière",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def consulter_matiere_programme(matiere_id: str, ctx: Context) -> str:
@@ -1664,6 +1710,7 @@ def consulter_matiere_programme(matiere_id: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_consulter_chapitre_programme",
+    title="Consulter un chapitre",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def consulter_chapitre_programme(chapitre_id: str, ctx: Context) -> str:
@@ -1689,6 +1736,7 @@ def consulter_chapitre_programme(chapitre_id: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_consulter_examens_programme",
+    title="Consulter les examens",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def consulter_examens_programme(programme_id: str, ctx: Context) -> str:
@@ -1783,6 +1831,7 @@ def _derouler_chat(**kwargs_chat) -> tuple[str, dict | None]:
 
 @mcp_espace.tool(
     name="clovis_discuter_avec_clovis",
+    title="Discuter avec Clovis",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
 )
 def discuter_avec_clovis(message: str, ctx: Context, conversation_id: str = "") -> str:
@@ -1848,6 +1897,7 @@ def discuter_avec_clovis(message: str, ctx: Context, conversation_id: str = "") 
 
 @mcp_espace.tool(
     name="clovis_confirmer_action_clovis",
+    title="Confirmer une action",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
 )
 def confirmer_action_clovis(id_confirmation: str, approuve: bool, ctx: Context) -> str:
@@ -1930,6 +1980,7 @@ def confirmer_action_clovis(id_confirmation: str, approuve: bool, ctx: Context) 
 # à la vraie pièce jointe déjà affichée.
 @mcp_espace.tool(
     name="clovis_generer_image",
+    title="Générer une image",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
     structured_output=False,
 )
