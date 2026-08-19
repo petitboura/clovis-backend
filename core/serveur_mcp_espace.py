@@ -123,6 +123,7 @@ from core.description_multimedia import (
     decrire_image_bibliotheque as _decrire_image_bibliotheque,
     transcrire_audio_bibliotheque as _transcrire_audio_bibliotheque,
 )
+from core.generation_images import generer_image as _generer_image
 from core.codes_partage import (
     propager_fichier_bibliotheque as _propager_fichier_bibliotheque,
     propager_lien_bibliotheque as _propager_lien_bibliotheque,
@@ -1701,3 +1702,23 @@ def confirmer_action_clovis(id_confirmation: str, approuve: bool, ctx: Context) 
         )
 
     return texte or "(Clovis n'a rien répondu.)"
+
+
+# Toujours actif : Pollinations (gratuit, sans clé) par défaut, bascule
+# automatique vers Together AI (payant, meilleure qualité) si
+# TOGETHER_API_KEY est configurée -- voir core/generation_images.py.
+# Duplication volontaire de l'outil generer_image de
+# core/serveur_mcp_generation.py (même convention que le reste de ce
+# fichier -- voir docstring en tête), ajoutée le 19/08/2026 (demande
+# explicite de Bourama).
+@mcp_espace.tool()
+def generer_image(prompt: str) -> str:
+    """
+    Génère une image à partir d'une description textuelle. Renvoie
+    l'URL publique de l'image générée.
+    """
+    try:
+        return _generer_image(prompt)
+    except Exception as e:
+        logging.error(f"ERREUR outil generer_image (mcp_espace) : {e}")
+        return "Erreur : la génération de l'image a échoué, réessaie."
