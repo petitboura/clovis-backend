@@ -70,7 +70,9 @@ import os
 import tempfile
 import uuid
 
-from mcp.server.mcpserver import MCPServer as FastMCP, Context
+import requests
+
+from mcp.server.mcpserver import MCPServer as FastMCP, Context, Image
 from mcp.types import ToolAnnotations
 from supabase import create_client
 
@@ -1711,14 +1713,42 @@ def confirmer_action_clovis(id_confirmation: str, approuve: bool, ctx: Context) 
 # core/serveur_mcp_generation.py (même convention que le reste de ce
 # fichier -- voir docstring en tête), ajoutée le 19/08/2026 (demande
 # explicite de Bourama).
+#
+# CORRECTIF 19/08/2026 : l'outil renvoyait juste l'URL publique en
+# texte -- un client MCP externe (Claude) ne l'affiche jamais comme
+# une vraie pièce jointe à partir d'un simple lien dans du texte. Il
+# faut lui renvoyer les octets de l'image elle-même. _generer_image()
+# a déjà uploadé l'image dans Supabase Storage au moment où elle
+# renvoie l'URL ; on retélécharge ces octets ici (sans toucher à
+# generation_images.py, qui a d'autres appelants -- api/generation.py,
+# core/main.py, calcul_symbolique.py, serveur_mcp_generation.py --
+# qui n'ont besoin que de l'URL) et on les enveloppe avec la classe
+# `Image` du SDK MCP (mcp.server.mcpserver.Image). Le framework
+# convertit automatiquement une instance `Image` renvoyée par un
+# outil en bloc ImageContent (base64) dans la réponse MCP -- vérifié
+# dans func_metadata.py du package mcp==2.0.0 réellement utilisé par
+# ce dépôt.
 @mcp_espace.tool()
-def generer_image(prompt: str) -> str:
+def generer_image(prompt: str) -> Image | str:
     """
-    Génère une image à partir d'une description textuelle. Renvoie
-    l'URL publique de l'image générée.
+    Génère une image à partir d'une description textuelle et la
+    renvoie directement (pas juste un lien) pour qu'elle s'affiche
+    comme une vraie pièce jointe côté client.
     """
     try:
-        return _generer_image(prompt)
+        url = _generer_image(prompt)
     except Exception as e:
         logging.error(f"ERREUR outil generer_image (mcp_espace) : {e}")
         return "Erreur : la génération de l'image a échoué, réessaie."
+
+    try:
+        reponse = requests.get(url, timeout=30)
+        reponse.raise_for_status()
+        return Image(data=reponse.content, format="png")
+    except Exception as e:
+        # L'image a bien été générée et uploadée (on a l'URL), seul le
+        # re-téléchargement pour l'afficher a échoué -- on retombe sur
+        # le lien texte plutôt que de faire échouer tout l'outil pour
+        # rien, l'image reste consultable via l'URL.
+        logging.error(f"ERREUR re-téléchargement image pour affichage (mcp_espace) : {e}")
+        return url
