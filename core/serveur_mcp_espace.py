@@ -1728,7 +1728,7 @@ def confirmer_action_clovis(id_confirmation: str, approuve: bool, ctx: Context) 
 # outil en bloc ImageContent (base64) dans la réponse MCP -- vérifié
 # dans func_metadata.py du package mcp==2.0.0 réellement utilisé par
 # ce dépôt.
-@mcp_espace.tool()
+@mcp_espace.tool(structured_output=False)
 def generer_image(prompt: str) -> Image | str:
     """
     Génère une image à partir d'une description textuelle et la
