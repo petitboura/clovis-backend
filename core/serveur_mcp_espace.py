@@ -204,7 +204,10 @@ def _user_id_authentifie(ctx: Context) -> str | None:
 # client MCP externe puisse aussi chercher par contenu dans la
 # bibliothèque, pas seulement lister/gérer ses entrées.
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_consulter_bibliotheque",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def consulter_bibliotheque(question: str, ctx: Context) -> str:
     """
     Cherche dans la bibliothèque personnelle de documents de cet
@@ -235,7 +238,10 @@ def consulter_bibliotheque(question: str, ctx: Context) -> str:
     return "\n\n---\n\n".join(blocs)
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_lire_document_bibliotheque_en_entier",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def lire_document_bibliotheque_en_entier(fichier_id: str, ctx: Context) -> str:
     """
     Renvoie le texte COMPLET d'un document de la bibliothèque
@@ -257,17 +263,25 @@ def lire_document_bibliotheque_en_entier(fichier_id: str, ctx: Context) -> str:
     return texte
 
 
-@mcp_espace.tool()
-def lister_bibliotheque(ctx: Context) -> str:
+@mcp_espace.tool(
+    name="espace_lister_bibliotheque",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def lister_bibliotheque(ctx: Context, limit: int = 20, offset: int = 0) -> str:
     """
     Liste les documents/liens/notes de la bibliothèque personnelle de cet
     utilisateur (section "Bibliothèque" de "Mon espace"), sans effectuer
     de recherche par contenu (voir consulter_bibliotheque pour ça).
     Renvoie pour chaque entrée : id, description, type, date d'ajout.
+    Résultats paginés : `limit` (défaut 20, max 100) entrées à partir de
+    `offset` (défaut 0). Si d'autres entrées existent au-delà, un rappel
+    est ajouté en fin de réponse avec l'offset suivant à utiliser.
     """
     user_id = _user_id_authentifie(ctx)
     if not user_id:
         return "Erreur : utilisateur non authentifié."
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
     try:
         fichiers = _lister_fichiers("utilisateur", user_id=user_id, origine="bibliotheque")
     except Exception as e:
@@ -275,8 +289,10 @@ def lister_bibliotheque(ctx: Context) -> str:
         return "Erreur : impossible de lister la bibliothèque, réessaie."
     if not fichiers:
         return "Bibliothèque vide pour l'instant."
+    total = len(fichiers)
+    page = fichiers[offset:offset + limit]
     lignes = []
-    for f in fichiers:
+    for f in page:
         ligne = (
             f"- id={f['id']} | {f.get('description') or f.get('nom_fichier')} "
             f"({f.get('type_mime', 'inconnu')}, ajouté le {f.get('created_at', '?')})"
@@ -285,10 +301,19 @@ def lister_bibliotheque(ctx: Context) -> str:
         if emplacements:
             ligne += " | classé dans : " + ", ".join(e["libelle"] for e in emplacements)
         lignes.append(ligne)
-    return "\n".join(lignes)
+    resultat = "\n".join(lignes)
+    if offset + limit < total:
+        resultat += (
+            f"\n\n({offset + 1}-{offset + len(page)} sur {total}. "
+            f"Pour la suite : offset={offset + limit}.)"
+        )
+    return resultat
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_ajouter_lien_bibliotheque",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
 def ajouter_lien_bibliotheque(url: str, titre: str, ctx: Context) -> str:
     """
     Ajoute un lien à la bibliothèque personnelle de cet utilisateur.
@@ -321,7 +346,10 @@ def ajouter_lien_bibliotheque(url: str, titre: str, ctx: Context) -> str:
     return f"Lien ajouté (id {ligne['id']})."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_ajouter_texte_bibliotheque",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
 def ajouter_texte_bibliotheque(contenu: str, titre: str, ctx: Context) -> str:
     """
     Ajoute une note de texte libre à la bibliothèque personnelle de cet
@@ -361,7 +389,10 @@ def ajouter_texte_bibliotheque(contenu: str, titre: str, ctx: Context) -> str:
     return f"Note ajoutée (id {ligne['id']})."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_ajouter_document_bibliotheque",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
 def ajouter_document_bibliotheque(
     nom_fichier: str, type_mime: str, contenu_base64: str, titre: str, description: str, ctx: Context,
     type_emplacement: str = "", emplacement_id: str = "",
@@ -475,7 +506,10 @@ def ajouter_document_bibliotheque(
     return message
 
 
-@mcp_espace.tool(annotations=ToolAnnotations(destructive_hint=True))
+@mcp_espace.tool(
+    name="espace_supprimer_document_bibliotheque",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
+)
 def supprimer_document_bibliotheque(fichier_id: str, ctx: Context) -> str:
     """
     Supprime DÉFINITIVEMENT un document/lien/note de la bibliothèque
@@ -517,7 +551,10 @@ def supprimer_document_bibliotheque(fichier_id: str, ctx: Context) -> str:
 # inversement qu'un document de la bibliothèque peut être rangé dans le
 # programme.
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_classer_document_dans_programme",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def classer_document_dans_programme(fichier_id: str, type_emplacement: str, emplacement_id: str, ctx: Context) -> str:
     """
     Classe un document de la bibliothèque personnelle à un emplacement
@@ -539,7 +576,10 @@ def classer_document_dans_programme(fichier_id: str, type_emplacement: str, empl
     return f"Document classé dans : {libelle}."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_retirer_document_du_programme",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def retirer_document_du_programme(fichier_id: str, type_emplacement: str, emplacement_id: str, ctx: Context) -> str:
     """
     Retire un document de la bibliothèque d'un emplacement du programme
@@ -565,7 +605,10 @@ def retirer_document_du_programme(fichier_id: str, type_emplacement: str, emplac
 # visible dans "Mon espace" côté utilisateur -- découverte faite en
 # auditant le dépôt (16/08), signalée à Bourama.
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_lire_memoire",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def lire_memoire(ctx: Context) -> str:
     """
     Lit le résumé long-terme que Clovis garde de cet utilisateur (section
@@ -589,7 +632,10 @@ def lire_memoire(ctx: Context) -> str:
     return resume or "Rien en mémoire pour l'instant."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_modifier_memoire",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def modifier_memoire(resume: str, ctx: Context) -> str:
     """
     Réécrit intégralement le résumé long-terme que Clovis garde de cet
@@ -609,7 +655,10 @@ def modifier_memoire(resume: str, ctx: Context) -> str:
     return "Mémoire mise à jour."
 
 
-@mcp_espace.tool(annotations=ToolAnnotations(destructive_hint=True))
+@mcp_espace.tool(
+    name="espace_effacer_memoire",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
+)
 def effacer_memoire(ctx: Context) -> str:
     """
     Efface DÉFINITIVEMENT le résumé long-terme que Clovis garde de cet
@@ -629,7 +678,10 @@ def effacer_memoire(ctx: Context) -> str:
 
 # --- Mes comportements (agent_id fixe "clovis") ------------------------
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_consulter_comportement",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def consulter_comportement(comportement_id: str, ctx: Context) -> str:
     """
     Lit le contenu COMPLET (frontmatter + instructions) d'une instruction
@@ -654,16 +706,24 @@ def consulter_comportement(comportement_id: str, ctx: Context) -> str:
     return skill_md
 
 
-@mcp_espace.tool()
-def lister_comportements(ctx: Context) -> str:
+@mcp_espace.tool(
+    name="espace_lister_comportements",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def lister_comportements(ctx: Context, limit: int = 20, offset: int = 0) -> str:
     """
     Liste les instructions personnelles que cet utilisateur a écrites
     lui-même (section "Mes comportements" de "Mon espace") pour Clovis.
     Renvoie pour chacune : id, description courte, texte complet.
+    Résultats paginés : `limit` (défaut 20, max 100) entrées à partir de
+    `offset` (défaut 0). Si d'autres entrées existent au-delà, un rappel
+    est ajouté en fin de réponse avec l'offset suivant à utiliser.
     """
     user_id = _user_id_authentifie(ctx)
     if not user_id:
         return "Erreur : utilisateur non authentifié."
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
     try:
         comportements = _lister_comportements(AGENT_ID_ESPACE, user_id)
     except Exception as e:
@@ -671,17 +731,28 @@ def lister_comportements(ctx: Context) -> str:
         return "Erreur : impossible de lister les comportements, réessaie."
     if not comportements:
         return "Aucun comportement enregistré pour l'instant."
+    total = len(comportements)
+    page = comportements[offset:offset + limit]
     lignes = []
-    for c in comportements:
+    for c in page:
         ligne = f"- id={c['id']} | {c['description']}\n  texte : {c['texte']}"
         if c.get("lien_type") and c.get("lien_id"):
             libelle = _libelle_emplacement(c["lien_type"], c["lien_id"]) if c["lien_type"] in TYPES_EMPLACEMENT_BIBLIOTHEQUE else None
             ligne += f"\n  lié à : {libelle or (c['lien_type'] + ' ' + c['lien_id'])}"
         lignes.append(ligne)
-    return "\n".join(lignes)
+    resultat = "\n".join(lignes)
+    if offset + limit < total:
+        resultat += (
+            f"\n\n({offset + 1}-{offset + len(page)} sur {total}. "
+            f"Pour la suite : offset={offset + limit}.)"
+        )
+    return resultat
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_ajouter_comportement_espace",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
 def ajouter_comportement_espace(texte: str, ctx: Context, type_lien: str = "", lien_id: str = "") -> str:
     """
     Enregistre une nouvelle instruction personnelle pour cet utilisateur
@@ -718,7 +789,10 @@ def ajouter_comportement_espace(texte: str, ctx: Context, type_lien: str = "", l
     return message
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_modifier_comportement_espace",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def modifier_comportement_espace(comportement_id: str, texte: str, ctx: Context) -> str:
     """
     Remplace le texte complet d'un comportement existant de cet
@@ -740,7 +814,10 @@ def modifier_comportement_espace(comportement_id: str, texte: str, ctx: Context)
     return f"Comportement modifié : {ligne['description']}"
 
 
-@mcp_espace.tool(annotations=ToolAnnotations(destructive_hint=True))
+@mcp_espace.tool(
+    name="espace_supprimer_comportement_espace",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
+)
 def supprimer_comportement_espace(comportement_id: str, ctx: Context) -> str:
     """
     Supprime DÉFINITIVEMENT un comportement de cet utilisateur, à partir
@@ -769,18 +846,26 @@ def supprimer_comportement_espace(comportement_id: str, ctx: Context) -> str:
 _LONGUEUR_MAX_TITRE = 42
 
 
-@mcp_espace.tool()
-def lister_conversations_historique(ctx: Context) -> str:
+@mcp_espace.tool(
+    name="espace_lister_conversations_historique",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def lister_conversations_historique(ctx: Context, limit: int = 20, offset: int = 0) -> str:
     """
     Liste les fils de discussion distincts entre cet utilisateur et
     Clovis (section "Historique"), le plus récemment actif en premier.
     Renvoie pour chacun : conversation_id ("legacy" pour les échanges
     d'avant l'historique par fil), titre (début du premier message),
     dernière activité.
+    Résultats paginés : `limit` (défaut 20, max 100) entrées à partir de
+    `offset` (défaut 0). Si d'autres entrées existent au-delà, un rappel
+    est ajouté en fin de réponse avec l'offset suivant à utiliser.
     """
     user_id = _user_id_authentifie(ctx)
     if not user_id:
         return "Erreur : utilisateur non authentifié."
+    limit = max(1, min(limit, 100))
+    offset = max(0, offset)
     try:
         lignes = (
             _supabase.table("historique_conversations")
@@ -817,13 +902,24 @@ def lister_conversations_historique(ctx: Context) -> str:
         resultats.append((cle, titre, fil["derniere_activite"]))
 
     resultats.sort(key=lambda r: r[2], reverse=True)
-    return "\n".join(
+    total = len(resultats)
+    page = resultats[offset:offset + limit]
+    resultat = "\n".join(
         f"- conversation_id={cle} | {titre} (dernière activité : {activite})"
-        for cle, titre, activite in resultats
+        for cle, titre, activite in page
     )
+    if offset + limit < total:
+        resultat += (
+            f"\n\n({offset + 1}-{offset + len(page)} sur {total}. "
+            f"Pour la suite : offset={offset + limit}.)"
+        )
+    return resultat
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_lire_conversation_historique",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def lire_conversation_historique(conversation_id: str, ctx: Context) -> str:
     """
     Contenu complet d'un fil de discussion précis entre cet utilisateur
@@ -863,7 +959,10 @@ def lire_conversation_historique(conversation_id: str, ctx: Context) -> str:
 # l'équipe Clovis (pas propre à un utilisateur -- agent_id fixe
 # "clovis" comme partout ailleurs dans ce fichier).
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_chercher_dans_base_connaissances",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def chercher_dans_base_connaissances(question: str, ctx: Context) -> str:
     """
     Cherche dans la base de connaissances de l'agent (documents et
@@ -886,7 +985,10 @@ def chercher_dans_base_connaissances(question: str, ctx: Context) -> str:
     return "\n\n---\n\n".join(morceaux)
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_lire_article_connaissance",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def lire_article_connaissance(nom: str, ctx: Context) -> str:
     """
     Renvoie le texte COMPLET (pas juste des extraits) d'un article de la
@@ -913,7 +1015,10 @@ def lire_article_connaissance(nom: str, ctx: Context) -> str:
     return " ".join(m["contenu"] for m in morceaux)
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_liste_articles_connaissance",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def liste_articles_connaissance(ctx: Context) -> str:
     """
     Liste les noms de tous les articles disponibles dans la base de
@@ -936,7 +1041,10 @@ def liste_articles_connaissance(ctx: Context) -> str:
     return "\n".join(noms)
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_obtenir_fichier_connaissance",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def obtenir_fichier_connaissance(nom: str, ctx: Context) -> str:
     """
     Renvoie le FICHIER original (pas son texte recopié) d'un article de
@@ -968,7 +1076,10 @@ def obtenir_fichier_connaissance(nom: str, ctx: Context) -> str:
 # Ajouté le 18/08/2026 (demande Bourama), même logique que côté agent
 # interne (core/serveur_mcp_generation.py).
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_consulter_matiere_active",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def consulter_matiere_active(message_utilisateur: str, ctx: Context) -> str:
     """
     Consulte le contenu pédagogique spécifique (cours, consignes d'un
@@ -1002,7 +1113,10 @@ def consulter_matiere_active(message_utilisateur: str, ctx: Context) -> str:
 # interne user_id, décorateur @mcp_espace.tool()). Docstrings et
 # comportement des outils repris à l'identique de mcp_generation.
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_lister_mes_programmes",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def lister_mes_programmes(ctx: Context) -> str:
     """
     Liste légère (id, niveau, nom) de TOUS les programmes de cet
@@ -1031,7 +1145,10 @@ def lister_mes_programmes(ctx: Context) -> str:
     )
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_consulter_programme",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def consulter_programme(programme_id: str, ctx: Context) -> str:
     """
     Lit les matières (avec leurs limites de cadre officiel si
@@ -1056,7 +1173,10 @@ def consulter_programme(programme_id: str, ctx: Context) -> str:
         return "Erreur : impossible de consulter ce programme, réessaie."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_ajouter_programme",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
 def ajouter_programme(niveau: str, ctx: Context, nom: str = "") -> str:
     """
     Crée un nouveau programme (ex: "Terminale S", "3ème") pour CET
@@ -1079,7 +1199,10 @@ def ajouter_programme(niveau: str, ctx: Context, nom: str = "") -> str:
         return "Erreur : impossible de créer ce programme, réessaie."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_modifier_programme",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def modifier_programme(programme_id: str, ctx: Context, niveau: str = "", nom: str = "") -> str:
     """
     Modifie le niveau et/ou le nom d'un programme existant de CET
@@ -1100,7 +1223,10 @@ def modifier_programme(programme_id: str, ctx: Context, niveau: str = "", nom: s
         return "Erreur : impossible de modifier ce programme, réessaie."
 
 
-@mcp_espace.tool(annotations=ToolAnnotations(destructive_hint=True))
+@mcp_espace.tool(
+    name="espace_supprimer_programme",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
+)
 def supprimer_programme(programme_id: str, ctx: Context) -> str:
     """
     Supprime DÉFINITIVEMENT un programme de CET utilisateur, ainsi que
@@ -1121,7 +1247,10 @@ def supprimer_programme(programme_id: str, ctx: Context) -> str:
         return "Erreur : impossible de supprimer ce programme, réessaie."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_ajouter_matiere",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
 def ajouter_matiere(programme_id: str, nom: str, ctx: Context, limites: str = "") -> str:
     """
     Ajoute une matière à un programme existant de CET utilisateur (ex:
@@ -1144,7 +1273,10 @@ def ajouter_matiere(programme_id: str, nom: str, ctx: Context, limites: str = ""
         return "Erreur : impossible d'ajouter cette matière, réessaie."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_modifier_matiere",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def modifier_matiere(matiere_id: str, ctx: Context, nom: str = "", limites: str = "") -> str:
     """
     Modifie le nom et/ou les limites de cadre officiel d'une matière
@@ -1164,7 +1296,10 @@ def modifier_matiere(matiere_id: str, ctx: Context, nom: str = "", limites: str 
         return "Erreur : impossible de modifier cette matière, réessaie."
 
 
-@mcp_espace.tool(annotations=ToolAnnotations(destructive_hint=True))
+@mcp_espace.tool(
+    name="espace_supprimer_matiere",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
+)
 def supprimer_matiere(matiere_id: str, ctx: Context) -> str:
     """
     Supprime DÉFINITIVEMENT une matière de CET utilisateur, avec tous
@@ -1184,7 +1319,10 @@ def supprimer_matiere(matiere_id: str, ctx: Context) -> str:
         return "Erreur : impossible de supprimer cette matière, réessaie."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_ajouter_chapitre",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
 def ajouter_chapitre(matiere_id: str, nom: str, ctx: Context, ordre: int = 0, limites: str = "") -> str:
     """
     Ajoute un chapitre à une matière existante de CET utilisateur.
@@ -1207,7 +1345,10 @@ def ajouter_chapitre(matiere_id: str, nom: str, ctx: Context, ordre: int = 0, li
         return "Erreur : impossible d'ajouter ce chapitre, réessaie."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_modifier_chapitre",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def modifier_chapitre(chapitre_id: str, ctx: Context, nom: str = "", ordre: int = -1, limites: str = "") -> str:
     """
     Modifie le nom, l'ordre d'affichage et/ou les limites d'un chapitre
@@ -1227,7 +1368,10 @@ def modifier_chapitre(chapitre_id: str, ctx: Context, nom: str = "", ordre: int 
         return "Erreur : impossible de modifier ce chapitre, réessaie."
 
 
-@mcp_espace.tool(annotations=ToolAnnotations(destructive_hint=True))
+@mcp_espace.tool(
+    name="espace_supprimer_chapitre",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
+)
 def supprimer_chapitre(chapitre_id: str, ctx: Context) -> str:
     """
     Supprime DÉFINITIVEMENT un chapitre de CET utilisateur, avec ses
@@ -1247,7 +1391,10 @@ def supprimer_chapitre(chapitre_id: str, ctx: Context) -> str:
         return "Erreur : impossible de supprimer ce chapitre, réessaie."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_ajouter_document_programme",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
 def ajouter_document_programme(chapitre_id: str, titre: str, url_ou_contenu: str, ctx: Context) -> str:
     """
     Ajoute un document à un chapitre du programme de CET utilisateur :
@@ -1269,7 +1416,10 @@ def ajouter_document_programme(chapitre_id: str, titre: str, url_ou_contenu: str
         return "Erreur : impossible d'ajouter ce document, réessaie."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_modifier_document_programme",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def modifier_document_programme(document_id: str, ctx: Context, titre: str = "", url_ou_contenu: str = "") -> str:
     """
     Modifie le titre et/ou le contenu (texte ou lien) d'un document
@@ -1289,7 +1439,10 @@ def modifier_document_programme(document_id: str, ctx: Context, titre: str = "",
         return "Erreur : impossible de modifier ce document, réessaie."
 
 
-@mcp_espace.tool(annotations=ToolAnnotations(destructive_hint=True))
+@mcp_espace.tool(
+    name="espace_supprimer_document_programme",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
+)
 def supprimer_document_programme(document_id: str, ctx: Context) -> str:
     """
     Supprime DÉFINITIVEMENT un document du programme de CET utilisateur.
@@ -1308,7 +1461,10 @@ def supprimer_document_programme(document_id: str, ctx: Context) -> str:
         return "Erreur : impossible de supprimer ce document, réessaie."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_ajouter_exercice_programme",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
 def ajouter_exercice_programme(chapitre_id: str, enonce: str, ctx: Context) -> str:
     """
     Ajoute un exercice (rattaché à UN SEUL chapitre) au programme de CET
@@ -1328,7 +1484,10 @@ def ajouter_exercice_programme(chapitre_id: str, enonce: str, ctx: Context) -> s
         return "Erreur : impossible d'ajouter cet exercice, réessaie."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_modifier_exercice_programme",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def modifier_exercice_programme(exercice_id: str, enonce: str, ctx: Context) -> str:
     """
     Remplace l'énoncé COMPLET d'un exercice existant du programme de CET
@@ -1347,7 +1506,10 @@ def modifier_exercice_programme(exercice_id: str, enonce: str, ctx: Context) -> 
         return "Erreur : impossible de modifier cet exercice, réessaie."
 
 
-@mcp_espace.tool(annotations=ToolAnnotations(destructive_hint=True))
+@mcp_espace.tool(
+    name="espace_supprimer_exercice_programme",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
+)
 def supprimer_exercice_programme(exercice_id: str, ctx: Context) -> str:
     """
     Supprime DÉFINITIVEMENT un exercice du programme de CET utilisateur.
@@ -1366,7 +1528,10 @@ def supprimer_exercice_programme(exercice_id: str, ctx: Context) -> str:
         return "Erreur : impossible de supprimer cet exercice, réessaie."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_ajouter_examen",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
 def ajouter_examen(titre: str, type: str, chapitre_ids: list[str], ctx: Context) -> str:
     """
     Crée un examen/devoir/problème composite pour CET utilisateur,
@@ -1391,7 +1556,10 @@ def ajouter_examen(titre: str, type: str, chapitre_ids: list[str], ctx: Context)
         return "Erreur : impossible de créer cet examen, réessaie."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_modifier_examen",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def modifier_examen(examen_id: str, ctx: Context, titre: str = "", type: str = "", chapitre_ids: list[str] | None = None) -> str:
     """
     Modifie le titre, le type et/ou la liste des chapitres couverts
@@ -1415,7 +1583,10 @@ def modifier_examen(examen_id: str, ctx: Context, titre: str = "", type: str = "
         return "Erreur : impossible de modifier cet examen, réessaie."
 
 
-@mcp_espace.tool(annotations=ToolAnnotations(destructive_hint=True))
+@mcp_espace.tool(
+    name="espace_supprimer_examen",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
+)
 def supprimer_examen(examen_id: str, ctx: Context) -> str:
     """
     Supprime DÉFINITIVEMENT un examen/devoir/problème composite de CET
@@ -1436,7 +1607,10 @@ def supprimer_examen(examen_id: str, ctx: Context) -> str:
         return "Erreur : impossible de supprimer cet examen, réessaie."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_annuler_derniere_modification",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
 def annuler_derniere_modification(ctx: Context) -> str:
     """
     Annule le DERNIER ajout ou la dernière modification de programme
@@ -1459,7 +1633,10 @@ def annuler_derniere_modification(ctx: Context) -> str:
         return "Erreur : impossible d'annuler, réessaie."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_consulter_matiere_programme",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def consulter_matiere_programme(matiere_id: str, ctx: Context) -> str:
     """
     Lit les chapitres (avec leurs limites de cadre officiel si
@@ -1485,7 +1662,10 @@ def consulter_matiere_programme(matiere_id: str, ctx: Context) -> str:
         return "Erreur : impossible de consulter cette matière, réessaie."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_consulter_chapitre_programme",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def consulter_chapitre_programme(chapitre_id: str, ctx: Context) -> str:
     """
     Lit le contenu réel (documents + exercices) d'UN chapitre précis
@@ -1507,7 +1687,10 @@ def consulter_chapitre_programme(chapitre_id: str, ctx: Context) -> str:
         return "Erreur : impossible de consulter ce chapitre, réessaie."
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_consulter_examens_programme",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
 def consulter_examens_programme(programme_id: str, ctx: Context) -> str:
     """
     Lit les examens/devoirs (titre, type, chapitres couverts) d'un
@@ -1598,7 +1781,10 @@ def _derouler_chat(**kwargs_chat) -> tuple[str, dict | None]:
     return "".join(reponse), None
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_discuter_avec_clovis",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
 def discuter_avec_clovis(message: str, ctx: Context, conversation_id: str = "") -> str:
     """
     Envoie un message à Clovis et renvoie sa vraie réponse, exactement
@@ -1660,7 +1846,10 @@ def discuter_avec_clovis(message: str, ctx: Context, conversation_id: str = "") 
     return entete + (texte or "(Clovis n'a rien répondu.)")
 
 
-@mcp_espace.tool()
+@mcp_espace.tool(
+    name="espace_confirmer_action_clovis",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
 def confirmer_action_clovis(id_confirmation: str, approuve: bool, ctx: Context) -> str:
     """
     Confirme ou annule une action que Clovis voulait effectuer, signalée
@@ -1739,7 +1928,11 @@ def confirmer_action_clovis(id_confirmation: str, approuve: bool, ctx: Context) 
 # (func_metadata.py) -- Image -> ImageContent, str -> TextContent --
 # donc les deux blocs arrivent dans la même réponse, sans rien changer
 # à la vraie pièce jointe déjà affichée.
-@mcp_espace.tool(structured_output=False)
+@mcp_espace.tool(
+    name="espace_generer_image",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+    structured_output=False,
+)
 def generer_image(prompt: str) -> list[Image | str] | str:
     """
     Génère une image à partir d'une description textuelle. Renvoie
