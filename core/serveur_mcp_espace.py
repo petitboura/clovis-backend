@@ -1728,12 +1728,25 @@ def confirmer_action_clovis(id_confirmation: str, approuve: bool, ctx: Context) 
 # outil en bloc ImageContent (base64) dans la réponse MCP -- vérifié
 # dans func_metadata.py du package mcp==2.0.0 réellement utilisé par
 # ce dépôt.
+#
+# CORRECTIF 19/08/2026 (2) : côté claude.ai/Desktop, le bloc image
+# d'un outil MCP externe s'affiche en miniature repliée dans l'appel
+# d'outil, sans bouton de téléchargement (comportement du client, pas
+# corrigeable ici -- confirmé via issue GitHub
+# anthropics/claude-code#53256). On renvoie donc en plus l'URL
+# publique en texte à côté de l'image : un `list`/`tuple` renvoyé par
+# un outil est éclaté élément par élément par _convert_to_content
+# (func_metadata.py) -- Image -> ImageContent, str -> TextContent --
+# donc les deux blocs arrivent dans la même réponse, sans rien changer
+# à la vraie pièce jointe déjà affichée.
 @mcp_espace.tool(structured_output=False)
-def generer_image(prompt: str) -> Image | str:
+def generer_image(prompt: str) -> list[Image | str] | str:
     """
-    Génère une image à partir d'une description textuelle et la
-    renvoie directement (pas juste un lien) pour qu'elle s'affiche
-    comme une vraie pièce jointe côté client.
+    Génère une image à partir d'une description textuelle. Renvoie
+    l'image elle-même (vraie pièce jointe affichée directement) ET
+    son URL publique en texte juste après (miniature d'aperçu petite
+    et sans téléchargement côté client MCP -- le lien permet d'ouvrir
+    l'image en taille réelle et de la télécharger).
     """
     try:
         url = _generer_image(prompt)
@@ -1744,7 +1757,7 @@ def generer_image(prompt: str) -> Image | str:
     try:
         reponse = requests.get(url, timeout=30)
         reponse.raise_for_status()
-        return Image(data=reponse.content, format="png")
+        return [Image(data=reponse.content, format="png"), url]
     except Exception as e:
         # L'image a bien été générée et uploadée (on a l'URL), seul le
         # re-téléchargement pour l'afficher a échoué -- on retombe sur
