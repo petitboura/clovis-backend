@@ -44,19 +44,22 @@ Point clé : Notion donne déjà gratuitement son plan payant aux étudiants (em
 
 ---
 
-## Partie 3 — Agent IA avec contrôle des appareils (version simplifiée)
+## Partie 3 — Agent IA avec contrôle des appareils
 
 ### Principe général
+Portée : ce que l'étudiant autorise et demande explicitement. Ordre des couches de permission : (1) ce que l'appli autorise en interne, (2) ce que l'OS autorise, (3) ce que l'utilisateur autorise en plus, explicitement.
+
+### Téléphone (version simplifiée, mise à jour)
 Fini l'idée initiale de contrôle total du téléphone façon "agent autonome" (accessibilité, clics à l'écran) — trop de risque de blocage par Google Play. Nouvelle approche : uniquement des actions qui passent par des mécanismes officiels et légers, sans jamais toucher à l'API d'accessibilité.
 
-### Ce qu'on ajoute, sans aucun risque
+**Ce qu'on ajoute, sans aucun risque**
 
-**Suivi et information**
+*Suivi et information*
 - Voir le temps passé par app (historique d'utilisation).
 - Savoir quelle app est active en ce moment (même mécanisme que le temps passé).
 - Naviguer, éditer, ajouter, classer et créer des dossiers/fichiers — mais uniquement dans les dossiers que l'étudiant a explicitement désignés une fois (choix persistant, pas à redemander à chaque fois).
 
-**Actions et rappels**
+*Actions et rappels*
 - Envoyer des notifications classiques.
 - Ouvrir une app à la demande.
 - Notifications en plein écran (jouable, mais à réserver à un usage type "alarme/rappel important" pour rester dans les clous de la review Google).
@@ -65,18 +68,39 @@ Fini l'idée initiale de contrôle total du téléphone façon "agent autonome" 
 - Activer/désactiver le mode Ne pas déranger pendant une session.
 - Ajuster le volume/sonnerie pendant une session.
 
-**Clovis qui agit pour l'étudiant (pas l'inverse)**
+*Clovis qui agit pour l'étudiant (pas l'inverse)*
 - Permettre à Clovis d'utiliser une app tierce via l'API propre de cette app ou un connecteur MCP (comme Notion, Google Calendar, Gmail, Drive...) — même principe que les connecteurs Claude actuels. Ne fonctionne que pour les apps qui exposent une API/MCP publique (donc pas Instagram, TikTok, WhatsApp perso).
 
-### Ce qui reste explicitement écarté (pas dans le scope)
+**Ce qui reste explicitement écarté (pas dans le scope)**
 - Fermer une autre app à distance — impossible techniquement, pas juste risqué.
 - Bloquer/débloquer l'accès à une app — même limite technique.
 - Cliquer/remplir des champs dans d'autres apps — nécessite l'accessibilité, écarté depuis le début.
 - Accès à tous les fichiers du téléphone sans désignation explicite — réservé aux gestionnaires de fichiers, refus quasi certain de Google Play.
 - Détecter automatiquement un nouveau dossier ajouté ailleurs sur le téléphone (hors des dossiers désignés) — bloqué par le système lui-même, pas de contournement possible sans le même accès large refusé plus haut.
 
-### Mécanique commune à tout ce qui touche aux fichiers/dossiers
+**Mécanique commune à tout ce qui touche aux fichiers/dossiers**
 L'initiative part toujours de l'étudiant. Clovis peut proposer ("veux-tu me donner accès à un autre dossier ?"), mais c'est toujours l'étudiant qui choisit via le sélecteur système. Une fois donné, l'accès persiste — pas de reconfirmation à chaque fois (même logique que l'appairage entre appareils, façon WhatsApp Web).
+
+### PC/ordinateur (inchangé)
+- Plus simple techniquement que le mobile : Windows/macOS/Linux ont des APIs d'automatisation plus ouvertes et matures, pas de restriction App Store, pas de sandbox aussi stricte.
+- Même logique de type "computer use" (Claude Cowork) : agent qui pilote souris/clavier/fichiers/apps avec permission de l'utilisateur.
+
+### Décision : agent unifié (inchangé)
+- **Un seul "cerveau"** (compréhension, planification, raisonnement, respect des permissions, mémoire de contexte) partagé entre téléphone et PC.
+- **Deux "mains" différentes** en dessous : côté téléphone désormais limitées aux mécanismes officiels décrits ci-dessus (plus d'accessibilité), côté PC via automatisation desktop classique.
+- Avantages : cohérence produit (une seule expérience mentale pour l'étudiant), maintenance simplifiée (une seule amélioration du raisonnement profite aux deux plateformes), continuité possible entre appareils.
+
+### Lien entre appareils (inchangé)
+Exigence : pouvoir rester sur PC et faire exécuter une action sur le téléphone, et inversement rester sur le téléphone et faire exécuter une action sur le PC.
+
+Deux options de liaison évaluées :
+
+| Option | Sécurité | Fonctionnement |
+|---|---|---|
+| **Liaison automatique par compte** | ❌ Plus risquée | Dès connexion au même compte sur les deux appareils, ils sont liés. Risque : un seul point de défaillance (le compte) — si compromis à distance (phishing, session volée), l'attaquant contrôle les deux appareils sans rien de plus. |
+| **Appairage explicite** | ✅ Plus sûre (recommandée) | Code à scanner / confirmation sur les deux appareils au moment de la liaison. Exige une action physique sur les appareils déjà liés — impossible à faire uniquement depuis un compte volé à distance. |
+
+**Recommandation retenue** : appairage explicite obligatoire **une seule fois**, au moment de créer le lien (comme WhatsApp Web — scan une fois, reste lié jusqu'à révocation manuelle) — pas de reconfirmation à chaque action, pour rester utilisable au quotidien.
 
 ---
 
