@@ -202,6 +202,8 @@ OUTILS_SENSIBLES = {
     # les suppressions programme ci-dessus : irréversible, toujours confirmé.
     "supprimer_page",
     "supprimer_bloc",
+    # Lot 3/5 (20/08)
+    "supprimer_element_base",
 }
 
 
@@ -424,6 +426,12 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "supprimer_bloc": {"label": "Suppression d'un bloc", "icone": "Trash2", "onglet": None},
     "ajouter_reference_carrefour": {"label": "Ajout d'une référence carrefour", "icone": "Link", "onglet": None},
     "supprimer_reference_carrefour": {"label": "Retrait d'une référence carrefour", "icone": "Link", "onglet": None},
+    "ajouter_base_donnees": {"label": "Création d'une base de révision/tâches", "icone": "Table", "onglet": None},
+    "consulter_base_donnees": {"label": "Consultation d'une base", "icone": "Table", "onglet": None},
+    "ajouter_propriete_base": {"label": "Ajout d'une propriété", "icone": "Table", "onglet": None},
+    "ajouter_element_base": {"label": "Ajout d'un élément", "icone": "Table", "onglet": None},
+    "modifier_element_base": {"label": "Modification d'un élément", "icone": "Table", "onglet": None},
+    "supprimer_element_base": {"label": "Suppression d'un élément", "icone": "Trash2", "onglet": None},
     "ajouter_comportement": {"label": "Ajout d'un comportement", "icone": "Sparkles", "onglet": None},
     "lister_comportements": {"label": "Liste de tes comportements", "icone": "Sparkles", "onglet": None},
     "modifier_comportement": {"label": "Modification d'un comportement", "icone": "Sparkles", "onglet": None},

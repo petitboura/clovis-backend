@@ -94,6 +94,15 @@ from core.pages_notion_llm import (
     supprimer_reference_carrefour as _supprimer_reference_carrefour_notion,
     TYPES_CIBLE_CARREFOUR as _TYPES_CIBLE_CARREFOUR,
 )
+from core.bases_donnees_llm import (
+    ajouter_base as _ajouter_base_notion,
+    obtenir_base as _obtenir_base_notion,
+    ajouter_propriete as _ajouter_propriete_notion,
+    ajouter_element as _ajouter_element_notion,
+    modifier_valeurs_element as _modifier_valeurs_element_notion,
+    supprimer_element as _supprimer_element_notion,
+    TYPES_PROPRIETES_CONNUS as _TYPES_PROPRIETES_CONNUS,
+)
 from core.programme_llm import (
     lister_mes_programmes_legers as _lister_mes_programmes_legers,
     obtenir_structure_programme as _obtenir_structure_programme,
@@ -2006,6 +2015,142 @@ def supprimer_reference_carrefour(page_id: str, reference_id: str, ctx: Context)
     if not ok:
         return "Cette page est introuvable ou ne correspond pas à cet utilisateur."
     return "Référence retirée."
+
+
+# --- Section "Notion-like" (Partie 2, lot 3/5) -- bases de révision et --
+# de tâches. Mêmes outils que côté agent interne
+# (core/serveur_mcp_generation.py), logique partagée via
+# core/bases_donnees_llm.py.
+
+
+@mcp_espace.tool(
+    name="clovis_ajouter_base_donnees",
+    title="Créer une base de révision/tâches",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
+def ajouter_base_donnees(page_id: str, titre: str, ctx: Context) -> str:
+    """Crée une base de données de révision (ou de tâches) sur une page."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        base = _ajouter_base_notion(user_id, page_id, titre)
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_base_donnees : {e}")
+        return "Erreur : impossible de créer la base, réessaie."
+    if base is None:
+        return "Erreur : page_id invalide ou ne correspond pas à cet utilisateur."
+    return f"Base créée : {base['titre'] or '(sans titre)'} (id: {base['id']})."
+
+
+@mcp_espace.tool(
+    name="clovis_consulter_base_donnees",
+    title="Consulter une base de révision/tâches",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def consulter_base_donnees(base_id: str, ctx: Context) -> str:
+    """Lit le contenu complet d'une base : ses propriétés (colonnes) et ses éléments avec leurs valeurs."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        contenu = _obtenir_base_notion(user_id, base_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_base_donnees : {e}")
+        return "Erreur : impossible de lire cette base, réessaie."
+    if contenu is None:
+        return "Cette base est introuvable ou ne correspond pas à cet utilisateur."
+    return contenu
+
+
+@mcp_espace.tool(
+    name="clovis_ajouter_propriete_base",
+    title="Ajouter une propriété à une base",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
+def ajouter_propriete_base(base_id: str, nom: str, type: str, ctx: Context, options: list = []) -> str:
+    """
+    Ajoute une propriété (colonne) à une base. `type` : texte, nombre,
+    date, statut ou case_a_cocher. Pour un statut, `options` = liste
+    des libellés possibles.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    if type not in _TYPES_PROPRIETES_CONNUS:
+        return f"Erreur : type doit être l'un de {', '.join(_TYPES_PROPRIETES_CONNUS)}."
+    try:
+        propriete = _ajouter_propriete_notion(user_id, base_id, nom, type, options)
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_propriete_base : {e}")
+        return "Erreur : impossible d'ajouter cette propriété, réessaie."
+    if propriete is None:
+        return "Cette base est introuvable ou ne correspond pas à cet utilisateur."
+    return f"Propriété ajoutée : {propriete['nom']} (id: {propriete['id']})."
+
+
+@mcp_espace.tool(
+    name="clovis_ajouter_element_base",
+    title="Ajouter un élément à une base",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
+def ajouter_element_base(base_id: str, valeurs: dict, ctx: Context, parent_element_id: str = "") -> str:
+    """
+    Ajoute un élément à une base (fiche de révision, tâche...).
+    `valeurs` : dict {nom_propriete: valeur}. Pour une sous-tâche,
+    passe `parent_element_id`.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        element = _ajouter_element_notion(user_id, base_id, valeurs, parent_element_id or None)
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_element_base : {e}")
+        return "Erreur : impossible d'ajouter cet élément, réessaie."
+    if element is None:
+        return "Erreur : base_id ou parent_element_id invalide, ou ne correspond pas à cet utilisateur."
+    return f"Élément ajouté (id: {element['id']})."
+
+
+@mcp_espace.tool(
+    name="clovis_modifier_element_base",
+    title="Modifier un élément d'une base",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def modifier_element_base(element_id: str, valeurs: dict, ctx: Context) -> str:
+    """Met à jour une ou plusieurs valeurs d'un élément existant."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ok = _modifier_valeurs_element_notion(user_id, element_id, valeurs)
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_element_base : {e}")
+        return "Erreur : impossible de modifier cet élément, réessaie."
+    if not ok:
+        return "Cet élément est introuvable ou ne correspond pas à cet utilisateur."
+    return "Élément modifié."
+
+
+@mcp_espace.tool(
+    name="clovis_supprimer_element_base",
+    title="Supprimer un élément d'une base",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
+)
+def supprimer_element_base(element_id: str, ctx: Context) -> str:
+    """Supprime DÉFINITIVEMENT un élément, ainsi que ses sous-éléments."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ok = _supprimer_element_notion(user_id, element_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_element_base : {e}")
+        return "Erreur : impossible de supprimer cet élément, réessaie."
+    if not ok:
+        return "Cet élément est introuvable ou ne correspond pas à cet utilisateur."
+    return "Élément supprimé."
 
 
 # --- Discuter avec Clovis ------------------------------------------------

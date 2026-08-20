@@ -49,7 +49,8 @@ TYPES_BLOCS_CONNUS = {
     "case_a_cocher",
     "citation",
     "separateur",
-    "equation",  # lot 2/5 -- rendu LaTeX, contenu = {"latex": "..."} au lieu de {"texte": "..."}
+    "equation",
+    "base_donnees",  # lot 3/5 -- contenu = {"base_donnees_id": "..."}
 }
 
 # Lot 2/5 -- pages carrefour : une page carrefour pointe vers un ou
