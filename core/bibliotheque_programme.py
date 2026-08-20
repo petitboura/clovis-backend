@@ -81,6 +81,53 @@ def proprietaire_emplacement(type_cible: str, cible_id: str) -> str | None:
     return None
 
 
+def programme_de_emplacement(type_cible: str, cible_id: str) -> str | None:
+    """
+    Renvoie l'id du PROGRAMME (pas son propriétaire) qui contient cet
+    emplacement, quel que soit son niveau. Ajouté le 20/08 pour le
+    plugin public "contribution libre" : il faut savoir de quel
+    programme dépend un chapitre/matière pour vérifier s'il existe un
+    plugin en contribution_libre dessus, indépendamment de qui en est
+    propriétaire (voir plugin_ouvert_a_la_contribution ci-dessous).
+    """
+    if type_cible == "programme":
+        return cible_id
+    if type_cible == "matiere":
+        matiere = _lire_matiere(cible_id)
+        return matiere["programme_id"] if matiere else None
+    if type_cible == "chapitre":
+        chapitre = _lire_chapitre(cible_id)
+        if not chapitre:
+            return None
+        matiere = _lire_matiere(chapitre["matiere_id"])
+        return matiere["programme_id"] if matiere else None
+    return None
+
+
+def plugin_ouvert_a_la_contribution(programme_id: str) -> bool:
+    """
+    True si `programme_id` est le programme source d'au moins un plugin
+    publié avec contribution_libre=true (20/08/2026, demande Bourama :
+    "un plugin public que nous on publie et tout le monde peut y ajouter
+    des pdf" -- n'importe quel chapitre existant de la structure, jamais
+    de nouvelle matière/chapitre créée par un contributeur, voir
+    migrations/2026_08_20_plugin_bibliotheque_publique.sql).
+    """
+    try:
+        res = (
+            supabase.table("plugins_programme")
+            .select("id")
+            .eq("programme_source_id", programme_id)
+            .eq("contribution_libre", True)
+            .limit(1)
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (vérif plugin contribution_libre, programme {programme_id}) : {e}")
+        return False
+    return bool(res.data)
+
+
 def libelle_emplacement(type_cible: str, cible_id: str) -> str | None:
     """Libellé lisible d'un emplacement, pour affichage (bibliothèque et
     comportements) -- None si l'emplacement n'existe plus (orphelin)."""
@@ -136,11 +183,22 @@ def classer_document(user_id: str, fichier_id: str, type_cible: str, cible_id: s
         return {"ok": False, "erreur": f"Type d'emplacement invalide : {type_cible}."}
     if _proprietaire_fichier(fichier_id) != user_id:
         return {"ok": False, "erreur": "Ce document est introuvable ou ne t'appartient pas."}
-    if proprietaire_emplacement(type_cible, cible_id) != user_id:
-        return {"ok": False, "erreur": "Cet emplacement du programme est introuvable ou ne t'appartient pas."}
+
+    est_proprietaire = proprietaire_emplacement(type_cible, cible_id) == user_id
+    if not est_proprietaire:
+        # Pas propriétaire de cet emplacement : autorisé quand même si
+        # c'est un chapitre/matière/programme d'un plugin en
+        # contribution_libre (20/08, voir plugin_ouvert_a_la_contribution).
+        # exercice/examen restent réservés au propriétaire.
+        if type_cible not in ("programme", "matiere", "chapitre"):
+            return {"ok": False, "erreur": "Cet emplacement du programme est introuvable ou ne t'appartient pas."}
+        programme_id = programme_de_emplacement(type_cible, cible_id)
+        if not programme_id or not plugin_ouvert_a_la_contribution(programme_id):
+            return {"ok": False, "erreur": "Cet emplacement du programme est introuvable ou ne t'appartient pas."}
+
     try:
         supabase.table("bibliotheque_emplacements_programme").upsert(
-            {"fichier_id": fichier_id, "type_cible": type_cible, "cible_id": cible_id},
+            {"fichier_id": fichier_id, "type_cible": type_cible, "cible_id": cible_id, "ajoute_par": user_id},
             on_conflict="fichier_id,type_cible,cible_id",
         ).execute()
     except Exception as e:
@@ -151,9 +209,28 @@ def classer_document(user_id: str, fichier_id: str, type_cible: str, cible_id: s
 
 def declasser_document(user_id: str, fichier_id: str, type_cible: str, cible_id: str) -> dict:
     """Retire un document d'un emplacement du programme (le document lui
-    reste dans la bibliothèque, seul le lien disparaît)."""
+    reste dans la bibliothèque, seul le lien disparaît). Autorisé si
+    user_id est le propriétaire du FICHIER (comme avant) -- ou, ajouté
+    le 20/08 pour la contribution libre, si user_id est celui qui a
+    classé ce document à cet emplacement précis (ajoute_par) : un
+    contributeur d'un plugin public peut retirer sa propre contribution,
+    même s'il ne possède ni le fichier ni l'emplacement."""
     if _proprietaire_fichier(fichier_id) != user_id:
-        return {"ok": False, "erreur": "Ce document est introuvable ou ne t'appartient pas."}
+        try:
+            lien = (
+                supabase.table("bibliotheque_emplacements_programme")
+                .select("ajoute_par")
+                .eq("fichier_id", fichier_id)
+                .eq("type_cible", type_cible)
+                .eq("cible_id", cible_id)
+                .maybe_single()
+                .execute()
+            )
+        except Exception as e:
+            logging.error(f"ERREUR SUPABASE (lecture ajoute_par {fichier_id}) : {e}")
+            return {"ok": False, "erreur": "Ce document est introuvable ou ne t'appartient pas."}
+        if not lien or not lien.data or lien.data.get("ajoute_par") != user_id:
+            return {"ok": False, "erreur": "Ce document est introuvable ou ne t'appartient pas."}
     try:
         supabase.table("bibliotheque_emplacements_programme").delete().eq("fichier_id", fichier_id).eq(
             "type_cible", type_cible
@@ -211,6 +288,54 @@ def lister_documents_emplacement(type_cible: str, cible_id: str) -> list[dict]:
         logging.error(f"ERREUR SUPABASE (lecture documents emplacement {type_cible}={cible_id}) : {e}")
         return []
     return fichiers
+
+
+def fichiers_des_plugins_publics(niveaux: list[str]) -> list[str]:
+    """
+    Tous les fichier_id classés (programme/matière/chapitre) dans un
+    plugin en contribution_libre dont le niveau est dans `niveaux`
+    (20/08/2026, pour l'outil de chat consulter_bibliotheque_publique --
+    voir core/serveur_mcp_generation.py). Si `niveaux` est vide, renvoie
+    tous les plugins publics tous niveaux confondus (repli volontaire,
+    mieux vaut chercher large que ne rien trouver).
+    """
+    try:
+        requete = supabase.table("plugins_programme").select("programme_source_id").eq("contribution_libre", True)
+        if niveaux:
+            requete = requete.in_("niveau", niveaux)
+        plugins = requete.execute().data or []
+        programme_ids = list({p["programme_source_id"] for p in plugins})
+        if not programme_ids:
+            return []
+
+        matieres = supabase.table("matieres").select("id").in_("programme_id", programme_ids).execute().data or []
+        matiere_ids = [m["id"] for m in matieres]
+        chapitres = (
+            supabase.table("chapitres").select("id").in_("matiere_id", matiere_ids).execute().data
+            if matiere_ids
+            else []
+        ) or []
+        chapitre_ids = [c["id"] for c in chapitres]
+
+        cibles = [("programme", programme_ids), ("matiere", matiere_ids), ("chapitre", chapitre_ids)]
+        fichier_ids: set[str] = set()
+        for type_cible, ids in cibles:
+            if not ids:
+                continue
+            liens = (
+                supabase.table("bibliotheque_emplacements_programme")
+                .select("fichier_id")
+                .eq("type_cible", type_cible)
+                .in_("cible_id", ids)
+                .execute()
+                .data
+                or []
+            )
+            fichier_ids.update(l["fichier_id"] for l in liens)
+        return list(fichier_ids)
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (fichiers_des_plugins_publics, niveaux={niveaux}) : {e}")
+        return []
 
 
 # --- Comportements <-> programme ----------------------------------------

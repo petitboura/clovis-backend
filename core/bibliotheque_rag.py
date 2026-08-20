@@ -148,3 +148,34 @@ def chercher_bibliotheque(question: str, user_id: str, match_count: int = 5) -> 
     except Exception as e:
         logging.error(f"ERREUR SUPABASE RPC recherche_bibliotheque (user_id={user_id}) : {e}")
         return []
+
+
+def chercher_bibliotheque_publique(question: str, fichier_ids: list[str], match_count: int = 5) -> list:
+    """
+    Recherche sémantique à travers un ENSEMBLE de fichiers précis, pas un
+    seul user_id (20/08/2026, plugin public "contribution libre" -- les
+    documents d'un plugin public appartiennent potentiellement à
+    plusieurs utilisateurs différents, chercher_bibliotheque ci-dessus
+    ne peut donc pas s'appliquer, voir recherche_bibliotheque_publique
+    dans migrations/2026_08_20_plugin_bibliotheque_publique.sql).
+    `fichier_ids` doit déjà être filtré côté appelant (documents
+    réellement classés dans ce plugin) -- cette fonction ne vérifie
+    aucune propriété, elle fait confiance à la liste fournie.
+    """
+    if not fichier_ids:
+        return []
+
+    try:
+        vecteur = vectoriser(question, task_type="RETRIEVAL_QUERY")
+    except Exception as e:
+        logging.error(f"ERREUR VECTORISATION bibliothèque publique (Gemini) : {e}")
+        return []
+
+    try:
+        return supabase.rpc(
+            "recherche_bibliotheque_publique",
+            {"query_embedding": vecteur, "match_count": match_count, "p_fichier_ids": fichier_ids},
+        ).execute().data or []
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE RPC recherche_bibliotheque_publique : {e}")
+        return []

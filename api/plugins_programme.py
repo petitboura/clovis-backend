@@ -45,6 +45,7 @@ router_programmes = APIRouter(prefix="/api/programmes", tags=["plugins"])
 class PublierPluginPayload(BaseModel):
     nom: str
     examens_transverses_inclus: List[str] = []
+    contribution_libre: bool = False
 
 
 class ExamenTransverseReponse(BaseModel):
@@ -61,6 +62,7 @@ class PluginReponse(BaseModel):
     niveau: str
     nom: str
     gratuit: bool
+    contribution_libre: bool
     telechargements_count: int
     created_at: str
 
@@ -97,6 +99,7 @@ def _plugin_vers_reponse(ligne: dict, noms_par_auteur: dict) -> PluginReponse:
         niveau=ligne["niveau"],
         nom=ligne["nom"],
         gratuit=ligne["gratuit"],
+        contribution_libre=ligne.get("contribution_libre", False),
         telechargements_count=ligne["telechargements_count"],
         created_at=ligne["created_at"],
     )
@@ -565,6 +568,7 @@ def publier_plugin(
                 "niveau": programme.data["niveau"],
                 "nom": payload.nom.strip(),
                 "examens_transverses_inclus": examens_transverses_choisis,
+                "contribution_libre": payload.contribution_libre,
             })
             .execute()
         )

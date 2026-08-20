@@ -110,6 +110,7 @@ from core.bibliotheque_fichiers import (
 )
 from core.bibliotheque_rag import (
     chercher_bibliotheque as _chercher_bibliotheque,
+    chercher_bibliotheque_publique as _chercher_bibliotheque_publique,
     lire_document_bibliotheque_en_entier as _lire_document_bibliotheque_en_entier,
     indexer_pdf_bibliotheque as _indexer_pdf_bibliotheque,
     indexer_texte_bibliotheque as _indexer_texte_bibliotheque,
@@ -119,6 +120,7 @@ from core.bibliotheque_programme import (
     declasser_document as _declasser_document,
     lister_emplacements_document as _lister_emplacements_document,
     libelle_emplacement as _libelle_emplacement,
+    fichiers_des_plugins_publics as _fichiers_des_plugins_publics,
     TYPES_EMPLACEMENT_BIBLIOTHEQUE,
 )
 from core.description_multimedia import (
@@ -409,6 +411,57 @@ def consulter_bibliotheque(question: str, ctx: Context) -> str:
     # de le relire en entier pour ça, uniquement d'inclure son lien dans
     # ta réponse (![...](url) pour une image, [...](url) pour les
     # autres types) pour qu'il s'affiche correctement selon son type.
+    blocs = []
+    for r in resultats:
+        bloc = r["contenu"]
+        if r.get("nom_fichier") and r.get("url_publique"):
+            bloc += f"\n(Source : {r['nom_fichier']} -- {r['url_publique']})"
+        blocs.append(bloc)
+
+    return "\n\n---\n\n".join(blocs)
+
+
+@mcp_generation.tool()
+def consulter_bibliotheque_publique(question: str, ctx: Context) -> str:
+    """
+    Cherche dans les PLUGINS PUBLICS (bibliothèques partagées, alimentées
+    par n'importe quel étudiant, voir migrations/2026_08_20_plugin_
+    bibliotheque_publique.sql) les passages les plus pertinents pour
+    répondre à `question`. Distinct de consulter_bibliotheque : ici les
+    documents ne sont pas propres à l'utilisateur, ils viennent de
+    plugins publiés par l'équipe et alimentés par toute la communauté.
+    La recherche se limite aux plugins publics du (des) niveau(x) de
+    l'utilisateur -- si aucun programme personnel n'est trouvé, cherche
+    dans tous les plugins publics, tous niveaux confondus.
+    Renvoie les extraits trouvés (à utiliser directement pour répondre),
+    chacun avec le nom et le lien de son document d'origine -- inclus ce
+    lien dans ta réponse si tu juges utile de montrer le document
+    (![...](url) pour une image, [...](url) pour les autres types).
+    Renvoie un message si rien de pertinent n'a été trouvé.
+    """
+    requete = ctx.request_context.request
+    user_id = requete.query_params.get("user_id")
+    if not user_id:
+        return "Aucune bibliothèque publique disponible : utilisateur non connecté."
+
+    try:
+        programmes = (
+            _supabase_memoire.table("programmes").select("niveau").eq("proprietaire_id", user_id).execute()
+        )
+        niveaux = list({p["niveau"] for p in (programmes.data or []) if p.get("niveau")})
+    except Exception as e:
+        logging.error(f"ERREUR consulter_bibliotheque_publique (niveaux user {user_id}) : {e}")
+        niveaux = []
+
+    try:
+        fichier_ids = _fichiers_des_plugins_publics(niveaux)
+        resultats = _chercher_bibliotheque_publique(question, fichier_ids)
+    except Exception:
+        return "Erreur : la recherche dans les plugins publics a échoué, réessaie."
+
+    if not resultats:
+        return "Rien de pertinent trouvé dans les plugins publics pour cette question."
+
     blocs = []
     for r in resultats:
         bloc = r["contenu"]

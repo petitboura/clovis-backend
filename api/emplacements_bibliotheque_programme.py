@@ -31,6 +31,8 @@ from core.bibliotheque_programme import (
     classer_document,
     declasser_document,
     lister_documents_emplacement,
+    plugin_ouvert_a_la_contribution,
+    programme_de_emplacement,
     proprietaire_emplacement,
 )
 
@@ -63,7 +65,13 @@ def lister(type_cible: TypeCible, cible_id: str, utilisateur=Depends(utilisateur
     if proprietaire_id is None:
         raise erreur_api(404, "EMPLACEMENT_INTROUVABLE")
     if proprietaire_id != utilisateur.id:
-        raise erreur_api(403, "PAS_LE_DROIT_SUR_CET_EMPLACEMENT")
+        # Pas propriétaire : autorisé quand même en lecture seule si cet
+        # emplacement appartient à un plugin en contribution_libre (20/08)
+        # -- n'importe qui doit pouvoir voir les documents d'un plugin
+        # public, pas seulement son auteur.
+        programme_id = programme_de_emplacement(type_cible, cible_id)
+        if not programme_id or not plugin_ouvert_a_la_contribution(programme_id):
+            raise erreur_api(403, "PAS_LE_DROIT_SUR_CET_EMPLACEMENT")
 
     return lister_documents_emplacement(type_cible, cible_id)
 

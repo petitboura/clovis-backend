@@ -235,6 +235,12 @@ def lister_outils_autorises_pour_agent(get_secret, user_id=None, agent_id=None):
                 # proposée dès qu'un utilisateur est connecté.
                 if user_id and "consulter_bibliotheque" not in outils_autorises:
                     outils_autorises = [*outils_autorises, "consulter_bibliotheque"]
+                # consulter_bibliotheque_publique (20/08) : même logique,
+                # pour les plugins publics (contribution_libre) -- pas
+                # scopée par registre_outils_plateforme non plus, voir
+                # docstring de l'outil dans serveur_mcp_generation.py.
+                if user_id and "consulter_bibliotheque_publique" not in outils_autorises:
+                    outils_autorises = [*outils_autorises, "consulter_bibliotheque_publique"]
             if outils_autorises is not None:
                 outils = [o for o in outils if o.name in outils_autorises]
 
