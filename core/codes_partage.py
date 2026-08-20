@@ -5,9 +5,13 @@ branché sur Clovis -- voir historique) par un système plus riche et
 générique. Un utilisateur peut créer PLUSIEURS codes (pour ne pas
 mélanger "à qui j'envoie quoi"), chacun pouvant porter, tous optionnels
 et combinables librement :
-- un comportement (même format que core/comportements_etudiants.py --
-  description courte générée automatiquement, texte long lu à la
-  demande via l'outil consulter_comportement)
+- des comportements (18/08/2026, demande Bourama : plus un texte tapé
+  directement dans le code, mais une SÉLECTION parmi les comportements
+  déjà créés dans "Mes comportements" -- plusieurs possibles par code,
+  RÉFÉRENCE VIVANTE via la table de liaison codes_partage_comportements,
+  jamais une copie : si le propriétaire modifie un comportement après
+  coup, tous les codes qui le référencent suivent automatiquement la
+  version à jour)
 - un programme (référence vers un programme DÉJÀ créé par le
   propriétaire dans "Programme" -- pas une copie, la structure reste
   gérée à un seul endroit)
@@ -19,13 +23,13 @@ et combinables librement :
 
 Toute personne qui a le code reçoit TOUT ce que porte ce code -- pas de
 sélection destinataire par destinataire (c'est le sens même du code).
-Modifiable après coup (Bourama, 14/08) : comportement/texte_libre sont
-lus en direct depuis la ligne codes_partage à chaque fois, le programme
-est une référence (donc toujours à jour), la bibliothèque se met à jour
-au fil des ajouts -- rien n'est jamais figé en copie au moment de
-l'entrée du code, SAUF les fichiers de bibliothèque eux-mêmes (voir
-propager_ajout_bibliotheque : ceux-ci sont bien copiés physiquement
-chez chaque receveur, comme demandé par Bourama).
+Modifiable après coup (Bourama, 14/08) : comportements (référence vivante,
+voir plus haut)/texte_libre sont lus en direct à chaque fois, le
+programme est une référence (donc toujours à jour), la bibliothèque se
+met à jour au fil des ajouts -- rien n'est jamais figé en copie au
+moment de l'entrée du code, SAUF les fichiers de bibliothèque eux-mêmes
+(voir propager_ajout_bibliotheque : ceux-ci sont bien copiés
+physiquement chez chaque receveur, comme demandé par Bourama).
 
 Voir l'injection dans core/main.py::chat() (comportements/programmes
 reçus fusionnés avec les siens propres) et les endpoints dans
@@ -42,7 +46,6 @@ import tempfile
 from supabase import create_client
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
-from comportements_etudiants import _generer_skill  # noqa: E402
 from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien  # noqa: E402
 from bibliotheque_rag import indexer_pdf_bibliotheque, indexer_texte_bibliotheque  # noqa: E402
 
@@ -78,7 +81,34 @@ def _generer_code_unique() -> str:
     raise RuntimeError("Impossible de générer un code unique après plusieurs tentatives")
 
 
-_COLONNES_CODE = "id, code, nom, comportement_texte, comportement_description, comportement_skill_md, programme_id, partage_bibliotheque, texte_libre, actif, created_at, updated_at"
+_COLONNES_CODE = "id, code, nom, programme_id, partage_bibliotheque, texte_libre, actif, created_at, updated_at"
+
+
+def _comportements_par_code(code_ids: list[str]) -> dict[str, list[dict]]:
+    """{code_id: [{id, nom}, ...]} pour l'ensemble des code_ids donnés --
+    lecture EN DIRECT sur comportements_etudiants (référence vivante,
+    jamais de copie), via la table de liaison codes_partage_comportements.
+    Utilisé aussi bien pour l'affichage propriétaire ("Mes codes") que
+    pour la résolution côté receveur plus bas."""
+    if not code_ids:
+        return {}
+    try:
+        liaisons = (
+            supabase.table("codes_partage_comportements")
+            .select("code_id, comportement_id, comportements_etudiants(id, nom)")
+            .in_("code_id", code_ids)
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture comportements liés aux codes {code_ids}) : {e}")
+        return {}
+    resultat: dict[str, list[dict]] = {}
+    for l in (liaisons.data or []):
+        comportement = l.get("comportements_etudiants")
+        if not comportement:
+            continue  # comportement supprimé entre-temps -- liaison orpheline ignorée à l'affichage
+        resultat.setdefault(l["code_id"], []).append({"id": comportement["id"], "nom": comportement.get("nom") or ""})
+    return resultat
 
 
 def lister_mes_codes(proprietaire_id: str) -> list[dict]:
@@ -93,40 +123,74 @@ def lister_mes_codes(proprietaire_id: str) -> list[dict]:
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (lecture codes de {proprietaire_id}) : {e}")
         return []
-    return res.data or []
+    codes = res.data or []
+    comportements_par_code = _comportements_par_code([c["id"] for c in codes])
+    for c in codes:
+        c["comportements"] = comportements_par_code.get(c["id"], [])
+    return codes
+
+
+def _remplacer_comportements_du_code(code_id: str, proprietaire_id: str, comportement_ids: list[str]) -> None:
+    """Remplace entièrement l'ensemble des comportements attachés à ce
+    code par comportement_ids (vide -> plus aucun). Vérifie que chaque id
+    appartient bien au propriétaire du code AVANT liaison (jamais de
+    fuite : impossible d'attacher le comportement de quelqu'un d'autre à
+    son propre code)."""
+    comportement_ids = list(dict.fromkeys(i for i in (comportement_ids or []) if i))  # dédupliqué, ordre gardé
+    if comportement_ids:
+        try:
+            valides = (
+                supabase.table("comportements_etudiants")
+                .select("id")
+                .in_("id", comportement_ids)
+                .eq("etudiant_id", proprietaire_id)
+                .execute()
+            )
+        except Exception as e:
+            logging.error(f"ERREUR SUPABASE (vérification propriété comportements {comportement_ids}) : {e}")
+            valides = None
+        ids_valides = {l["id"] for l in (valides.data or [])} if valides else set()
+        comportement_ids = [i for i in comportement_ids if i in ids_valides]
+
+    try:
+        supabase.table("codes_partage_comportements").delete().eq("code_id", code_id).execute()
+        if comportement_ids:
+            supabase.table("codes_partage_comportements").insert(
+                [{"code_id": code_id, "comportement_id": cid} for cid in comportement_ids]
+            ).execute()
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (liaison comportements <-> code {code_id}) : {e}")
 
 
 def creer_code(
     proprietaire_id: str,
     nom: str | None = None,
-    comportement_texte: str | None = None,
+    comportement_ids: list[str] | None = None,
     programme_id: str | None = None,
     partage_bibliotheque: bool = False,
     texte_libre: str | None = None,
 ) -> dict:
-    comportement_texte = (comportement_texte or "").strip() or None
-    skill = _generer_skill(comportement_texte) if comportement_texte else None
-
     ligne = {
         "proprietaire_id": proprietaire_id,
         "code": _generer_code_unique(),
         "nom": (nom or "").strip() or None,
-        "comportement_texte": comportement_texte,
-        "comportement_description": skill["description"] if skill else None,
-        "comportement_skill_md": skill["skill_md"] if skill else None,
         "programme_id": programme_id or None,
         "partage_bibliotheque": bool(partage_bibliotheque),
         "texte_libre": (texte_libre or "").strip() or None,
     }
     res = supabase.table("codes_partage").insert(ligne).execute()
-    return res.data[0]
+    code = res.data[0]
+    if comportement_ids:
+        _remplacer_comportements_du_code(code["id"], proprietaire_id, comportement_ids)
+    code["comportements"] = _comportements_par_code([code["id"]]).get(code["id"], [])
+    return code
 
 
 def modifier_code(
     code_id: str,
     proprietaire_id: str,
     nom: str | None = None,
-    comportement_texte: str | None = None,
+    comportement_ids: list[str] | None = None,
     programme_id: str | None = None,
     partage_bibliotheque: bool | None = None,
     texte_libre: str | None = None,
@@ -134,16 +198,14 @@ def modifier_code(
     """Modification partielle : seuls les champs explicitement fournis
     (non None) sont mis à jour -- permet à un appelant de ne changer que
     le comportement sans toucher au reste, par exemple. Pour vider un
-    champ texte, l'appelant doit passer une chaîne vide, pas None."""
+    champ texte, l'appelant doit passer une chaîne vide, pas None.
+
+    comportement_ids (18/08/2026) : None -> pas touché ; liste (même
+    vide) -> remplace ENTIÈREMENT l'ensemble des comportements attachés
+    (liste vide = tout détacher)."""
     patch: dict = {}
     if nom is not None:
         patch["nom"] = nom.strip() or None
-    if comportement_texte is not None:
-        comportement_texte = comportement_texte.strip() or None
-        patch["comportement_texte"] = comportement_texte
-        skill = _generer_skill(comportement_texte) if comportement_texte else None
-        patch["comportement_description"] = skill["description"] if skill else None
-        patch["comportement_skill_md"] = skill["skill_md"] if skill else None
     if programme_id is not None:
         patch["programme_id"] = programme_id or None
     if partage_bibliotheque is not None:
@@ -151,21 +213,30 @@ def modifier_code(
     if texte_libre is not None:
         patch["texte_libre"] = texte_libre.strip() or None
 
-    if not patch:
+    if patch:
+        res = (
+            supabase.table("codes_partage")
+            .update(patch)
+            .eq("id", code_id)
+            .eq("proprietaire_id", proprietaire_id)
+            .execute()
+        )
+        if not res.data:
+            return None
+        code = res.data[0]
+    else:
         res = (
             supabase.table("codes_partage").select(_COLONNES_CODE)
             .eq("id", code_id).eq("proprietaire_id", proprietaire_id).maybe_single().execute()
         )
-        return res.data if res else None
+        if not res or not res.data:
+            return None
+        code = res.data
 
-    res = (
-        supabase.table("codes_partage")
-        .update(patch)
-        .eq("id", code_id)
-        .eq("proprietaire_id", proprietaire_id)
-        .execute()
-    )
-    return res.data[0] if res.data else None
+    if comportement_ids is not None:
+        _remplacer_comportements_du_code(code_id, proprietaire_id, comportement_ids)
+    code["comportements"] = _comportements_par_code([code_id]).get(code_id, [])
+    return code
 
 
 def activer_desactiver_code(code_id: str, proprietaire_id: str, actif: bool) -> dict | None:
@@ -233,7 +304,7 @@ def lister_mes_rattachements(receveur_id: str) -> list[dict]:
     try:
         res = (
             supabase.table("rattachements_codes")
-            .select("id, created_at, codes_partage!inner(id, code, nom, comportement_texte, comportement_description, programme_id, partage_bibliotheque, texte_libre, actif, proprietaire_id)")
+            .select("id, created_at, codes_partage!inner(id, code, nom, programme_id, partage_bibliotheque, texte_libre, actif, proprietaire_id)")
             .eq("receveur_id", receveur_id)
             .eq("codes_partage.actif", True)
             .order("created_at")
@@ -244,6 +315,8 @@ def lister_mes_rattachements(receveur_id: str) -> list[dict]:
         return []
 
     lignes = res.data or []
+    code_ids = [l["codes_partage"]["id"] for l in lignes if l.get("codes_partage")]
+    comportements_par_code = _comportements_par_code(code_ids)
     proprietaires_ids = list({l["codes_partage"]["proprietaire_id"] for l in lignes if l.get("codes_partage")})
     noms_proprietaires: dict[str, str] = {}
     if proprietaires_ids:
@@ -275,6 +348,7 @@ def lister_mes_rattachements(receveur_id: str) -> list[dict]:
         cp = l.get("codes_partage")
         if not cp:
             continue
+        comportements = comportements_par_code.get(cp["id"], [])
         resultat.append({
             "rattachement_id": l["id"],
             "code_id": cp["id"],
@@ -282,8 +356,8 @@ def lister_mes_rattachements(receveur_id: str) -> list[dict]:
             "nom_code": cp.get("nom"),
             "proprietaire_id": cp["proprietaire_id"],
             "proprietaire_nom": noms_proprietaires.get(cp["proprietaire_id"], "un autre utilisateur"),
-            "a_comportement": bool(cp.get("comportement_texte")),
-            "comportement_texte": cp.get("comportement_texte"),
+            "a_comportement": bool(comportements),
+            "comportements": comportements,  # [{id, nom}, ...] -- référence vivante, jamais figée
             "a_programme": bool(cp.get("programme_id")),
             "programme_id": cp.get("programme_id"),
             "programme_nom": noms_programmes.get(cp.get("programme_id")),
@@ -307,72 +381,77 @@ def retirer_rattachement(rattachement_id: str, receveur_id: str) -> bool:
 # --- Injection côté chat (comportements/programmes reçus) -----------------
 
 def lister_comportements_recus(receveur_id: str) -> list[dict]:
-    """Comportements reçus via un code actif, forme {id, description}
-    compatible avec core/comportements_etudiants.py::lister_comportements
-    (même clés utilisées par choisir_comportements_pertinents et par le
-    rendu du prompt -- jamais de 'texte' ici, exprès : le texte complet
-    d'un comportement reçu se lit à la demande via consulter_comportement,
+    """Comportements reçus via un ou plusieurs codes actifs, forme
+    {id, description} compatible avec
+    core/comportements_etudiants.py::lister_comportements (même clés
+    utilisées par choisir_comportements_pertinents et par le rendu du
+    prompt -- jamais de 'texte' ici, exprès : le texte complet d'un
+    comportement reçu se lit à la demande via consulter_comportement,
     jamais injecté d'office, comme pour les comportements propres).
-    id = 'recu:<code_id>' (jamais de collision possible avec un id de
-    comportements_etudiants, qui est un uuid nu) -- voir
-    obtenir_comportement_skill_recu pour la résolution inverse."""
+
+    id = 'recu:<comportement_id>' (18/08/2026 -- avant : 'recu:<code_id>',
+    changé car un code peut désormais porter plusieurs comportements ;
+    comportement_id est l'uuid réel dans comportements_etudiants, jamais
+    de collision possible avec le préfixe 'recu:'). Description lue EN
+    DIRECT sur comportements_etudiants -- référence vivante, jamais figée
+    au moment de l'entrée du code. Si le même comportement est reçu via
+    plusieurs codes actifs à la fois, il n'apparaît qu'une fois."""
     rattachements = lister_mes_rattachements(receveur_id)
-    code_ids = [r["code_id"] for r in rattachements if r["a_comportement"]]
-    if not code_ids:
+    par_comportement: dict[str, str] = {}  # comportement_id -> nom du propriétaire (premier trouvé)
+    for r in rattachements:
+        for c in r["comportements"]:
+            par_comportement.setdefault(c["id"], r["proprietaire_nom"])
+    if not par_comportement:
         return []
     try:
         lignes = (
-            supabase.table("codes_partage")
-            .select("id, comportement_description")
-            .in_("id", code_ids)
+            supabase.table("comportements_etudiants")
+            .select("id, description")
+            .in_("id", list(par_comportement.keys()))
             .execute()
         )
     except Exception as e:
-        logging.error(f"ERREUR SUPABASE (descriptions comportements reçus {code_ids}) : {e}")
+        logging.error(f"ERREUR SUPABASE (descriptions comportements reçus {list(par_comportement.keys())}) : {e}")
         return []
-    descriptions = {l["id"]: l.get("comportement_description") for l in (lignes.data or [])}
-    noms = {r["code_id"]: r["proprietaire_nom"] for r in rattachements}
     return [
-        {"id": f"recu:{code_id}", "description": f"(reçu de {noms.get(code_id, 'un autre utilisateur')}) {descriptions.get(code_id) or ''}".strip()}
-        for code_id in code_ids
+        {
+            "id": f"recu:{l['id']}",
+            "description": f"(reçu de {par_comportement.get(l['id'], 'un autre utilisateur')}) {l.get('description') or ''}".strip(),
+        }
+        for l in (lignes.data or [])
     ]
 
 
 def obtenir_comportement_skill_recu(receveur_id: str, id_recu: str) -> str | None:
     """Skill complet (frontmatter + corps markdown) d'un comportement
-    REÇU, à partir de l'id préfixé 'recu:<code_id>' -- utilisé par
-    l'outil consulter_comportement quand il reçoit un id de cette forme
-    plutôt qu'un id de comportements_etudiants classique. Vérifie que le
-    rattachement existe bien et que le code est toujours actif (jamais
-    de fuite vers un code qu'on n'a pas/plus)."""
+    REÇU, à partir de l'id préfixé 'recu:<comportement_id>' -- utilisé
+    par l'outil consulter_comportement quand il reçoit un id de cette
+    forme plutôt qu'un id de comportements_etudiants classique. Vérifie
+    qu'un rattachement actif donne bien accès à CE comportement précis
+    (via un code qui le référence) avant de le lire -- jamais de fuite
+    vers un comportement qu'on n'a pas/plus. Lecture EN DIRECT sur
+    comportements_etudiants (référence vivante)."""
     if not id_recu.startswith("recu:"):
         return None
-    code_id = id_recu[len("recu:"):]
+    comportement_id = id_recu[len("recu:"):]
+    rattachements = lister_mes_rattachements(receveur_id)
+    accessible = any(c["id"] == comportement_id for r in rattachements for c in r["comportements"])
+    if not accessible:
+        return None
     try:
-        rattachement = (
-            supabase.table("rattachements_codes")
-            .select("id")
-            .eq("code_id", code_id)
-            .eq("receveur_id", receveur_id)
-            .maybe_single()
-            .execute()
-        )
-        if not rattachement or not rattachement.data:
-            return None
         ligne = (
-            supabase.table("codes_partage")
-            .select("comportement_skill_md")
-            .eq("id", code_id)
-            .eq("actif", True)
+            supabase.table("comportements_etudiants")
+            .select("skill_md")
+            .eq("id", comportement_id)
             .maybe_single()
             .execute()
         )
     except Exception as e:
-        logging.error(f"ERREUR SUPABASE (lecture skill comportement reçu {code_id}) : {e}")
+        logging.error(f"ERREUR SUPABASE (lecture skill comportement reçu {comportement_id}) : {e}")
         return None
     if not ligne or not ligne.data:
         return None
-    return ligne.data.get("comportement_skill_md")
+    return ligne.data.get("skill_md")
 
 
 def lister_programmes_recus_legers(receveur_id: str) -> list[dict]:

@@ -42,10 +42,16 @@ class Comportement(BaseModel):
     id: str
     texte: str
     description: str
+    nom: str
 
 
 class ComportementPayload(BaseModel):
     texte: str
+    # 18/08/2026, demande Bourama : nom d'affichage choisi par l'étudiant.
+    # Vide/absent -> mode "auto" (nom généré côté serveur avec le skill).
+    # Sur une modification, le frontend doit renvoyer le nom manuel actuel
+    # s'il veut le préserver -- sinon il repasse en auto.
+    nom: str | None = None
 
 
 @router.get("", response_model=list[Comportement])
@@ -57,14 +63,14 @@ def lire_mes_comportements(agent_id: str, utilisateur=Depends(utilisateur_couran
 def ajouter_mon_comportement(agent_id: str, payload: ComportementPayload, utilisateur=Depends(utilisateur_courant)):
     if not payload.texte.strip():
         raise erreur_api(400, "TEXTE_REQUIS")
-    return ajouter_comportement(agent_id, utilisateur.id, payload.texte)
+    return ajouter_comportement(agent_id, utilisateur.id, payload.texte, nom=payload.nom)
 
 
 @router.patch("/{comportement_id}", response_model=Comportement)
 def modifier_mon_comportement(agent_id: str, comportement_id: str, payload: ComportementPayload, utilisateur=Depends(utilisateur_courant)):
     if not payload.texte.strip():
         raise erreur_api(400, "TEXTE_REQUIS")
-    resultat = modifier_comportement(agent_id, utilisateur.id, comportement_id, payload.texte)
+    resultat = modifier_comportement(agent_id, utilisateur.id, comportement_id, payload.texte, nom=payload.nom)
     if not resultat:
         raise erreur_api(404, "COMPORTEMENT_INTROUVABLE")
     return resultat

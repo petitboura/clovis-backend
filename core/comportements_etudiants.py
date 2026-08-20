@@ -81,8 +81,9 @@ def _skill_repli(texte: str) -> dict:
     création/modification d'un comportement (une description imparfaite
     vaut mieux qu'un enregistrement qui échoue)."""
     description = texte if len(texte) <= 120 else texte[:117] + "..."
+    nom = texte if len(texte) <= 60 else texte[:57] + "..."
     skill_md = f"---\nname: {_slugifier(description)}\ndescription: {description}\n---\n\n{texte}\n"
-    return {"description": description, "skill_md": skill_md}
+    return {"nom": nom, "description": description, "skill_md": skill_md}
 
 
 def _generer_skill(texte: str) -> dict:
@@ -103,6 +104,15 @@ def _generer_skill(texte: str) -> dict:
 
     Fail-safe : toute erreur (appel LLM, format de réponse invalide) fait
     retomber sur _skill_repli plutôt que de bloquer la création.
+
+    En plus du frontmatter name/description standard, on demande un
+    troisième champ `nom_affichage` (18/08/2026, demande Bourama) : un nom
+    court et soigné destiné à être VU par l'étudiant dans "Mes
+    comportements" -- même exercice que `name`, mais lisible (accents,
+    majuscules, espaces) plutôt qu'un slug technique. `name`/`description`
+    restent inchangés (routeur + skill, jamais affichés tels quels à
+    l'étudiant). Utilisé seulement si l'étudiant n'a pas choisi son propre
+    nom (voir ajouter_comportement/modifier_comportement).
     """
     try:
         client = Groq(api_key=get_secret("GROQ_API_KEY"), max_retries=0, timeout=20.0)
@@ -114,12 +124,15 @@ def _generer_skill(texte: str) -> dict:
                     "Transforme l'instruction personnelle suivante, écrite par un "
                     "étudiant pour personnaliser son assistant IA, en un skill au "
                     "format Anthropic (fichier SKILL.md) : un bloc frontmatter YAML "
-                    "avec exactement deux champs `name` (identifiant court en "
+                    "avec exactement trois champs `name` (identifiant court en "
                     "minuscules, mots séparés par des tirets, sans accents, max 64 "
-                    "caractères) et `description` (UNE phrase à la troisième "
+                    "caractères), `description` (UNE phrase à la troisième "
                     "personne, qui dit CE QUE fait ce comportement ET QUAND "
                     "l'appliquer, avec des mots concrets qui déclenchent son usage, "
-                    "max 500 caractères), suivi d'un corps en Markdown qui détaille "
+                    "max 500 caractères) et `nom_affichage` (un nom court et soigné, "
+                    "2 à 5 mots, avec accents/majuscules/espaces normaux, pensé pour "
+                    "être LU par l'étudiant dans une liste -- pas un slug technique, "
+                    "max 40 caractères), suivi d'un corps en Markdown qui détaille "
                     "l'instruction de façon claire et directe, à la deuxième "
                     "personne, comme des consignes que l'assistant doit suivre. Ne "
                     "réponds QUE avec le contenu du fichier, rien d'autre autour, "
@@ -136,14 +149,21 @@ def _generer_skill(texte: str) -> dict:
             raise ValueError("réponse sans frontmatter valide")
         entete, corps = correspondance.group(1), correspondance.group(2).strip()
         description = ""
+        nom_affichage = ""
         for ligne in entete.splitlines():
-            if ligne.strip().lower().startswith("description:"):
+            ligne_basse = ligne.strip().lower()
+            if ligne_basse.startswith("description:"):
                 description = ligne.split(":", 1)[1].strip().strip('"')
-                break
+            elif ligne_basse.startswith("nom_affichage:"):
+                nom_affichage = ligne.split(":", 1)[1].strip().strip('"')
         if not description or not corps:
             raise ValueError("frontmatter ou corps manquant")
+        if not nom_affichage:
+            # Repli léger : pas de nouvel appel LLM pour un simple nom
+            # manquant, description tronquée suffit (voir _skill_repli).
+            nom_affichage = description if len(description) <= 40 else description[:37] + "..."
         skill_md = brut if brut.endswith("\n") else brut + "\n"
-        return {"description": description, "skill_md": skill_md}
+        return {"nom": nom_affichage, "description": description, "skill_md": skill_md}
     except Exception as e:
         logging.error(f"ERREUR génération skill comportement : {e}")
         return _skill_repli(texte)
@@ -157,7 +177,7 @@ def lister_comportements(agent_id: str, etudiant_id: str) -> list[dict]:
     try:
         res = (
             supabase.table("comportements_etudiants")
-            .select("id, texte, description, lien_type, lien_id")
+            .select("id, texte, description, nom, lien_type, lien_id")
             .eq("agent_id", agent_id)
             .eq("etudiant_id", etudiant_id)
             .order("created_at")
@@ -171,6 +191,7 @@ def lister_comportements(agent_id: str, etudiant_id: str) -> list[dict]:
             "id": ligne["id"],
             "texte": ligne["texte"],
             "description": ligne.get("description") or "",
+            "nom": ligne.get("nom") or "",
             "lien_type": ligne.get("lien_type"),
             "lien_id": ligne.get("lien_id"),
         }
@@ -260,7 +281,12 @@ def choisir_comportements_pertinents(message_utilisateur: str, comportements: li
 
 
 def ajouter_comportement(
-    agent_id: str, etudiant_id: str, texte: str, lien_type: str | None = None, lien_id: str | None = None
+    agent_id: str,
+    etudiant_id: str,
+    texte: str,
+    nom: str | None = None,
+    lien_type: str | None = None,
+    lien_id: str | None = None,
 ) -> dict:
     """
     lien_type/lien_id (16/08/2026, demande Bourama) : rattache
@@ -272,8 +298,14 @@ def ajouter_comportement(
     d'appeler cette fonction -- ce module ne revérifie pas la
     propriété de la cible, même logique que le reste du fichier
     (aucune vérification RLS/FK réelle, tout est fait côté code).
+
+    nom (18/08/2026, demande Bourama) : nom d'affichage choisi par
+    l'étudiant. Vide/absent -> mode "auto" : on prend le nom_affichage
+    généré par _generer_skill (même appel LLM que le skill, aucun coût
+    supplémentaire).
     """
     texte = texte.strip()
+    nom = (nom or "").strip()
     skill = _generer_skill(texte)
     ligne_a_inserer = {
         "agent_id": agent_id,
@@ -281,6 +313,7 @@ def ajouter_comportement(
         "texte": texte,
         "description": skill["description"],
         "skill_md": skill["skill_md"],
+        "nom": nom or skill["nom"],
         "lien_type": lien_type,
         "lien_id": lien_id,
     }
@@ -290,19 +323,34 @@ def ajouter_comportement(
         "id": ligne["id"],
         "texte": ligne["texte"],
         "description": ligne.get("description") or "",
+        "nom": ligne.get("nom") or "",
         "lien_type": ligne.get("lien_type"),
         "lien_id": ligne.get("lien_id"),
     }
 
 
-def modifier_comportement(agent_id: str, etudiant_id: str, comportement_id: str, texte: str) -> dict | None:
+def modifier_comportement(
+    agent_id: str, etudiant_id: str, comportement_id: str, texte: str, nom: str | None = None
+) -> dict | None:
     """Modifie le texte -- ne touche jamais lien_type/lien_id (pas
-    demandé : un comportement lié le reste, seul son texte change)."""
+    demandé : un comportement lié le reste, seul son texte change).
+
+    nom (18/08/2026) : même règle qu'à la création -- vide/absent -> nom
+    auto régénéré avec le nouveau skill ; rempli -> gardé tel quel.
+    L'appelant doit donc renvoyer le nom manuel actuel s'il veut le
+    préserver lors d'une modification du texte seul (voir
+    api/comportements_etudiants.py)."""
     texte = texte.strip()
+    nom = (nom or "").strip()
     skill = _generer_skill(texte)
     res = (
         supabase.table("comportements_etudiants")
-        .update({"texte": texte, "description": skill["description"], "skill_md": skill["skill_md"]})
+        .update({
+            "texte": texte,
+            "description": skill["description"],
+            "skill_md": skill["skill_md"],
+            "nom": nom or skill["nom"],
+        })
         .eq("id", comportement_id)
         .eq("agent_id", agent_id)
         .eq("etudiant_id", etudiant_id)
@@ -315,6 +363,7 @@ def modifier_comportement(agent_id: str, etudiant_id: str, comportement_id: str,
         "id": ligne["id"],
         "texte": ligne["texte"],
         "description": ligne.get("description") or "",
+        "nom": ligne.get("nom") or "",
         "lien_type": ligne.get("lien_type"),
         "lien_id": ligne.get("lien_id"),
     }
