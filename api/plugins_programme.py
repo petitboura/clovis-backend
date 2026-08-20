@@ -30,6 +30,7 @@ from pydantic import BaseModel
 
 from api.auth import utilisateur_courant, supabase
 from api.journal import journaliser
+from api.permissions_hierarchie import _est_admin
 from core.erreurs import erreur_api
 
 logging.basicConfig(level=logging.INFO)
@@ -548,6 +549,15 @@ def publier_plugin(
         raise erreur_api(404, "PROGRAMME_INTROUVABLE")
     if programme.data["proprietaire_id"] != utilisateur.id:
         raise erreur_api(403, "PAS_LE_DROIT_SUR_CE_PROGRAMME")
+
+    # contribution_libre réservé à l'équipe (20/08, demande Bourama :
+    # "c'est uniquement nous qui publions les plugins auxquels tout le
+    # monde peut ajouter des documents") -- n'importe quel propriétaire
+    # de programme peut toujours publier un plugin normal (comportement
+    # inchangé), mais seul un compte role="admin" (voir
+    # api/permissions_hierarchie.py) peut le marquer contribution_libre.
+    if payload.contribution_libre and not _est_admin(utilisateur.id):
+        raise erreur_api(403, "PAS_LE_DROIT_DE_PUBLIER_UN_PLUGIN_PUBLIC")
 
     # Le choix de l'auteur (examensTransversesInclus) ne peut porter que sur
     # des examens réellement transverses de CE programme -- jamais un id
