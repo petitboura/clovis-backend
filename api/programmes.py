@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from api.auth import utilisateur_courant, supabase
 from core.erreurs import erreur_api
+from core.bibliotheque_programme import plugin_ouvert_a_la_contribution
 
 
 def _nettoyer_classements_pour_cible(cible_type: str, cible_id: str) -> None:
@@ -253,7 +254,17 @@ def _charger_matiere_avec_programme_ou_404(matiere_id: str, utilisateur_id: str)
 
 @router_programmes.get("/{programme_id}/matieres", response_model=list[Matiere])
 def lister_matieres(programme_id: str, utilisateur=Depends(utilisateur_courant)):
-    _charger_programme_ou_404(programme_id, utilisateur.id)
+    # Lecture seule ouverte en plus au cas où ce programme est source
+    # d'un plugin contribution_libre (20/08, demande Bourama : "tu peux
+    # ajouter des documents aussi" -- il faut pouvoir parcourir la
+    # structure pour savoir où). N'affecte QUE cet endpoint GET, jamais
+    # la création/modification qui reste strictement propriétaire (voir
+    # _charger_programme_ou_404 utilisé partout ailleurs, inchangé).
+    try:
+        _charger_programme_ou_404(programme_id, utilisateur.id)
+    except Exception:
+        if not plugin_ouvert_a_la_contribution(programme_id):
+            raise
     try:
         res = (
             supabase.table("matieres")
@@ -381,7 +392,19 @@ def _charger_chapitre_avec_programme_ou_404(chapitre_id: str, utilisateur_id: st
 
 @router_matieres.get("/{matiere_id}/chapitres", response_model=list[Chapitre])
 def lister_chapitres(matiere_id: str, utilisateur=Depends(utilisateur_courant)):
-    _charger_matiere_avec_programme_ou_404(matiere_id, utilisateur.id)
+    # Même relâchement en lecture seule que lister_matieres ci-dessus,
+    # pour un plugin contribution_libre (20/08).
+    try:
+        _charger_matiere_avec_programme_ou_404(matiere_id, utilisateur.id)
+    except Exception:
+        try:
+            matiere = supabase.table("matieres").select("programme_id").eq("id", matiere_id).maybe_single().execute()
+        except Exception as e:
+            logging.error(f"ERREUR SUPABASE (lecture programme_id matière {matiere_id}) : {e}")
+            raise erreur_api(500, "ERREUR_INCONNUE")
+        programme_id = (matiere.data or {}).get("programme_id") if matiere else None
+        if not programme_id or not plugin_ouvert_a_la_contribution(programme_id):
+            raise
     try:
         res = (
             supabase.table("chapitres")
