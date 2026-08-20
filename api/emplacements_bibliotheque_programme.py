@@ -30,9 +30,8 @@ from core.bibliotheque_programme import (
     TYPES_EMPLACEMENT_BIBLIOTHEQUE,
     classer_document,
     declasser_document,
+    emplacement_couvert_par_plugin_public,
     lister_documents_emplacement,
-    plugin_ouvert_a_la_contribution,
-    programme_de_emplacement,
     proprietaire_emplacement,
 )
 
@@ -68,9 +67,9 @@ def lister(type_cible: TypeCible, cible_id: str, utilisateur=Depends(utilisateur
         # Pas propriétaire : autorisé quand même en lecture seule si cet
         # emplacement appartient à un plugin en contribution_libre (20/08)
         # -- n'importe qui doit pouvoir voir les documents d'un plugin
-        # public, pas seulement son auteur.
-        programme_id = programme_de_emplacement(type_cible, cible_id)
-        if not programme_id or not plugin_ouvert_a_la_contribution(programme_id):
+        # public, pas seulement son auteur. Couvre aussi les examens
+        # transverses (voir emplacement_couvert_par_plugin_public).
+        if not emplacement_couvert_par_plugin_public(type_cible, cible_id):
             raise erreur_api(403, "PAS_LE_DROIT_SUR_CET_EMPLACEMENT")
 
     return lister_documents_emplacement(type_cible, cible_id)

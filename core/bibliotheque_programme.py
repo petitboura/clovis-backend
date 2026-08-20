@@ -84,11 +84,12 @@ def proprietaire_emplacement(type_cible: str, cible_id: str) -> str | None:
 def programme_de_emplacement(type_cible: str, cible_id: str) -> str | None:
     """
     Renvoie l'id du PROGRAMME (pas son propriétaire) qui contient cet
-    emplacement, quel que soit son niveau. Ajouté le 20/08 pour le
-    plugin public "contribution libre" : il faut savoir de quel
-    programme dépend un chapitre/matière pour vérifier s'il existe un
-    plugin en contribution_libre dessus, indépendamment de qui en est
-    propriétaire (voir plugin_ouvert_a_la_contribution ci-dessous).
+    emplacement. Ajouté le 20/08 pour le plugin public "contribution
+    libre". Ne couvre PAS "examen" : un examen peut être transverse et
+    toucher plusieurs programmes à la fois (voir examen_chapitres +
+    migrations/2026_08_14_plugin_examens_transverses.sql), il n'y a donc
+    pas UN programme unique à renvoyer -- voir programmes_de_examen et
+    emplacement_couvert_par_plugin_public ci-dessous.
     """
     if type_cible == "programme":
         return cible_id
@@ -101,7 +102,43 @@ def programme_de_emplacement(type_cible: str, cible_id: str) -> str | None:
             return None
         matiere = _lire_matiere(chapitre["matiere_id"])
         return matiere["programme_id"] if matiere else None
+    if type_cible == "exercice":
+        exercice = _lire_exercice(cible_id)
+        if not exercice:
+            return None
+        chapitre = _lire_chapitre(exercice["chapitre_id"])
+        if not chapitre:
+            return None
+        matiere = _lire_matiere(chapitre["matiere_id"])
+        return matiere["programme_id"] if matiere else None
     return None
+
+
+def programmes_de_examen(examen_id: str) -> list[str]:
+    """
+    Tous les programmes touchés par un examen (potentiellement plusieurs
+    -- un examen transverse peut couvrir des chapitres de programmes
+    différents, voir examen_chapitres). 20/08, contribution libre.
+    """
+    try:
+        chapitre_ids = [
+            l["chapitre_id"]
+            for l in (
+                supabase.table("examen_chapitres").select("chapitre_id").eq("examen_id", examen_id).execute().data
+                or []
+            )
+        ]
+        if not chapitre_ids:
+            return []
+        chapitres = supabase.table("chapitres").select("id, matiere_id").in_("id", chapitre_ids).execute().data or []
+        matiere_ids = list({c["matiere_id"] for c in chapitres})
+        if not matiere_ids:
+            return []
+        matieres = supabase.table("matieres").select("id, programme_id").in_("id", matiere_ids).execute().data or []
+        return list({m["programme_id"] for m in matieres})
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (programmes_de_examen {examen_id}) : {e}")
+        return []
 
 
 def plugin_ouvert_a_la_contribution(programme_id: str) -> bool:
@@ -126,6 +163,23 @@ def plugin_ouvert_a_la_contribution(programme_id: str) -> bool:
         logging.error(f"ERREUR SUPABASE (vérif plugin contribution_libre, programme {programme_id}) : {e}")
         return False
     return bool(res.data)
+
+
+def emplacement_couvert_par_plugin_public(type_cible: str, cible_id: str) -> bool:
+    """
+    True si N'IMPORTE QUI (pas seulement le propriétaire) doit pouvoir
+    lire/contribuer à cet emplacement, parce qu'il fait partie d'un
+    plugin contribution_libre. Fonction UNIQUE à utiliser partout où
+    cette vérification est nécessaire (classer_document, lecture des
+    documents, navigation matières/chapitres) -- gère le cas particulier
+    des examens transverses (20/08, voir programmes_de_examen : il
+    suffit qu'UN SEUL des programmes touchés par l'examen soit
+    contribution_libre pour autoriser l'accès à CET examen).
+    """
+    if type_cible == "examen":
+        return any(plugin_ouvert_a_la_contribution(pid) for pid in programmes_de_examen(cible_id))
+    programme_id = programme_de_emplacement(type_cible, cible_id)
+    return bool(programme_id and plugin_ouvert_a_la_contribution(programme_id))
 
 
 def libelle_emplacement(type_cible: str, cible_id: str) -> str | None:
@@ -187,13 +241,13 @@ def classer_document(user_id: str, fichier_id: str, type_cible: str, cible_id: s
     est_proprietaire = proprietaire_emplacement(type_cible, cible_id) == user_id
     if not est_proprietaire:
         # Pas propriétaire de cet emplacement : autorisé quand même si
-        # c'est un chapitre/matière/programme d'un plugin en
-        # contribution_libre (20/08, voir plugin_ouvert_a_la_contribution).
-        # exercice/examen restent réservés au propriétaire.
-        if type_cible not in ("programme", "matiere", "chapitre"):
-            return {"ok": False, "erreur": "Cet emplacement du programme est introuvable ou ne t'appartient pas."}
-        programme_id = programme_de_emplacement(type_cible, cible_id)
-        if not programme_id or not plugin_ouvert_a_la_contribution(programme_id):
+        # cet emplacement (programme/matière/chapitre/exercice/examen,
+        # y compris un examen transverse touchant plusieurs programmes)
+        # fait partie d'un plugin en contribution_libre (20/08, demande
+        # Bourama confirmée -- exercices ET examens inclus, pas
+        # seulement la structure programme/matière/chapitre comme prévu
+        # initialement).
+        if not emplacement_couvert_par_plugin_public(type_cible, cible_id):
             return {"ok": False, "erreur": "Cet emplacement du programme est introuvable ou ne t'appartient pas."}
 
     try:
