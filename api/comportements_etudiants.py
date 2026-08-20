@@ -32,6 +32,8 @@ from core.comportements_etudiants import (
     ajouter_comportement,
     modifier_comportement,
     supprimer_comportement,
+    obtenir_comportement_skill,
+    modifier_skill_comportement,
 )
 from core.erreurs import erreur_api
 
@@ -71,6 +73,42 @@ def modifier_mon_comportement(agent_id: str, comportement_id: str, payload: Comp
     if not payload.texte.strip():
         raise erreur_api(400, "TEXTE_REQUIS")
     resultat = modifier_comportement(agent_id, utilisateur.id, comportement_id, payload.texte, nom=payload.nom)
+    if not resultat:
+        raise erreur_api(404, "COMPORTEMENT_INTROUVABLE")
+    return resultat
+
+
+class SkillComportement(BaseModel):
+    skill_md: str
+
+
+class SkillPayload(BaseModel):
+    skill_md: str
+
+
+@router.get("/{comportement_id}/skill", response_model=SkillComportement)
+def lire_skill_comportement(agent_id: str, comportement_id: str, utilisateur=Depends(utilisateur_courant)):
+    """18/08/2026, demande Bourama : onglet "Voir le skill généré" --
+    lecture À LA DEMANDE (pas dans la liste principale, même philosophie
+    que consulter_comportement côté chat), pour ne pas alourdir la liste
+    avec un skill_md par ligne alors qu'on ne l'affiche que sur clic."""
+    skill_md = obtenir_comportement_skill(agent_id, utilisateur.id, comportement_id)
+    if skill_md is None:
+        raise erreur_api(404, "COMPORTEMENT_INTROUVABLE")
+    return {"skill_md": skill_md}
+
+
+@router.patch("/{comportement_id}/skill", response_model=Comportement)
+def modifier_skill_mon_comportement(agent_id: str, comportement_id: str, payload: SkillPayload, utilisateur=Depends(utilisateur_courant)):
+    """Édition DIRECTE du skill (frontmatter + corps), sans passer par
+    le texte brut -- voir core/comportements_etudiants.py::modifier_skill_comportement.
+    400 si le frontmatter fourni n'est pas un skill valide (pas de
+    ---...--- ou pas de description:), pour ne jamais stocker un skill
+    cassé que le routeur/l'IA ne saurait plus lire."""
+    try:
+        resultat = modifier_skill_comportement(agent_id, utilisateur.id, comportement_id, payload.skill_md)
+    except ValueError as e:
+        raise erreur_api(400, str(e))
     if not resultat:
         raise erreur_api(404, "COMPORTEMENT_INTROUVABLE")
     return resultat

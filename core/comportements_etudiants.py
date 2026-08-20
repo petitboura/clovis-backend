@@ -226,6 +226,61 @@ def obtenir_comportement_skill(agent_id: str, etudiant_id: str, comportement_id:
     return res.data.get("skill_md")
 
 
+def modifier_skill_comportement(agent_id: str, etudiant_id: str, comportement_id: str, skill_md: str) -> dict | None:
+    """
+    18/08/2026, demande Bourama ("les deux : édite le texte, l'impacte,
+    ou tu peux l'éditer directement") -- édition DIRECTE du skill
+    complet, sans passer par _generer_skill/le texte brut. Complète
+    modifier_comportement (qui régénère toujours le skill depuis le
+    texte) : ici l'étudiant écrit/corrige le frontmatter+corps lui-même
+    et on le stocke tel quel, en ne touchant PAS au texte ni au nom.
+
+    `description` est re-extraite du frontmatter fourni (le routeur
+    choisir_comportements_pertinents en dépend) -- rejeté si le
+    frontmatter est absent ou invalide, plutôt que de stocker un skill
+    cassé silencieusement.
+
+    Point d'attention pour l'appelant (16/08, même logique que le texte
+    brut) : si l'étudiant modifie ensuite son texte brut et enregistre
+    depuis l'onglet "Texte", modifier_comportement régénère le skill
+    depuis ce texte et écrase donc cette édition manuelle -- comportement
+    voulu, pas un bug (confirmé par Bourama).
+    """
+    skill_md = skill_md.strip()
+    correspondance = _RE_FRONTMATTER.match(skill_md)
+    if not correspondance:
+        raise ValueError("FRONTMATTER_INVALIDE")
+    entete, corps = correspondance.group(1), correspondance.group(2).strip()
+    description = ""
+    for ligne in entete.splitlines():
+        if ligne.strip().lower().startswith("description:"):
+            description = ligne.split(":", 1)[1].strip().strip('"')
+            break
+    if not description or not corps:
+        raise ValueError("FRONTMATTER_INCOMPLET")
+    skill_md_normalise = skill_md if skill_md.endswith("\n") else skill_md + "\n"
+
+    res = (
+        supabase.table("comportements_etudiants")
+        .update({"skill_md": skill_md_normalise, "description": description})
+        .eq("id", comportement_id)
+        .eq("agent_id", agent_id)
+        .eq("etudiant_id", etudiant_id)
+        .execute()
+    )
+    if not res.data:
+        return None
+    ligne = res.data[0]
+    return {
+        "id": ligne["id"],
+        "texte": ligne["texte"],
+        "description": ligne.get("description") or "",
+        "nom": ligne.get("nom") or "",
+        "lien_type": ligne.get("lien_type"),
+        "lien_id": ligne.get("lien_id"),
+    }
+
+
 def choisir_comportements_pertinents(message_utilisateur: str, comportements: list[dict]) -> list[dict]:
     """
     Petit routeur (même modèle/pattern que _router_outils dans
