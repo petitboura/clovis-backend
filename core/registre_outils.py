@@ -422,6 +422,8 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "ajouter_bloc": {"label": "Ajout d'un bloc", "icone": "FileText", "onglet": None},
     "modifier_bloc": {"label": "Modification d'un bloc", "icone": "FileText", "onglet": None},
     "supprimer_bloc": {"label": "Suppression d'un bloc", "icone": "Trash2", "onglet": None},
+    "ajouter_reference_carrefour": {"label": "Ajout d'une référence carrefour", "icone": "Link", "onglet": None},
+    "supprimer_reference_carrefour": {"label": "Retrait d'une référence carrefour", "icone": "Link", "onglet": None},
     "ajouter_comportement": {"label": "Ajout d'un comportement", "icone": "Sparkles", "onglet": None},
     "lister_comportements": {"label": "Liste de tes comportements", "icone": "Sparkles", "onglet": None},
     "modifier_comportement": {"label": "Modification d'un comportement", "icone": "Sparkles", "onglet": None},

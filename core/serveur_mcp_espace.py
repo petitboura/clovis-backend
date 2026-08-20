@@ -90,6 +90,9 @@ from core.pages_notion_llm import (
     ajouter_bloc as _ajouter_bloc_notion,
     modifier_bloc as _modifier_bloc_notion,
     supprimer_bloc as _supprimer_bloc_notion,
+    ajouter_reference_carrefour as _ajouter_reference_carrefour_notion,
+    supprimer_reference_carrefour as _supprimer_reference_carrefour_notion,
+    TYPES_CIBLE_CARREFOUR as _TYPES_CIBLE_CARREFOUR,
 )
 from core.programme_llm import (
     lister_mes_programmes_legers as _lister_mes_programmes_legers,
@@ -1956,6 +1959,53 @@ def supprimer_bloc(bloc_id: str, ctx: Context) -> str:
     if not ok:
         return "Ce bloc est introuvable ou ne correspond pas à cet utilisateur."
     return "Bloc supprimé."
+
+
+@mcp_espace.tool(
+    name="clovis_ajouter_reference_carrefour",
+    title="Ajouter une référence carrefour",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
+def ajouter_reference_carrefour(page_id: str, type_cible: str, cible_id: str, ctx: Context) -> str:
+    """
+    Ajoute une référence à une page carrefour -- la page pointe alors
+    vers un élément de la structure programme (programme, matiere,
+    chapitre ou document) au lieu d'avoir son propre contenu. La page
+    devient carrefour automatiquement à la première référence ajoutée.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    if type_cible not in _TYPES_CIBLE_CARREFOUR:
+        return f"Erreur : type_cible doit être l'un de {', '.join(_TYPES_CIBLE_CARREFOUR)}."
+    try:
+        ref = _ajouter_reference_carrefour_notion(user_id, page_id, type_cible, cible_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_reference_carrefour : {e}")
+        return "Erreur : impossible d'ajouter cette référence, réessaie."
+    if ref is None:
+        return "Erreur : page_id ou cible_id invalide, ou ne correspond pas à cet utilisateur."
+    return "Référence ajoutée à la page carrefour."
+
+
+@mcp_espace.tool(
+    name="clovis_supprimer_reference_carrefour",
+    title="Retirer une référence carrefour",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
+)
+def supprimer_reference_carrefour(page_id: str, reference_id: str, ctx: Context) -> str:
+    """Retire une référence d'une page carrefour (id vu via clovis_consulter_page)."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ok = _supprimer_reference_carrefour_notion(user_id, page_id, reference_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_reference_carrefour : {e}")
+        return "Erreur : impossible de retirer cette référence, réessaie."
+    if not ok:
+        return "Cette page est introuvable ou ne correspond pas à cet utilisateur."
+    return "Référence retirée."
 
 
 # --- Discuter avec Clovis ------------------------------------------------

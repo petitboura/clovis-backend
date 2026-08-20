@@ -75,6 +75,9 @@ from core.pages_notion_llm import (
     ajouter_bloc as _ajouter_bloc,
     modifier_bloc as _modifier_bloc,
     supprimer_bloc as _supprimer_bloc,
+    ajouter_reference_carrefour as _ajouter_reference_carrefour,
+    supprimer_reference_carrefour as _supprimer_reference_carrefour,
+    TYPES_CIBLE_CARREFOUR as _TYPES_CIBLE_CARREFOUR,
 )
 from core.programme_llm import obtenir_structure_programme as _obtenir_structure_programme
 from core.programme_llm import obtenir_chapitres_matiere as _obtenir_chapitres_matiere
@@ -1376,6 +1379,47 @@ def supprimer_bloc(bloc_id: str, ctx: Context) -> str:
     if not ok:
         return "Ce bloc est introuvable ou ne correspond pas à cet étudiant."
     return "Bloc supprimé."
+
+
+@mcp_generation.tool()
+def ajouter_reference_carrefour(page_id: str, type_cible: str, cible_id: str, ctx: Context) -> str:
+    """
+    Ajoute une référence à une page carrefour -- la page pointe alors
+    vers un élément de la structure programme de l'étudiant (au lieu
+    d'avoir son propre contenu). `type_cible` : programme, matiere,
+    chapitre ou document. La page devient carrefour automatiquement à
+    la première référence ajoutée. Ne devine jamais cible_id, vérifie-le
+    d'abord (ex. via consulter_programme/consulter_chapitre_programme).
+    """
+    user_id = _user_id_ou_erreur(ctx)
+    if not user_id:
+        return "Erreur : impossible d'identifier l'étudiant."
+    if type_cible not in _TYPES_CIBLE_CARREFOUR:
+        return f"Erreur : type_cible doit être l'un de {', '.join(_TYPES_CIBLE_CARREFOUR)}."
+    try:
+        ref = _ajouter_reference_carrefour(user_id, page_id, type_cible, cible_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_reference_carrefour : {e}")
+        return "Erreur : impossible d'ajouter cette référence, réessaie."
+    if ref is None:
+        return "Erreur : page_id ou cible_id invalide, ou ne correspond pas à cet étudiant."
+    return "Référence ajoutée à la page carrefour."
+
+
+@mcp_generation.tool()
+def supprimer_reference_carrefour(page_id: str, reference_id: str, ctx: Context) -> str:
+    """Retire une référence d'une page carrefour (id vu via consulter_page)."""
+    user_id = _user_id_ou_erreur(ctx)
+    if not user_id:
+        return "Erreur : impossible d'identifier l'étudiant."
+    try:
+        ok = _supprimer_reference_carrefour(user_id, page_id, reference_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_reference_carrefour : {e}")
+        return "Erreur : impossible de retirer cette référence, réessaie."
+    if not ok:
+        return "Cette page est introuvable ou ne correspond pas à cet étudiant."
+    return "Référence retirée."
 
 
 @mcp_generation.tool()

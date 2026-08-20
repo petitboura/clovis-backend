@@ -22,6 +22,11 @@ from pydantic import BaseModel
 
 from api.auth import utilisateur_courant, supabase
 from core.erreurs import erreur_api
+from core.pages_notion_llm import (
+    ajouter_reference_carrefour as _ajouter_reference_carrefour,
+    lister_references_carrefour as _lister_references_carrefour,
+    supprimer_reference_carrefour as _supprimer_reference_carrefour,
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -41,7 +46,10 @@ TYPES_BLOCS_CONNUS = {
     "case_a_cocher",
     "citation",
     "separateur",
+    "equation",
 }
+
+TYPES_CIBLE_CARREFOUR = ("programme", "matiere", "chapitre", "document")
 
 
 class PagePayload(BaseModel):
@@ -61,6 +69,7 @@ class Page(BaseModel):
     parent_id: str | None = None
     titre: str
     ordre: int
+    est_carrefour: bool = False
     created_at: str
     updated_at: str
 
@@ -222,6 +231,45 @@ def supprimer_page(page_id: str, utilisateur=Depends(utilisateur_courant)):
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (suppression page {page_id}) : {e}")
         raise erreur_api(500, "ERREUR_INCONNUE")
+
+
+class ReferenceCarrefourPayload(BaseModel):
+    type_cible: str
+    cible_id: str
+
+
+class ReferenceCarrefour(BaseModel):
+    id: str
+    type_cible: str
+    cible_id: str
+    label: str
+
+
+@router_pages.get("/{page_id}/carrefour", response_model=list[ReferenceCarrefour])
+def lister_carrefour(page_id: str, utilisateur=Depends(utilisateur_courant)):
+    _charger_page_ou_404(page_id, utilisateur.id)
+    return _lister_references_carrefour(page_id)
+
+
+@router_pages.post("/{page_id}/carrefour", response_model=ReferenceCarrefour, status_code=201)
+def ajouter_carrefour(page_id: str, payload: ReferenceCarrefourPayload, utilisateur=Depends(utilisateur_courant)):
+    if payload.type_cible not in TYPES_CIBLE_CARREFOUR:
+        raise erreur_api(422, "TYPE_DE_CIBLE_INVALIDE")
+    ref = _ajouter_reference_carrefour(utilisateur.id, page_id, payload.type_cible, payload.cible_id)
+    if ref is None:
+        raise erreur_api(404, "PAGE_OU_CIBLE_INTROUVABLE")
+    refs = _lister_references_carrefour(page_id)
+    correspondante = next((r for r in refs if r["id"] == ref["id"]), None)
+    if correspondante is None:
+        raise erreur_api(500, "ERREUR_INCONNUE")
+    return correspondante
+
+
+@router_pages.delete("/{page_id}/carrefour/{reference_id}", status_code=204)
+def supprimer_carrefour(page_id: str, reference_id: str, utilisateur=Depends(utilisateur_courant)):
+    ok = _supprimer_reference_carrefour(utilisateur.id, page_id, reference_id)
+    if not ok:
+        raise erreur_api(404, "PAGE_INTROUVABLE")
 
 
 # ================================ Blocs ===================================
