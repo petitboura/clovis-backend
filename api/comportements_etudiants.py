@@ -27,10 +27,13 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from api.auth import utilisateur_courant
+from core.bibliotheque_programme import TYPES_LIEN_COMPORTEMENT, proprietaire_lien_comportement
 from core.comportements_etudiants import (
     lister_comportements,
+    lister_comportements_par_lien,
     ajouter_comportement,
     modifier_comportement,
+    attacher_comportement,
     supprimer_comportement,
     obtenir_comportement_skill,
     modifier_skill_comportement,
@@ -45,6 +48,8 @@ class Comportement(BaseModel):
     texte: str
     description: str
     nom: str
+    lien_type: str | None = None
+    lien_id: str | None = None
 
 
 class ComportementPayload(BaseModel):
@@ -54,6 +59,29 @@ class ComportementPayload(BaseModel):
     # Sur une modification, le frontend doit renvoyer le nom manuel actuel
     # s'il veut le préserver -- sinon il repasse en auto.
     nom: str | None = None
+    # 20/08/2026, demande Bourama : "les comportements peuvent être créés
+    # depuis le programme" -- rattachement optionnel dès la création.
+    # Vérifié ci-dessous (proprietaire_lien_comportement) avant insertion,
+    # jamais fait confiance au lien_id fourni tel quel.
+    lien_type: str | None = None
+    lien_id: str | None = None
+
+
+class AttacherPayload(BaseModel):
+    # None/None pour détacher explicitement.
+    lien_type: str | None = None
+    lien_id: str | None = None
+
+
+def _verifier_lien(lien_type: str | None, lien_id: str | None, utilisateur_id: str) -> None:
+    if lien_type is None and lien_id is None:
+        return
+    if lien_type is None or lien_id is None:
+        raise erreur_api(400, "LIEN_INCOMPLET")
+    if lien_type not in TYPES_LIEN_COMPORTEMENT:
+        raise erreur_api(400, "TYPE_LIEN_INVALIDE")
+    if proprietaire_lien_comportement(lien_type, lien_id) != utilisateur_id:
+        raise erreur_api(404, "EMPLACEMENT_INTROUVABLE")
 
 
 @router.get("", response_model=list[Comportement])
@@ -61,11 +89,24 @@ def lire_mes_comportements(agent_id: str, utilisateur=Depends(utilisateur_couran
     return lister_comportements(agent_id, utilisateur.id)
 
 
+@router.get("/par-lien/{lien_type}/{lien_id}", response_model=list[Comportement])
+def lire_comportements_par_lien(agent_id: str, lien_type: str, lien_id: str, utilisateur=Depends(utilisateur_courant)):
+    """Comportements de cet étudiant déjà attachés à CET emplacement
+    précis -- pour l'afficher directement sur l'écran programme
+    (chapitre, matière, examen, section...), 20/08/2026."""
+    if lien_type not in TYPES_LIEN_COMPORTEMENT:
+        raise erreur_api(400, "TYPE_LIEN_INVALIDE")
+    return lister_comportements_par_lien(agent_id, utilisateur.id, lien_type, lien_id)
+
+
 @router.post("", response_model=Comportement, status_code=201)
 def ajouter_mon_comportement(agent_id: str, payload: ComportementPayload, utilisateur=Depends(utilisateur_courant)):
     if not payload.texte.strip():
         raise erreur_api(400, "TEXTE_REQUIS")
-    return ajouter_comportement(agent_id, utilisateur.id, payload.texte, nom=payload.nom)
+    _verifier_lien(payload.lien_type, payload.lien_id, utilisateur.id)
+    return ajouter_comportement(
+        agent_id, utilisateur.id, payload.texte, nom=payload.nom, lien_type=payload.lien_type, lien_id=payload.lien_id
+    )
 
 
 @router.patch("/{comportement_id}", response_model=Comportement)
@@ -109,6 +150,19 @@ def modifier_skill_mon_comportement(agent_id: str, comportement_id: str, payload
         resultat = modifier_skill_comportement(agent_id, utilisateur.id, comportement_id, payload.skill_md)
     except ValueError as e:
         raise erreur_api(400, str(e))
+    if not resultat:
+        raise erreur_api(404, "COMPORTEMENT_INTROUVABLE")
+    return resultat
+
+
+@router.patch("/{comportement_id}/lien", response_model=Comportement)
+def attacher_mon_comportement(agent_id: str, comportement_id: str, payload: AttacherPayload, utilisateur=Depends(utilisateur_courant)):
+    """Attache (ou détache si lien_type/lien_id sont None) un
+    comportement déjà existant -- séparé de la modification du texte
+    (20/08/2026, demande Bourama : "au moment de la création ou après
+    tu peux l'attacher")."""
+    _verifier_lien(payload.lien_type, payload.lien_id, utilisateur.id)
+    resultat = attacher_comportement(agent_id, utilisateur.id, comportement_id, payload.lien_type, payload.lien_id)
     if not resultat:
         raise erreur_api(404, "COMPORTEMENT_INTROUVABLE")
     return resultat

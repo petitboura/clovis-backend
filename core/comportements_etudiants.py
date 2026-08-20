@@ -388,7 +388,11 @@ def modifier_comportement(
     agent_id: str, etudiant_id: str, comportement_id: str, texte: str, nom: str | None = None
 ) -> dict | None:
     """Modifie le texte -- ne touche jamais lien_type/lien_id (pas
-    demandé : un comportement lié le reste, seul son texte change).
+    demandé ici : modifier le TEXTE d'un comportement lié ne doit pas
+    le détacher accidentellement -- voir attacher_comportement
+    ci-dessous pour changer lien_type/lien_id explicitement, séparé
+    exprès en deux actions distinctes, 20/08/2026 demande Bourama :
+    "au moment de la création ou après tu peux l'attacher").
 
     nom (18/08/2026) : même règle qu'à la création -- vide/absent -> nom
     auto régénéré avec le nouveau skill ; rempli -> gardé tel quel.
@@ -422,6 +426,65 @@ def modifier_comportement(
         "lien_type": ligne.get("lien_type"),
         "lien_id": ligne.get("lien_id"),
     }
+
+
+def attacher_comportement(
+    agent_id: str, etudiant_id: str, comportement_id: str, lien_type: str | None, lien_id: str | None
+) -> dict | None:
+    """
+    Attache (ou détache si lien_type/lien_id sont None) un comportement
+    DÉJÀ EXISTANT à un emplacement du programme -- séparé de
+    modifier_comportement exprès (20/08/2026, demande Bourama : "au
+    moment de la création ou après tu peux l'attacher"). L'appelant est
+    responsable de vérifier que lien_id appartient bien à cet étudiant
+    AVANT d'appeler cette fonction (voir proprietaire_lien_comportement
+    dans core/bibliotheque_programme.py), même convention que
+    ajouter_comportement.
+    """
+    res = (
+        supabase.table("comportements_etudiants")
+        .update({"lien_type": lien_type, "lien_id": lien_id})
+        .eq("id", comportement_id)
+        .eq("agent_id", agent_id)
+        .eq("etudiant_id", etudiant_id)
+        .execute()
+    )
+    if not res.data:
+        return None
+    ligne = res.data[0]
+    return {
+        "id": ligne["id"],
+        "texte": ligne["texte"],
+        "description": ligne.get("description") or "",
+        "nom": ligne.get("nom") or "",
+        "lien_type": ligne.get("lien_type"),
+        "lien_id": ligne.get("lien_id"),
+    }
+
+
+def lister_comportements_par_lien(agent_id: str, etudiant_id: str, lien_type: str, lien_id: str) -> list[dict]:
+    """Comportements de cet étudiant attachés PRÉCISÉMENT à cet
+    emplacement -- pour afficher, depuis un écran programme (chapitre,
+    matière...), les comportements déjà accrochés là (20/08/2026)."""
+    try:
+        res = (
+            supabase.table("comportements_etudiants")
+            .select("id, texte, description, nom")
+            .eq("agent_id", agent_id)
+            .eq("etudiant_id", etudiant_id)
+            .eq("lien_type", lien_type)
+            .eq("lien_id", lien_id)
+            .order("created_at")
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (comportements par lien {lien_type}={lien_id}) : {e}")
+        return []
+    return [
+        {"id": l["id"], "texte": l["texte"], "description": l.get("description") or "", "nom": l.get("nom") or ""}
+        for l in (res.data or [])
+        if l.get("texte", "").strip()
+    ]
 
 
 def supprimer_comportement(agent_id: str, etudiant_id: str, comportement_id: str) -> bool:

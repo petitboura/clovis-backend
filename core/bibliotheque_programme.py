@@ -206,6 +206,20 @@ def libelle_emplacement(type_cible: str, cible_id: str) -> str | None:
         if type_cible == "examen":
             res = supabase.table("examens_programme").select("titre").eq("id", cible_id).maybe_single().execute()
             return res.data["titre"] if res and res.data else None
+        if type_cible == "document":
+            res = supabase.table("documents_programme").select("titre").eq("id", cible_id).maybe_single().execute()
+            return res.data["titre"] if res and res.data else None
+        if type_cible == "section":
+            res = (
+                supabase.table("classements_transversaux")
+                .select("label, type")
+                .eq("id", cible_id)
+                .maybe_single()
+                .execute()
+            )
+            if not res or not res.data:
+                return None
+            return res.data.get("label") or res.data.get("type") or "Section"
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (libellé emplacement {type_cible}={cible_id}) : {e}")
         return None
@@ -394,18 +408,18 @@ def fichiers_des_plugins_publics(niveaux: list[str]) -> list[str]:
 
 # --- Comportements <-> programme ----------------------------------------
 
-TYPES_LIEN_COMPORTEMENT = ("programme", "matiere", "chapitre", "document", "exercice", "examen")
+TYPES_LIEN_COMPORTEMENT = ("programme", "matiere", "chapitre", "document", "exercice", "examen", "section")
 
 
 def proprietaire_lien_comportement(type_cible: str, cible_id: str) -> str | None:
     """
     Comme proprietaire_emplacement, mais couvre en plus document/
-    exercice/examen (types possibles pour un lien de comportement, pas
-    pour un classement bibliothèque -- voir docstring en tête de
-    fichier). Réutilise _proprietaire_du_chapitre de
+    exercice/examen/section (types possibles pour un lien de
+    comportement, pas pour un classement bibliothèque -- voir docstring
+    en tête de fichier). Réutilise _proprietaire_du_chapitre de
     api/contenu_programme.py pour document/exercice (rattachés à un
-    seul chapitre), et une résolution directe pour examen (rattaché à
-    un proprietaire_id, pas à un chapitre -- voir
+    seul chapitre), et une résolution directe pour examen/section
+    (rattachés à un proprietaire_id, pas à un chapitre -- voir
     2026_08_12_contenu_pratique_programme.sql).
     """
     if type_cible in ("programme", "matiere", "chapitre"):
@@ -422,4 +436,17 @@ def proprietaire_lien_comportement(type_cible: str, cible_id: str) -> str | None
     if type_cible == "examen":
         examen = _lire_examen(cible_id)
         return examen["proprietaire_id"] if examen else None
+    if type_cible == "section":
+        try:
+            res = (
+                supabase.table("classements_transversaux")
+                .select("proprietaire_id")
+                .eq("id", cible_id)
+                .maybe_single()
+                .execute()
+            )
+        except Exception as e:
+            logging.error(f"ERREUR SUPABASE (lecture propriétaire section {cible_id}) : {e}")
+            return None
+        return res.data["proprietaire_id"] if res and res.data else None
     return None
