@@ -31,6 +31,7 @@ from api.contenu_dynamique_matiere import router_etudiant as contenu_matiere_etu
 from api.contenu_dynamique_matiere import router_liste_agents as contenu_matiere_liste_agents_router
 from api.comportements_etudiants import router as comportements_etudiants_router
 from api.programmes import router_programmes, router_matieres, router_chapitres
+from api.pages_notion import router_pages, router_blocs
 from api.audits_programme import router_audits_programme
 from api.contenu_programme import router as contenu_programme_router
 from api.emplacements_bibliotheque_programme import router as emplacements_bibliotheque_programme_router
@@ -367,6 +368,8 @@ app.include_router(comportements_etudiants_router)
 app.include_router(router_programmes)
 app.include_router(router_matieres)
 app.include_router(router_chapitres)
+app.include_router(router_pages)
+app.include_router(router_blocs)
 app.include_router(router_audits_programme)
 app.include_router(contenu_programme_router)
 app.include_router(emplacements_bibliotheque_programme_router)

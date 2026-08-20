@@ -198,6 +198,10 @@ OUTILS_SENSIBLES = {
     # l'agent interne.
     "supprimer_document_bibliotheque",
     "effacer_memoire",
+    # Section "Notion-like" (Partie 2, lot 1/5, 20/08) -- même logique que
+    # les suppressions programme ci-dessus : irréversible, toujours confirmé.
+    "supprimer_page",
+    "supprimer_bloc",
 }
 
 
@@ -409,6 +413,15 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "consulter_examens_programme": {"label": "Consultation des examens", "icone": "ClipboardList", "onglet": None},
     "supprimer_examen": {"label": "Suppression d'un examen", "icone": "Trash2", "onglet": None},
     "annuler_derniere_modification": {"label": "Annulation de la dernière modification", "icone": "Undo2", "onglet": None},
+    # Section "Notion-like" (Partie 2, lot 1/5, 20/08)
+    "lister_mes_pages": {"label": "Liste de tes pages", "icone": "FileText", "onglet": None},
+    "consulter_page": {"label": "Consultation d'une page", "icone": "FileText", "onglet": None},
+    "ajouter_page": {"label": "Création d'une page", "icone": "FileText", "onglet": None},
+    "modifier_page": {"label": "Modification d'une page", "icone": "FileText", "onglet": None},
+    "supprimer_page": {"label": "Suppression d'une page", "icone": "Trash2", "onglet": None},
+    "ajouter_bloc": {"label": "Ajout d'un bloc", "icone": "FileText", "onglet": None},
+    "modifier_bloc": {"label": "Modification d'un bloc", "icone": "FileText", "onglet": None},
+    "supprimer_bloc": {"label": "Suppression d'un bloc", "icone": "Trash2", "onglet": None},
     "ajouter_comportement": {"label": "Ajout d'un comportement", "icone": "Sparkles", "onglet": None},
     "lister_comportements": {"label": "Liste de tes comportements", "icone": "Sparkles", "onglet": None},
     "modifier_comportement": {"label": "Modification d'un comportement", "icone": "Sparkles", "onglet": None},

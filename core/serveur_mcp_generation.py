@@ -66,6 +66,16 @@ from core.comportements_etudiants import (
     modifier_comportement as _modifier_comportement,
     supprimer_comportement as _supprimer_comportement,
 )
+from core.pages_notion_llm import (
+    lister_mes_pages_racines_legeres as _lister_mes_pages_racines_legeres,
+    obtenir_page as _obtenir_page,
+    ajouter_page as _ajouter_page,
+    modifier_page as _modifier_page,
+    supprimer_page as _supprimer_page,
+    ajouter_bloc as _ajouter_bloc,
+    modifier_bloc as _modifier_bloc,
+    supprimer_bloc as _supprimer_bloc,
+)
 from core.programme_llm import obtenir_structure_programme as _obtenir_structure_programme
 from core.programme_llm import obtenir_chapitres_matiere as _obtenir_chapitres_matiere
 from core.programme_llm import obtenir_contenu_chapitre as _obtenir_contenu_chapitre
@@ -1205,6 +1215,167 @@ def _user_id_ou_erreur(ctx: Context) -> str | None:
     besoin d'agent_id, contrairement aux comportements -- un programme
     appartient à l'utilisateur, pas à un agent précis)."""
     return ctx.request_context.request.query_params.get("user_id")
+
+
+# --- Section "Notion-like" (Partie 2, lot 1/5) -- navigation pages/blocs --
+# Demande Bourama (20/08) : l'IA doit pouvoir naviguer/s'orienter dans
+# cette structure, pareil côté MCP public (voir core/serveur_mcp_espace.py
+# pour les mêmes outils exposés à un client externe).
+
+
+@mcp_generation.tool()
+def lister_mes_pages(ctx: Context) -> str:
+    """
+    Liste légère (id, titre) des pages RACINES (sans page parente) de
+    CET utilisateur, dans sa section "Notion-like" -- point de départ
+    obligatoire avant tout autre outil "page" s'il n'a pas déjà un id
+    précis en tête. Ne contient PAS les sous-pages ni les blocs (voir
+    consulter_page une fois une page choisie).
+    """
+    user_id = _user_id_ou_erreur(ctx)
+    if not user_id:
+        return "Erreur : impossible d'identifier l'étudiant."
+    try:
+        pages = _lister_mes_pages_racines_legeres(user_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil lister_mes_pages : {e}")
+        return "Erreur : impossible de lister les pages, réessaie."
+    if not pages:
+        return "Aucune page créée pour l'instant."
+    return "\n".join(f"- {p['titre']} (id: {p['id']})" for p in pages)
+
+
+@mcp_generation.tool()
+def consulter_page(page_id: str, ctx: Context) -> str:
+    """
+    Lit le contenu d'UNE page précise : ses sous-pages (id + titre, pour
+    y naviguer ensuite) et ses blocs (id + type + texte, dans l'ordre).
+    Utilise cet outil pour t'orienter dans l'arborescence des pages,
+    jamais en devinant un id.
+    """
+    user_id = _user_id_ou_erreur(ctx)
+    if not user_id:
+        return "Erreur : impossible d'identifier l'étudiant."
+    try:
+        contenu = _obtenir_page(user_id, page_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_page : {e}")
+        return "Erreur : impossible de lire cette page, réessaie."
+    if contenu is None:
+        return "Cette page est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+    return contenu
+
+
+@mcp_generation.tool()
+def ajouter_page(titre: str, ctx: Context, parent_id: str = "") -> str:
+    """
+    Crée une nouvelle page dans la section "Notion-like" de CET
+    étudiant. Si `parent_id` est fourni, la nouvelle page devient une
+    sous-page de celle-ci -- sinon elle est créée à la racine. N'utilise
+    JAMAIS cet outil sur une supposition d'id parent, vérifie-le d'abord
+    avec lister_mes_pages ou consulter_page.
+    """
+    user_id = _user_id_ou_erreur(ctx)
+    if not user_id:
+        return "Erreur : impossible d'identifier l'étudiant."
+    try:
+        page = _ajouter_page(user_id, titre, parent_id or None)
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_page : {e}")
+        return "Erreur : impossible de créer la page, réessaie."
+    if page is None:
+        return "Erreur : parent_id invalide ou ne correspond pas à cet étudiant."
+    return f"Page créée : {page['titre'] or '(sans titre)'} (id: {page['id']})."
+
+
+@mcp_generation.tool()
+def modifier_page(page_id: str, titre: str, ctx: Context) -> str:
+    """Renomme une page existante (id vu via lister_mes_pages ou consulter_page)."""
+    user_id = _user_id_ou_erreur(ctx)
+    if not user_id:
+        return "Erreur : impossible d'identifier l'étudiant."
+    try:
+        page = _modifier_page(user_id, page_id, titre)
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_page : {e}")
+        return "Erreur : impossible de modifier cette page, réessaie."
+    if page is None:
+        return "Cette page est introuvable ou ne correspond pas à cet étudiant."
+    return f"Page renommée : {page['titre']}."
+
+
+@mcp_generation.tool()
+def supprimer_page(page_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT une page, ainsi que ses sous-pages et ses
+    blocs. Action irréversible -- voir OUTILS_SENSIBLES (confirmation
+    utilisateur obligatoire avant exécution réelle).
+    """
+    user_id = _user_id_ou_erreur(ctx)
+    if not user_id:
+        return "Erreur : impossible d'identifier l'étudiant."
+    try:
+        ok = _supprimer_page(user_id, page_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_page : {e}")
+        return "Erreur : impossible de supprimer cette page, réessaie."
+    if not ok:
+        return "Cette page est introuvable ou ne correspond pas à cet étudiant."
+    return "Page supprimée."
+
+
+@mcp_generation.tool()
+def ajouter_bloc(page_id: str, type: str, texte: str, ctx: Context, ordre: int = 0) -> str:
+    """
+    Ajoute un bloc de contenu à une page (rattaché à UNE SEULE page).
+    `type` : texte, titre, liste_puces, liste_numerotee, case_a_cocher,
+    citation ou separateur (repli sur "texte" si autre chose). Vérifie
+    d'abord le page_id avec lister_mes_pages/consulter_page, jamais deviné.
+    """
+    user_id = _user_id_ou_erreur(ctx)
+    if not user_id:
+        return "Erreur : impossible d'identifier l'étudiant."
+    try:
+        bloc = _ajouter_bloc(user_id, page_id, type, texte, ordre)
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_bloc : {e}")
+        return "Erreur : impossible d'ajouter ce bloc, réessaie."
+    if bloc is None:
+        return "Erreur : page_id invalide ou ne correspond pas à cet étudiant."
+    return f"Bloc ajouté (id: {bloc['id']})."
+
+
+@mcp_generation.tool()
+def modifier_bloc(bloc_id: str, texte: str, ctx: Context) -> str:
+    """Remplace le texte d'un bloc existant (id vu via consulter_page)."""
+    user_id = _user_id_ou_erreur(ctx)
+    if not user_id:
+        return "Erreur : impossible d'identifier l'étudiant."
+    try:
+        bloc = _modifier_bloc(user_id, bloc_id, texte)
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_bloc : {e}")
+        return "Erreur : impossible de modifier ce bloc, réessaie."
+    if bloc is None:
+        return "Ce bloc est introuvable ou ne correspond pas à cet étudiant."
+    return "Bloc modifié."
+
+
+@mcp_generation.tool()
+def supprimer_bloc(bloc_id: str, ctx: Context) -> str:
+    """Supprime DÉFINITIVEMENT un bloc. Action irréversible -- voir
+    OUTILS_SENSIBLES (confirmation utilisateur obligatoire)."""
+    user_id = _user_id_ou_erreur(ctx)
+    if not user_id:
+        return "Erreur : impossible d'identifier l'étudiant."
+    try:
+        ok = _supprimer_bloc(user_id, bloc_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_bloc : {e}")
+        return "Erreur : impossible de supprimer ce bloc, réessaie."
+    if not ok:
+        return "Ce bloc est introuvable ou ne correspond pas à cet étudiant."
+    return "Bloc supprimé."
 
 
 @mcp_generation.tool()
