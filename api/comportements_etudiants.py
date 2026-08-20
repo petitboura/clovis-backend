@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from api.auth import utilisateur_courant
-from core.bibliotheque_programme import TYPES_LIEN_COMPORTEMENT, proprietaire_lien_comportement
+from core.bibliotheque_programme import TYPES_LIEN_COMPORTEMENT, libelle_emplacement, proprietaire_lien_comportement
 from core.comportements_etudiants import (
     lister_comportements,
     lister_comportements_par_lien,
@@ -50,6 +50,7 @@ class Comportement(BaseModel):
     nom: str
     lien_type: str | None = None
     lien_id: str | None = None
+    lien_libelle: str | None = None
 
 
 class ComportementPayload(BaseModel):
@@ -84,9 +85,18 @@ def _verifier_lien(lien_type: str | None, lien_id: str | None, utilisateur_id: s
         raise erreur_api(404, "EMPLACEMENT_INTROUVABLE")
 
 
+def _avec_libelle(ligne: dict) -> dict:
+    """Ajoute lien_libelle (20/08, pour affichage direct dans "Mes
+    comportements" sans que le frontend ait à refaire un appel par
+    comportement lié)."""
+    if ligne.get("lien_type") and ligne.get("lien_id"):
+        ligne = {**ligne, "lien_libelle": libelle_emplacement(ligne["lien_type"], ligne["lien_id"])}
+    return ligne
+
+
 @router.get("", response_model=list[Comportement])
 def lire_mes_comportements(agent_id: str, utilisateur=Depends(utilisateur_courant)):
-    return lister_comportements(agent_id, utilisateur.id)
+    return [_avec_libelle(c) for c in lister_comportements(agent_id, utilisateur.id)]
 
 
 @router.get("/par-lien/{lien_type}/{lien_id}", response_model=list[Comportement])
@@ -104,8 +114,10 @@ def ajouter_mon_comportement(agent_id: str, payload: ComportementPayload, utilis
     if not payload.texte.strip():
         raise erreur_api(400, "TEXTE_REQUIS")
     _verifier_lien(payload.lien_type, payload.lien_id, utilisateur.id)
-    return ajouter_comportement(
-        agent_id, utilisateur.id, payload.texte, nom=payload.nom, lien_type=payload.lien_type, lien_id=payload.lien_id
+    return _avec_libelle(
+        ajouter_comportement(
+            agent_id, utilisateur.id, payload.texte, nom=payload.nom, lien_type=payload.lien_type, lien_id=payload.lien_id
+        )
     )
 
 
@@ -116,7 +128,7 @@ def modifier_mon_comportement(agent_id: str, comportement_id: str, payload: Comp
     resultat = modifier_comportement(agent_id, utilisateur.id, comportement_id, payload.texte, nom=payload.nom)
     if not resultat:
         raise erreur_api(404, "COMPORTEMENT_INTROUVABLE")
-    return resultat
+    return _avec_libelle(resultat)
 
 
 class SkillComportement(BaseModel):
@@ -165,7 +177,7 @@ def attacher_mon_comportement(agent_id: str, comportement_id: str, payload: Atta
     resultat = attacher_comportement(agent_id, utilisateur.id, comportement_id, payload.lien_type, payload.lien_id)
     if not resultat:
         raise erreur_api(404, "COMPORTEMENT_INTROUVABLE")
-    return resultat
+    return _avec_libelle(resultat)
 
 
 @router.delete("/{comportement_id}", status_code=204)
