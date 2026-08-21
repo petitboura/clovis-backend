@@ -37,6 +37,10 @@ from core.comportements_etudiants import (
     supprimer_comportement,
     obtenir_comportement_skill,
     modifier_skill_comportement,
+    activer_desactiver_comportement,
+    publier_comportement_public,
+    lister_comportements_publics,
+    activer_comportement_public,
 )
 from core.erreurs import erreur_api
 
@@ -51,6 +55,7 @@ class Comportement(BaseModel):
     lien_type: str | None = None
     lien_id: str | None = None
     lien_libelle: str | None = None
+    actif: bool = True
 
 
 class ComportementPayload(BaseModel):
@@ -184,3 +189,32 @@ def attacher_mon_comportement(agent_id: str, comportement_id: str, payload: Atta
 def supprimer_mon_comportement(agent_id: str, comportement_id: str, utilisateur=Depends(utilisateur_courant)):
     if not supprimer_comportement(agent_id, utilisateur.id, comportement_id):
         raise erreur_api(404, "COMPORTEMENT_INTROUVABLE")
+
+
+class ActifPayload(BaseModel):
+    actif: bool
+
+
+@router.patch("/{comportement_id}/actif", response_model=Comportement)
+def activer_desactiver_mon_comportement(
+    agent_id: str, comportement_id: str, payload: ActifPayload, utilisateur=Depends(utilisateur_courant)
+):
+    """21/08/2026, demande Bourama : "ajoute activer et désactiver aux
+    comportements". Désactiver n'efface rien -- voir
+    activer_desactiver_comportement pour ce que ça change concrètement."""
+    resultat = activer_desactiver_comportement(agent_id, utilisateur.id, comportement_id, payload.actif)
+    if not resultat:
+        raise erreur_api(404, "COMPORTEMENT_INTROUVABLE")
+    return _avec_libelle(resultat)
+
+
+@router.post("/{comportement_id}/publier", status_code=201)
+def publier_mon_comportement(agent_id: str, comportement_id: str, utilisateur=Depends(utilisateur_courant)):
+    """21/08/2026, demande Bourama : "je veux un onglet public...
+    quelqu'un peut l'uploader". Publie une COPIE figée dans le catalogue
+    public -- voir publier_comportement_public, l'original ici n'est ni
+    modifié ni lié après coup."""
+    resultat = publier_comportement_public(agent_id, utilisateur.id, comportement_id)
+    if not resultat:
+        raise erreur_api(404, "COMPORTEMENT_INTROUVABLE")
+    return resultat

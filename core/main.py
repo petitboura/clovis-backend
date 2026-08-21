@@ -2686,7 +2686,8 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     comportements_etudiant = (
         choisir_comportements_pertinents(
             message_utilisateur,
-            lister_comportements_etudiant(agent_id, user_id) + lister_comportements_recus(user_id),
+            [c for c in lister_comportements_etudiant(agent_id, user_id) if c.get("actif", True)]
+            + lister_comportements_recus(user_id),
         )
         if user_id and message_utilisateur else []
     )

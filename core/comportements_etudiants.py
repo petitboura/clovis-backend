@@ -177,7 +177,7 @@ def lister_comportements(agent_id: str, etudiant_id: str) -> list[dict]:
     try:
         res = (
             supabase.table("comportements_etudiants")
-            .select("id, texte, description, nom, lien_type, lien_id")
+            .select("id, texte, description, nom, lien_type, lien_id, actif")
             .eq("agent_id", agent_id)
             .eq("etudiant_id", etudiant_id)
             .order("created_at")
@@ -194,6 +194,7 @@ def lister_comportements(agent_id: str, etudiant_id: str) -> list[dict]:
             "nom": ligne.get("nom") or "",
             "lien_type": ligne.get("lien_type"),
             "lien_id": ligne.get("lien_id"),
+            "actif": ligne.get("actif", True),
         }
         for ligne in (res.data or [])
         if ligne.get("texte", "").strip()
@@ -278,6 +279,7 @@ def modifier_skill_comportement(agent_id: str, etudiant_id: str, comportement_id
         "nom": ligne.get("nom") or "",
         "lien_type": ligne.get("lien_type"),
         "lien_id": ligne.get("lien_id"),
+        "actif": ligne.get("actif", True),
     }
 
 
@@ -381,6 +383,7 @@ def ajouter_comportement(
         "nom": ligne.get("nom") or "",
         "lien_type": ligne.get("lien_type"),
         "lien_id": ligne.get("lien_id"),
+        "actif": ligne.get("actif", True),
     }
 
 
@@ -425,6 +428,7 @@ def modifier_comportement(
         "nom": ligne.get("nom") or "",
         "lien_type": ligne.get("lien_type"),
         "lien_id": ligne.get("lien_id"),
+        "actif": ligne.get("actif", True),
     }
 
 
@@ -459,6 +463,7 @@ def attacher_comportement(
         "nom": ligne.get("nom") or "",
         "lien_type": ligne.get("lien_type"),
         "lien_id": ligne.get("lien_id"),
+        "actif": ligne.get("actif", True),
     }
 
 
@@ -497,3 +502,164 @@ def supprimer_comportement(agent_id: str, etudiant_id: str, comportement_id: str
         .execute()
     )
     return bool(res.data)
+
+
+def activer_desactiver_comportement(agent_id: str, etudiant_id: str, comportement_id: str, actif: bool) -> dict | None:
+    """
+    21/08/2026, demande Bourama : "ajoute activer et désactiver aux
+    comportements". Désactiver != supprimer -- le comportement reste
+    visible/modifiable dans "Mes comportements", seul le filtre posé
+    dans core/main.py (avant choisir_comportements_pertinents) l'exclut
+    des candidats proposés au grand modèle. Les outils MCP de lecture
+    (consulter_comportement et consorts) continuent de le montrer tel
+    quel -- volontairement pas de double filtrage côté outils, un
+    comportement désactivé reste consultable par l'étudiant lui-même.
+    """
+    res = (
+        supabase.table("comportements_etudiants")
+        .update({"actif": actif})
+        .eq("id", comportement_id)
+        .eq("agent_id", agent_id)
+        .eq("etudiant_id", etudiant_id)
+        .execute()
+    )
+    if not res.data:
+        return None
+    ligne = res.data[0]
+    return {
+        "id": ligne["id"],
+        "texte": ligne["texte"],
+        "description": ligne.get("description") or "",
+        "nom": ligne.get("nom") or "",
+        "lien_type": ligne.get("lien_type"),
+        "lien_id": ligne.get("lien_id"),
+        "actif": ligne.get("actif", True),
+    }
+
+
+# ---------------------------------------------------------------------
+# Comportements publics (21/08/2026, demande Bourama : "les comportements
+# aussi, je veux un onglet public... quelqu'un peut l'uploader et
+# l'activer"). Même philosophie que le système de plugins (voir
+# api/plugins_programme.py) : publier prend un INSTANTANÉ indépendant du
+# comportement source (l'original de l'auteur n'est jamais modifié ni
+# lié après coup) ; activer crée une VRAIE ligne comportements_etudiants
+# chez l'utilisateur qui active (toujours pour AGENT_ID_ESPACE -- "Mon
+# espace" est le seul endroit où cette section existe côté frontend),
+# actif=true par défaut, indépendante elle aussi du comportement public
+# d'origine dès sa création.
+# ---------------------------------------------------------------------
+
+# Valeur vérifiée dans core/serveur_mcp_espace.py::AGENT_ID_ESPACE -- pas
+# importée directement ici (import circulaire : serveur_mcp_espace.py
+# importe déjà ce module), donc dupliquée avec ce commentaire comme
+# rappel si jamais l'une des deux valeurs change sans l'autre.
+AGENT_ID_ESPACE = "clovis"
+
+
+def publier_comportement_public(agent_id: str, etudiant_id: str, comportement_id: str) -> dict | None:
+    """Publie une copie figée d'un comportement de CET étudiant. None si
+    le comportement n'existe pas ou ne lui appartient pas (jamais de
+    publication d'un comportement d'un autre)."""
+    source = (
+        supabase.table("comportements_etudiants")
+        .select("nom, description, texte, skill_md")
+        .eq("id", comportement_id)
+        .eq("agent_id", agent_id)
+        .eq("etudiant_id", etudiant_id)
+        .maybe_single()
+        .execute()
+    )
+    if not source or not source.data:
+        return None
+    ligne = (
+        supabase.table("comportements_publics")
+        .insert({
+            "auteur_id": etudiant_id,
+            "nom": source.data.get("nom") or "Sans nom",
+            "description": source.data.get("description") or "",
+            "texte": source.data["texte"],
+            "skill_md": source.data.get("skill_md") or "",
+        })
+        .execute()
+    )
+    return ligne.data[0]
+
+
+def lister_comportements_publics(mot_cle: str | None = None) -> list[dict]:
+    requete = supabase.table("comportements_publics").select("*")
+    mot_cle = (mot_cle or "").strip()
+    if mot_cle:
+        requete = requete.or_(f"nom.ilike.%{mot_cle}%,description.ilike.%{mot_cle}%")
+    try:
+        res = requete.order("activations_count", desc=True).limit(100).execute()
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (recherche comportements publics q={mot_cle}) : {e}")
+        return []
+    return res.data or []
+
+
+def activer_comportement_public(comportement_public_id: str, etudiant_id: str) -> dict | None:
+    """
+    Crée une copie indépendante (comportements_etudiants, actif=true)
+    chez `etudiant_id` pour AGENT_ID_ESPACE. Déjà activé par cet
+    utilisateur -> renvoie sa copie existante plutôt que d'en recréer une
+    deuxième (même principe que telecharger_plugin côté plugins).
+    """
+    deja = (
+        supabase.table("comportement_public_activations")
+        .select("comportement_etudiant_id")
+        .eq("comportement_public_id", comportement_public_id)
+        .eq("active_par", etudiant_id)
+        .maybe_single()
+        .execute()
+    )
+    if deja and deja.data and deja.data.get("comportement_etudiant_id"):
+        copie = (
+            supabase.table("comportements_etudiants")
+            .select("id, texte, description, nom, lien_type, lien_id, actif")
+            .eq("id", deja.data["comportement_etudiant_id"])
+            .maybe_single()
+            .execute()
+        )
+        if copie and copie.data:
+            return copie.data
+
+    source = (
+        supabase.table("comportements_publics")
+        .select("nom, description, texte, skill_md, activations_count")
+        .eq("id", comportement_public_id)
+        .maybe_single()
+        .execute()
+    )
+    if not source or not source.data:
+        return None
+
+    nouvelle = (
+        supabase.table("comportements_etudiants")
+        .insert({
+            "agent_id": AGENT_ID_ESPACE,
+            "etudiant_id": etudiant_id,
+            "texte": source.data["texte"],
+            "description": source.data.get("description") or "",
+            "skill_md": source.data.get("skill_md") or "",
+            "nom": source.data.get("nom") or "",
+            "actif": True,
+        })
+        .execute()
+    ).data[0]
+
+    supabase.table("comportement_public_activations").insert({
+        "comportement_public_id": comportement_public_id,
+        "active_par": etudiant_id,
+        "comportement_etudiant_id": nouvelle["id"],
+    }).execute()
+
+    try:
+        supabase.table("comportements_publics").update(
+            {"activations_count": (source.data.get("activations_count") or 0) + 1}
+        ).eq("id", comportement_public_id).execute()
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (compteur activations comportement public {comportement_public_id}) : {e}")
+
+    return nouvelle
