@@ -434,10 +434,10 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "supprimer_element_base": {"label": "Suppression d'un élément", "icone": "Trash2", "onglet": None},
     "lister_elements_a_reviser": {"label": "Liste des révisions dues", "icone": "Brain", "onglet": None},
     "enregistrer_reponse_revision": {"label": "Enregistrement d'une réponse de révision", "icone": "Brain", "onglet": None},
-    "ajouter_comportement": {"label": "Ajout d'un comportement", "icone": "Sparkles", "onglet": None},
-    "lister_comportements": {"label": "Liste de tes comportements", "icone": "Sparkles", "onglet": None},
-    "modifier_comportement": {"label": "Modification d'un comportement", "icone": "Sparkles", "onglet": None},
-    "consulter_comportement": {"label": "Consultation d'un comportement", "icone": "Sparkles", "onglet": None},
-    "supprimer_comportement": {"label": "Suppression d'un comportement", "icone": "Trash2", "onglet": None},
+    "ajouter_comportement": {"label": "Ajout d'un skill", "icone": "ScrollText", "onglet": None},
+    "lister_comportements": {"label": "Liste de tes skills", "icone": "ScrollText", "onglet": None},
+    "modifier_comportement": {"label": "Modification d'un skill", "icone": "ScrollText", "onglet": None},
+    "consulter_comportement": {"label": "Consultation d'un skill", "icone": "ScrollText", "onglet": None},
+    "supprimer_comportement": {"label": "Suppression d'un skill", "icone": "Trash2", "onglet": None},
 }
 
