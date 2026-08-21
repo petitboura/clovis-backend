@@ -747,6 +747,45 @@ def ajouter_item_classement(
     return ligne
 
 
+class ClassementItemAvecLibelle(BaseModel):
+    id: str
+    cible_type: str
+    cible_id: str
+    libelle: str | None = None
+
+
+@router.get("/classements/{classement_id}/items", response_model=List[ClassementItemAvecLibelle])
+def lister_items_classement(classement_id: str, utilisateur=Depends(utilisateur_courant)):
+    """20/08/2026, demande Bourama : écran de consultation d'un
+    classement (semestre/année/section) -- jusqu'ici on ne pouvait
+    qu'AJOUTER un élément à un classement (AjouterAClassementBouton côté
+    frontend), jamais consulter ce qu'il contient. libelle résolu ici
+    (via libelle_emplacement, même fonction que pour les comportements)
+    pour éviter un aller-retour de plus côté frontend."""
+    from core.bibliotheque_programme import libelle_emplacement
+
+    classement = _lire_classement(classement_id)
+    if not classement:
+        raise erreur_api(404, "CLASSEMENT_INTROUVABLE")
+    if classement["proprietaire_id"] != utilisateur.id:
+        raise erreur_api(403, "PAS_LE_DROIT_SUR_CE_CLASSEMENT")
+    try:
+        res = (
+            supabase.table("classement_transversal_items")
+            .select("id, cible_type, cible_id")
+            .eq("classement_id", classement_id)
+            .order("created_at")
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (liste items classement {classement_id}) : {e}")
+        raise erreur_api(500, "ERREUR_INCONNUE")
+    return [
+        {**ligne, "libelle": libelle_emplacement(ligne["cible_type"], ligne["cible_id"])}
+        for ligne in (res.data or [])
+    ]
+
+
 @router.delete("/classements/{classement_id}/items/{item_id}", status_code=204)
 def supprimer_item_classement(
     classement_id: str, item_id: str, request: Request, utilisateur=Depends(utilisateur_courant)
