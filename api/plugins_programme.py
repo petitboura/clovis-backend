@@ -72,6 +72,27 @@ class TelechargerReponse(BaseModel):
     programme_id: str
 
 
+class ChapitreApercu(BaseModel):
+    id: str
+    nom: str
+    documents_count: int
+    exercices_count: int
+
+
+class MatiereApercu(BaseModel):
+    id: str
+    nom: str
+    chapitres: List[ChapitreApercu]
+
+
+class PluginApercuReponse(BaseModel):
+    id: str
+    nom: str
+    niveau: str
+    auteur_nom: Optional[str] = None
+    matieres: List[MatiereApercu]
+
+
 # ---------------------------------------------------------------------------
 # Aide interne
 # ---------------------------------------------------------------------------
@@ -675,6 +696,128 @@ def classement_plugins():
     lignes = res.data or []
     noms_par_auteur = {uid: _nom_affiche_ou_repli(uid) for uid in {ligne["auteur_id"] for ligne in lignes}}
     return [_plugin_vers_reponse(ligne, noms_par_auteur) for ligne in lignes]
+
+
+@router.get("/{plugin_id}/apercu", response_model=PluginApercuReponse)
+def apercu_plugin(plugin_id: str):
+    """
+    Aperçu en lecture seule du contenu d'un plugin (matières, chapitres,
+    nombre de documents/exercices par chapitre), SANS le télécharger.
+
+    Demande Bourama (21/08) : "quand un programme est publié comme
+    plugin, on ne peut pas le voir sans le télécharger, la carte n'est
+    pas cliquable" -- jusqu'ici seul GET /api/plugins (liste) était
+    public, il fallait /telecharger (qui crée une copie liée à un
+    compte, voir docstring de telecharger_plugin) pour voir le détail.
+    Public, comme la liste/recherche (aucun Depends(utilisateur_courant))
+    -- même principe que rechercher_plugins : seul le téléchargement
+    lui-même reste gaté par un compte, pas la consultation.
+
+    Ne modifie jamais rien, ne compte pas comme un téléchargement.
+    """
+    try:
+        plugin = (
+            supabase.table("plugins_programme")
+            .select("id, programme_source_id, nom, niveau, auteur_id")
+            .eq("id", plugin_id)
+            .maybe_single()
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture plugin {plugin_id} pour aperçu) : {e}")
+        raise erreur_api(500, "ERREUR_INCONNUE")
+
+    if not plugin or not plugin.data:
+        raise erreur_api(404, "PLUGIN_INTROUVABLE")
+
+    programme_source_id = plugin.data["programme_source_id"]
+
+    try:
+        matieres = (
+            supabase.table("matieres")
+            .select("id, nom")
+            .eq("programme_id", programme_source_id)
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (matières du programme {programme_source_id} pour aperçu) : {e}")
+        raise erreur_api(500, "ERREUR_INCONNUE")
+
+    matieres_data = matieres.data or []
+    matiere_ids = [m["id"] for m in matieres_data]
+
+    chapitres_par_matiere: dict[str, list[dict]] = {mid: [] for mid in matiere_ids}
+    if matiere_ids:
+        try:
+            chapitres = (
+                supabase.table("chapitres")
+                .select("id, matiere_id, nom, ordre")
+                .in_("matiere_id", matiere_ids)
+                .order("ordre")
+                .execute()
+            )
+        except Exception as e:
+            logging.error(f"ERREUR SUPABASE (chapitres pour aperçu plugin {plugin_id}) : {e}")
+            raise erreur_api(500, "ERREUR_INCONNUE")
+        for c in (chapitres.data or []):
+            chapitres_par_matiere.setdefault(c["matiere_id"], []).append(c)
+
+    tous_chapitre_ids = [c["id"] for chs in chapitres_par_matiere.values() for c in chs]
+
+    # Lot 2 (documents_programme/exercices_programme) : mêmes précautions
+    # que _cloner_programme -- si ces tables n'existent pas encore, on
+    # retombe sur des compteurs à 0 plutôt que de casser tout l'aperçu.
+    documents_count_par_chapitre: dict[str, int] = {}
+    exercices_count_par_chapitre: dict[str, int] = {}
+    if tous_chapitre_ids:
+        try:
+            docs = (
+                supabase.table("documents_programme")
+                .select("chapitre_id")
+                .in_("chapitre_id", tous_chapitre_ids)
+                .execute()
+            )
+            for d in (docs.data or []):
+                documents_count_par_chapitre[d["chapitre_id"]] = documents_count_par_chapitre.get(d["chapitre_id"], 0) + 1
+        except Exception as e:
+            logging.info(f"documents_programme indisponible pour aperçu plugin {plugin_id} (probablement lot 2 pas encore livré) : {e}")
+
+        try:
+            exos = (
+                supabase.table("exercices_programme")
+                .select("chapitre_id")
+                .in_("chapitre_id", tous_chapitre_ids)
+                .execute()
+            )
+            for ex in (exos.data or []):
+                exercices_count_par_chapitre[ex["chapitre_id"]] = exercices_count_par_chapitre.get(ex["chapitre_id"], 0) + 1
+        except Exception as e:
+            logging.info(f"exercices_programme indisponible pour aperçu plugin {plugin_id} (probablement lot 2 pas encore livré) : {e}")
+
+    matieres_apercu = [
+        MatiereApercu(
+            id=m["id"],
+            nom=m["nom"],
+            chapitres=[
+                ChapitreApercu(
+                    id=c["id"],
+                    nom=c["nom"],
+                    documents_count=documents_count_par_chapitre.get(c["id"], 0),
+                    exercices_count=exercices_count_par_chapitre.get(c["id"], 0),
+                )
+                for c in chapitres_par_matiere.get(m["id"], [])
+            ],
+        )
+        for m in matieres_data
+    ]
+
+    return PluginApercuReponse(
+        id=plugin.data["id"],
+        nom=plugin.data["nom"],
+        niveau=plugin.data["niveau"],
+        auteur_nom=_nom_affiche_ou_repli(plugin.data["auteur_id"]),
+        matieres=matieres_apercu,
+    )
 
 
 @router.post("/{plugin_id}/telecharger", response_model=TelechargerReponse, status_code=201)
