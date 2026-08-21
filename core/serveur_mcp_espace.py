@@ -262,7 +262,7 @@ def consulter_bibliotheque(question: str, ctx: Context) -> str:
     for r in resultats:
         bloc = r["contenu"]
         if r.get("nom_fichier") and r.get("url_publique"):
-            bloc += f"\n(Source : {r['nom_fichier']} -- {r['url_publique']})"
+            bloc += f"\n(Source : {r['nom_fichier']}, {r['url_publique']})"
         blocs.append(bloc)
     return "\n\n---\n\n".join(blocs)
 
