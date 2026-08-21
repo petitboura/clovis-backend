@@ -325,12 +325,13 @@ def lister_bibliotheque(ctx: Context, limit: int = 20, offset: int = 0) -> str:
     lignes = []
     for f in page:
         ligne = (
-            f"- id={f['id']} | {f.get('description') or f.get('nom_fichier')} "
+            f"- {f.get('description') or f.get('nom_fichier')} "
             f"({f.get('type_mime', 'inconnu')}, ajouté le {f.get('created_at', '?')})"
         )
         emplacements = _lister_emplacements_document(f["id"])
         if emplacements:
             ligne += " | classé dans : " + ", ".join(e["libelle"] for e in emplacements)
+        ligne += f" [id: {f['id']}]"
         lignes.append(ligne)
     resultat = "\n".join(lignes)
     if offset + limit < total:
@@ -777,10 +778,11 @@ def lister_comportements(ctx: Context, limit: int = 20, offset: int = 0) -> str:
     page = comportements[offset:offset + limit]
     lignes = []
     for c in page:
-        ligne = f"- id={c['id']} | {c['description']}\n  texte : {c['texte']}"
+        ligne = f"- {c['description']}\n  texte : {c['texte']}"
         if c.get("lien_type") and c.get("lien_id"):
             libelle = _libelle_emplacement(c["lien_type"], c["lien_id"]) if c["lien_type"] in TYPES_LIEN_COMPORTEMENT else None
             ligne += f"\n  lié à : {libelle or (c['lien_type'] + ' ' + c['lien_id'])}"
+        ligne += f"\n  [id: {c['id']}]"
         lignes.append(ligne)
     resultat = "\n".join(lignes)
     if offset + limit < total:
@@ -988,7 +990,7 @@ def lister_conversations_historique(ctx: Context, limit: int = 20, offset: int =
     total = len(resultats)
     page = resultats[offset:offset + limit]
     resultat = "\n".join(
-        f"- conversation_id={cle} | {titre} (dernière activité : {activite})"
+        f"- {titre} (dernière activité : {activite}) [conversation_id: {cle}]"
         for cle, titre, activite in page
     )
     if offset + limit < total:
