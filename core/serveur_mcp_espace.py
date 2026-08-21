@@ -103,6 +103,11 @@ from core.bases_donnees_llm import (
     supprimer_element as _supprimer_element_notion,
     TYPES_PROPRIETES_CONNUS as _TYPES_PROPRIETES_CONNUS,
 )
+from core.revision_llm import (
+    QUALITES_CONNUES as _QUALITES_CONNUES,
+    lister_elements_a_reviser as _lister_elements_a_reviser,
+    enregistrer_reponse as _enregistrer_reponse_revision,
+)
 from core.programme_llm import (
     lister_mes_programmes_legers as _lister_mes_programmes_legers,
     obtenir_structure_programme as _obtenir_structure_programme,
@@ -2189,6 +2194,56 @@ def supprimer_element_base(element_id: str, ctx: Context) -> str:
     if not ok:
         return "Cet élément est introuvable ou ne correspond pas à cet utilisateur."
     return "Élément supprimé."
+
+
+# --- Section "Notion-like" (Partie 2, lot 4/5) -- répétition espacée. --
+# Mêmes outils que côté agent interne (core/serveur_mcp_generation.py),
+# logique partagée via core/revision_llm.py.
+
+
+@mcp_espace.tool(
+    name="clovis_lister_elements_a_reviser",
+    title="Lister les éléments à réviser",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def lister_elements_a_reviser(ctx: Context, base_id: str = "") -> str:
+    """Liste les éléments dont la révision est due aujourd'hui (ou en retard)."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        elements = _lister_elements_a_reviser(user_id, base_id or None)
+    except Exception as e:
+        logging.error(f"ERREUR outil lister_elements_a_reviser : {e}")
+        return "Erreur : impossible de lister les éléments à réviser, réessaie."
+    if not elements:
+        return "Rien à réviser pour l'instant."
+    return "\n".join(
+        f"- élément id={e['element_id']} (base id={e['base_id']}, dû depuis {e['prochaine_revision']})"
+        for e in elements
+    )
+
+
+@mcp_espace.tool(
+    name="clovis_enregistrer_reponse_revision",
+    title="Enregistrer une réponse de révision",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
+def enregistrer_reponse_revision(element_id: str, qualite: str, ctx: Context) -> str:
+    """Enregistre la réponse après révision d'un élément et recalcule sa prochaine date. `qualite` : echec, difficile, correct ou facile."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    if qualite not in _QUALITES_CONNUES:
+        return f"Erreur : qualite doit être l'un de {', '.join(_QUALITES_CONNUES)}."
+    try:
+        resultat = _enregistrer_reponse_revision(user_id, element_id, qualite)
+    except Exception as e:
+        logging.error(f"ERREUR outil enregistrer_reponse_revision : {e}")
+        return "Erreur : impossible d'enregistrer cette réponse, réessaie."
+    if resultat is None:
+        return "Cet élément est introuvable ou ne correspond pas à cet utilisateur."
+    return f"Réponse enregistrée. Prochaine révision : {resultat['prochaine_revision']}."
 
 
 # --- Discuter avec Clovis ------------------------------------------------

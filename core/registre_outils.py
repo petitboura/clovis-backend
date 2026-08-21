@@ -432,6 +432,8 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "ajouter_element_base": {"label": "Ajout d'un élément", "icone": "Table", "onglet": None},
     "modifier_element_base": {"label": "Modification d'un élément", "icone": "Table", "onglet": None},
     "supprimer_element_base": {"label": "Suppression d'un élément", "icone": "Trash2", "onglet": None},
+    "lister_elements_a_reviser": {"label": "Liste des révisions dues", "icone": "Brain", "onglet": None},
+    "enregistrer_reponse_revision": {"label": "Enregistrement d'une réponse de révision", "icone": "Brain", "onglet": None},
     "ajouter_comportement": {"label": "Ajout d'un comportement", "icone": "Sparkles", "onglet": None},
     "lister_comportements": {"label": "Liste de tes comportements", "icone": "Sparkles", "onglet": None},
     "modifier_comportement": {"label": "Modification d'un comportement", "icone": "Sparkles", "onglet": None},
