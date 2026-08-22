@@ -7,6 +7,7 @@ Lancement local : uvicorn api.main:app --reload --port 8000
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import List, Optional
 
 from anyio import to_thread
@@ -45,6 +46,7 @@ from api.outils_registre import router as outils_registre_router
 from core.serveur_mcp_generation import mcp_generation
 from core.notifications_push import traiter_rappels_echus, notifications_push_disponible
 from core.proactivite import verifier_relances_proactives
+from core.audit_programme import executer_audits_hebdomadaires
 from core.serveur_mcp_github import mcp_github
 from core.serveur_mcp_public import mcp_public
 from core.serveur_mcp_espace import mcp_espace
@@ -87,6 +89,31 @@ async def _boucle_planificateur_proactivite():
         await asyncio.sleep(6 * 60 * 60)
 
 
+async def _boucle_planificateur_audits():
+    # Chantier "Audits" (26/08/2026) -- cascade chapitre -> matière ->
+    # programme pour TOUS les programmes, chaque lundi (voir
+    # core/audit_programme.py::executer_audits_hebdomadaires, incrémental).
+    # Pas de dépendance externe (APScheduler, cron Railway) : même
+    # tolérance que les boucles rappels/proactivité ci-dessus -- vérifie
+    # toutes les heures si on est lundi et si ça n'a pas déjà tourné
+    # aujourd'hui (variable en mémoire, remise à zéro à chaque redémarrage
+    # du process ; au pire un lundi sans redéploiement est traité une
+    # seule fois, un redémarrage pendant la fenêtre peut le refaire
+    # tourner deux fois -- l'incrémental rend ça inoffensif : la deuxième
+    # passe ne retraite que ce qui aurait changé entre-temps).
+    derniere_date_executee = None
+    while True:
+        try:
+            maintenant = datetime.now(timezone.utc)
+            if maintenant.weekday() == 0 and derniere_date_executee != maintenant.date():
+                nb = executer_audits_hebdomadaires()
+                derniere_date_executee = maintenant.date()
+                logging.info(f"Planificateur audits : cascade exécutée pour {nb} programme(s).")
+        except Exception as e:
+            logging.error(f"ERREUR boucle planificateur audits : {e}")
+        await asyncio.sleep(60 * 60)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     # Toutes les routes API sont en `def` sync (Supabase, Groq, Gemini :
@@ -116,11 +143,13 @@ async def _lifespan(app: FastAPI):
         if notifications_push_disponible():
             tache_planificateur = asyncio.create_task(_boucle_planificateur_rappels())
             tache_proactivite = asyncio.create_task(_boucle_planificateur_proactivite())
+        tache_audits = asyncio.create_task(_boucle_planificateur_audits())
         yield
         if tache_planificateur:
             tache_planificateur.cancel()
         if tache_proactivite:
             tache_proactivite.cancel()
+        tache_audits.cancel()
 
 
 app = FastAPI(title="Clovis API", version="0.1.0", lifespan=_lifespan)
