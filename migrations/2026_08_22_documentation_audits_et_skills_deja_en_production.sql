@@ -44,13 +44,14 @@ create table if not exists audits_matiere (
   hash_source text
 );
 
--- ATTENTION (constat de l'audit du dépôt, 22/08) : aucun code dans ce
--- dépôt n'écrit ni ne lit cette table aujourd'hui, alors qu'elle contient
--- déjà 31 lignes en production -- le code qui l'alimente tourne donc
--- ailleurs (script à part, autre service) ou a été retiré depuis. Dimension
--- alignée sur le standard actuel du projet (DIMENSION_EMBEDDING = 768,
--- voir core/embeddings.py) à confirmer avec Bourama si un code réutilise
--- un jour cette table.
+-- OBSOLÈTE (confirmé par Bourama, 22/08) : reliquat d'une ancienne
+-- version du pipeline d'audit de matière, qui découpait le texte en
+-- chunks pour une recherche vectorielle (RAG). Depuis, le texte d'un
+-- audit est directement transformé en skill via _generer_skill (voir
+-- core/comportements_etudiants.py), plus besoin de chunks/embedding.
+-- Table gardée (31 lignes existantes, pas de suppression demandée) mais
+-- plus aucun code actuel n'écrit ni ne lit dedans -- ne pas s'en servir
+-- comme référence pour du nouveau code.
 create table if not exists audits_matiere_chunks (
   id uuid primary key default gen_random_uuid(),
   audit_id uuid not null references audits_matiere(id) on delete cascade,
