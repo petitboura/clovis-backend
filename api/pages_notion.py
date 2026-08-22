@@ -47,6 +47,10 @@ TYPES_BLOCS_CONNUS = {
     "citation",
     "separateur",
     "equation",
+    "base_donnees",  # bug corrigé le 21/08/2026 -- manquait ici alors que
+    # présent dans la copie de core/pages_notion_llm.py (chemin MCP/IA),
+    # ce qui rétrogradait silencieusement en "texte" tout bloc base de
+    # données créé depuis l'interface (chemin REST, api/blocs).
 }
 
 TYPES_CIBLE_CARREFOUR = ("programme", "matiere", "chapitre", "document")
@@ -56,11 +60,13 @@ class PagePayload(BaseModel):
     titre: str = ""
     parent_id: str | None = None
     ordre: int = 0
+    icone: str | None = None
 
 
 class PagePatchPayload(BaseModel):
     titre: str | None = None
     ordre: int | None = None
+    icone: str | None = None
 
 
 class Page(BaseModel):
@@ -70,6 +76,7 @@ class Page(BaseModel):
     titre: str
     ordre: int
     est_carrefour: bool = False
+    icone: str | None = None
     created_at: str
     updated_at: str
 
@@ -166,6 +173,7 @@ def creer_page(payload: PagePayload, utilisateur=Depends(utilisateur_courant)):
                     "parent_id": payload.parent_id,
                     "titre": payload.titre.strip(),
                     "ordre": payload.ordre,
+                    "icone": payload.icone,
                 }
             )
             .execute()
@@ -210,6 +218,8 @@ def modifier_page(page_id: str, payload: PagePatchPayload, utilisateur=Depends(u
         maj["titre"] = payload.titre.strip()
     if payload.ordre is not None:
         maj["ordre"] = payload.ordre
+    if payload.icone is not None:
+        maj["icone"] = payload.icone or None
     if not maj:
         raise erreur_api(400, "AUCUNE_MODIFICATION_FOURNIE")
     maj["updated_at"] = "now()"
