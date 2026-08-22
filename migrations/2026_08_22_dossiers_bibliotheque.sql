@@ -1,7 +1,7 @@
 -- Dossiers/sous-dossiers dans la bibliotheque personnelle (22/08/2026,
 -- demande explicite de Bourama : dossiers qui peuvent avoir des
 -- sous-dossiers, superposes aux vues par type deja existantes
--- (Images/Audio/Documents/...) -- si un dossier contient une image ET
+-- (Images/Audio/Documents/...) : si un dossier contient une image ET
 -- un audio, ce meme dossier doit apparaitre a la fois dans l'onglet
 -- Images et dans l'onglet Audio.
 --
@@ -10,7 +10,7 @@
 -- touche ici.
 --
 -- Un fichier peut etre range dans plusieurs dossiers a la fois (confirme
--- par Bourama) -- d'ou la table de liaison many-to-many plutot qu'une
+-- par Bourama), d'ou la table de liaison many-to-many plutot qu'une
 -- simple colonne dossier_id sur fichiers_uploades. Un dossier peut
 -- melanger librement plusieurs types de fichiers (confirme aussi).
 
@@ -26,7 +26,7 @@ create index if not exists idx_dossiers_bib_parent on dossiers_bibliotheque(doss
 
 -- Liaison many-to-many fichier <-> dossier. ON DELETE CASCADE des deux
 -- cotes : si le dossier est supprime, la ligne de liaison disparait
--- (le fichier lui-meme n'est PAS supprime ici -- voir la logique
+-- (le fichier lui-meme n'est PAS supprime ici, voir la logique
 -- applicative dans api/dossiers_bibliotheque.py qui, avant de supprimer
 -- le dossier, supprime explicitement les fichiers qui n'auraient plus
 -- aucun autre rattachement, confirme par Bourama : "le fichier est

@@ -2,7 +2,7 @@
 Routes REST pour les dossiers/sous-dossiers de la bibliothèque
 personnelle (22/08/2026, demande explicite de Bourama).
 
-Toute la logique vit dans core/dossiers_bibliotheque.py -- ce fichier
+Toute la logique vit dans core/dossiers_bibliotheque.py, ce fichier
 n'est qu'une fine couche HTTP par-dessus, pour que le FRONTEND
 (section Bibliothèque de "Mon espace") puisse créer/renommer/supprimer
 des dossiers et y ranger/retirer des fichiers. Les mêmes actions sont
@@ -10,7 +10,7 @@ aussi exposées à l'IA via des outils MCP (core/serveur_mcp_espace.py
 et core/serveur_mcp_generation.py).
 
 Vérification de propriété systématique ici : chaque dossier/fichier
-manipulé doit appartenir à l'utilisateur connecté, sinon 403/404 --
+manipulé doit appartenir à l'utilisateur connecté, sinon 403/404,
 même convention que api/bibliotheque_utilisateur.py.
 """
 
@@ -61,7 +61,7 @@ class RangerFichierPayload(BaseModel):
 def lister(utilisateur=Depends(utilisateur_courant)):
     """
     Liste tous les dossiers de l'utilisateur, à plat, avec la liste des
-    fichier_id directement rattachés à chacun -- au frontend de
+    fichier_id directement rattachés à chacun, au frontend de
     reconstruire l'arborescence et de croiser avec sa propre liste de
     fichiers (déjà chargée par ailleurs via GET /api/bibliotheque).
     """

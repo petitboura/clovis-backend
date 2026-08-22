@@ -12,7 +12,7 @@ Principes confirmés par Bourama :
   (image + audio + document...).
 - Les dossiers sont une couche PAR DESSUS l'existant : un fichier peut
   très bien n'être dans aucun dossier (rester "libre", visible tel
-  quel dans "Tous" comme aujourd'hui) -- l'ajout d'un fichier ne
+  quel dans "Tous" comme aujourd'hui) : l'ajout d'un fichier ne
   requiert jamais de choisir un dossier.
 - Suppression d'un dossier : un fichier encore rattaché à au moins un
   autre dossier est seulement détaché de celui-ci (conservé). Un
@@ -61,7 +61,7 @@ def renommer_dossier(dossier_id: str, nouveau_nom: str) -> None:
 def lister_dossiers(user_id: str) -> list:
     """
     Liste TOUS les dossiers de l'utilisateur, à plat (id, nom,
-    dossier_parent_id) -- à l'appelant de reconstruire l'arborescence
+    dossier_parent_id), à l'appelant de reconstruire l'arborescence
     si besoin, comme fait côté frontend pour un arbre de composants.
     """
     return (
@@ -82,8 +82,8 @@ def lister_fichiers_ids_dossier(dossier_id: str) -> list:
 
 def lister_dossiers_du_fichier(fichier_id: str) -> list:
     """
-    Renvoie les dossiers (id + nom) dans lesquels ce fichier est rangé
-    -- utilisé pour l'affichage "classé dans : ..." déjà en place pour
+    Renvoie les dossiers (id + nom) dans lesquels ce fichier est rangé,
+    utilisé pour l'affichage "classé dans : ..." déjà en place pour
     le Programme (voir lister_emplacements_document), même principe
     ici pour les dossiers.
     """
@@ -118,7 +118,7 @@ def supprimer_dossier(dossier_id: str) -> None:
     même temps que le dossier.
 
     Les sous-dossiers (dossier_parent_id -> ON DELETE CASCADE) sont
-    supprimés en cascade par la base -- mais leurs propres fichiers
+    supprimés en cascade par la base, mais leurs propres fichiers
     passent par la même règle : on calcule donc d'abord la liste
     complète (ce dossier + tous ses descendants) avant de trancher quel
     fichier part avec.

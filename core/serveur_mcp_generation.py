@@ -890,7 +890,7 @@ def consulter_dossier_bibliotheque(dossier_id: str, ctx: Context) -> str:
     Liste le contenu direct d'un dossier précis de la bibliothèque
     personnelle de CET utilisateur : ses sous-dossiers et ses fichiers
     (description, type, id). Ne descend pas récursivement dans les
-    sous-dossiers -- rappelle cet outil avec l'id d'un sous-dossier pour
+    sous-dossiers, rappelle cet outil avec l'id d'un sous-dossier pour
     y entrer.
     """
     user_id = ctx.request_context.request.query_params.get("user_id")
