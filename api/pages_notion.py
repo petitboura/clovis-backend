@@ -17,11 +17,12 @@ dans cette structure, en interne comme sur le MCP public).
 
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel
 
 from api.auth import utilisateur_courant, supabase
 from core.erreurs import erreur_api
+from core.bibliotheque_fichiers import enregistrer_fichier
 from core.pages_notion_llm import (
     ajouter_reference_carrefour as _ajouter_reference_carrefour,
     lister_references_carrefour as _lister_references_carrefour,
@@ -51,6 +52,11 @@ TYPES_BLOCS_CONNUS = {
     # présent dans la copie de core/pages_notion_llm.py (chemin MCP/IA),
     # ce qui rétrogradait silencieusement en "texte" tout bloc base de
     # données créé depuis l'interface (chemin REST, api/blocs).
+    "image",     # Partie 2, 22/08/2026 -- contenu = {"url": "...", "nom": "..."}
+    "fichier",   # idem, fichier générique (pas forcément une image)
+    "video",     # contenu = {"url": "..."} -- lien externe (YouTube etc.), pas d'upload direct
+    "embed",     # contenu = {"url": "..."} -- intégration générique (site, doc externe)
+    "bascule",   # toggle -- contenu = {"texte": "...", "ouvert": bool}, peut contenir des blocs enfants (parent_bloc_id)
 }
 
 TYPES_CIBLE_CARREFOUR = ("programme", "matiere", "chapitre", "document")
@@ -86,12 +92,15 @@ class BlocPayload(BaseModel):
     type: str = "texte"
     contenu: dict = {}
     ordre: int = 0
+    parent_bloc_id: str | None = None
 
 
 class BlocPatchPayload(BaseModel):
     type: str | None = None
     contenu: dict | None = None
     ordre: int | None = None
+    parent_bloc_id: str | None = None
+    parent_bloc_id_defini: bool = False  # True si parent_bloc_id doit être appliqué même à None (sortir un bloc de son parent) -- distingue "non fourni" de "remis à la racine"
 
 
 class Bloc(BaseModel):
@@ -100,6 +109,7 @@ class Bloc(BaseModel):
     type: str
     contenu: dict
     ordre: int
+    parent_bloc_id: str | None = None
     created_at: str
     updated_at: str
 
@@ -156,6 +166,37 @@ def lister_pages_racines(utilisateur=Depends(utilisateur_courant)):
         )
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (liste pages racines {utilisateur.id}) : {e}")
+        raise erreur_api(500, "ERREUR_INCONNUE")
+    return [Page(**ligne) for ligne in (res.data or [])]
+
+
+@router_pages.get("/recherche/tout", response_model=list[Page])
+def rechercher_pages(q: str = "", utilisateur=Depends(utilisateur_courant)):
+    """Recherche simple sur le titre des pages (insensible à la casse) --
+    utilisée par la recherche globale (Cmd+K côté frontend) et
+    l'autocomplete de lien [[ ]] / @ dans l'éditeur de bloc. Volontairement
+    limitée au titre (pas de recherche plein texte dans le contenu des
+    blocs) -- "simple et fiable", même principe que le reste de cette
+    section (voir commentaires api/bases_donnees.py).
+    Chemin à deux segments (/recherche/tout) : ne collisionne jamais avec
+    GET /{page_id} (un seul segment) quel que soit l'ordre d'enregistrement
+    des routes.
+    """
+    q = (q or "").strip()
+    if not q:
+        return []
+    try:
+        res = (
+            supabase.table("pages")
+            .select("*")
+            .eq("proprietaire_id", utilisateur.id)
+            .ilike("titre", f"%{q}%")
+            .order("titre")
+            .limit(20)
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (recherche pages {utilisateur.id}) : {e}")
         raise erreur_api(500, "ERREUR_INCONNUE")
     return [Page(**ligne) for ligne in (res.data or [])]
 
@@ -285,10 +326,82 @@ def supprimer_carrefour(page_id: str, reference_id: str, utilisateur=Depends(uti
 # ================================ Blocs ===================================
 
 
+TYPES_IMAGE_AUTORISES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif"}
+TAILLE_MAX_IMAGE_OCTETS = 5 * 1024 * 1024  # 5 Mo, même limite que api/uploads.py
+TAILLE_MAX_FICHIER_OCTETS = 20 * 1024 * 1024  # 20 Mo -- fichier générique (PDF, etc.), plus permissif qu'une image
+
+
+@router_blocs.post("/upload", response_model=Bloc, status_code=201)
+async def uploader_bloc_fichier(
+    page_id: str = Form(...),
+    type_bloc: str = Form(...),  # "image" ou "fichier"
+    ordre: int = Form(0),
+    parent_bloc_id: str | None = Form(None),
+    fichier: UploadFile = File(...),
+    utilisateur=Depends(utilisateur_courant),
+):
+    """Upload une image ou un fichier générique et crée le bloc
+    correspondant en une seule opération (pas de bloc coquille orphelin
+    si l'upload échoue). Réutilise core/bibliotheque_fichiers.py, déjà
+    utilisé par api/uploads.py pour le chat -- même bucket, même
+    mécanisme, `origine="notes"` pour distinguer dans fichiers_uploades.
+    """
+    _charger_page_ou_404(page_id, utilisateur.id)
+    if parent_bloc_id:
+        _charger_bloc_ou_404(parent_bloc_id, utilisateur.id)
+    if type_bloc not in ("image", "fichier"):
+        raise erreur_api(400, "TYPE_DOIT_ETRE_IMAGE_OU_FICHIER")
+
+    contenu_brut = await fichier.read()
+    if len(contenu_brut) == 0:
+        raise erreur_api(400, "FICHIER_VIDE")
+    limite = TAILLE_MAX_IMAGE_OCTETS if type_bloc == "image" else TAILLE_MAX_FICHIER_OCTETS
+    if len(contenu_brut) > limite:
+        raise erreur_api(400, "FICHIER_TROP_LOURD")
+    if type_bloc == "image" and fichier.content_type not in TYPES_IMAGE_AUTORISES:
+        raise erreur_api(400, "FORMAT_IMAGE_NON_SUPPORTE")
+
+    try:
+        ligne = enregistrer_fichier(
+            contenu=contenu_brut,
+            nom_fichier=fichier.filename or ("image" if type_bloc == "image" else "fichier"),
+            type_mime=fichier.content_type or "application/octet-stream",
+            niveau="utilisateur",
+            uploade_par=utilisateur.id,
+            user_id=utilisateur.id,
+            description=f"Pièce jointe page Notes ({page_id})",
+            origine="notes",
+        )
+    except Exception as e:
+        logging.error(f"ERREUR upload bloc {type_bloc} (page {page_id}) : {e}")
+        raise erreur_api(500, "ECHEC_DE_L_UPLOAD_REESSAIE")
+
+    try:
+        res = (
+            supabase.table("blocs")
+            .insert(
+                {
+                    "page_id": page_id,
+                    "type": type_bloc,
+                    "contenu": {"url": ligne["url_publique"], "nom": fichier.filename or ""},
+                    "ordre": ordre,
+                    "parent_bloc_id": parent_bloc_id,
+                }
+            )
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (création bloc {type_bloc}, page {page_id}) : {e}")
+        raise erreur_api(500, "ERREUR_INCONNUE")
+    return Bloc(**res.data[0])
+
+
 @router_blocs.post("", response_model=Bloc, status_code=201)
 def creer_bloc(payload: BlocPayload, utilisateur=Depends(utilisateur_courant)):
     _charger_page_ou_404(payload.page_id, utilisateur.id)
     type_bloc = payload.type if payload.type in TYPES_BLOCS_CONNUS else "texte"
+    if payload.parent_bloc_id:
+        _charger_bloc_ou_404(payload.parent_bloc_id, utilisateur.id)  # 404 si le bloc parent n'est pas à l'appelant
     try:
         res = (
             supabase.table("blocs")
@@ -298,6 +411,7 @@ def creer_bloc(payload: BlocPayload, utilisateur=Depends(utilisateur_courant)):
                     "type": type_bloc,
                     "contenu": payload.contenu,
                     "ordre": payload.ordre,
+                    "parent_bloc_id": payload.parent_bloc_id,
                 }
             )
             .execute()
@@ -318,6 +432,10 @@ def modifier_bloc(bloc_id: str, payload: BlocPatchPayload, utilisateur=Depends(u
         maj["contenu"] = payload.contenu
     if payload.ordre is not None:
         maj["ordre"] = payload.ordre
+    if payload.parent_bloc_id_defini:
+        if payload.parent_bloc_id:
+            _charger_bloc_ou_404(payload.parent_bloc_id, utilisateur.id)
+        maj["parent_bloc_id"] = payload.parent_bloc_id
     if not maj:
         raise erreur_api(400, "AUCUNE_MODIFICATION_FOURNIE")
     maj["updated_at"] = "now()"

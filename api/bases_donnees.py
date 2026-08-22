@@ -42,6 +42,7 @@ class ProprietePayload(BaseModel):
     nom: str
     type: str = "texte"
     options: list = []
+    config: dict = {}
 
 
 class ElementPayload(BaseModel):
@@ -107,7 +108,7 @@ def lire_base(base_id: str, utilisateur=Depends(utilisateur_courant)):
 def creer_propriete(base_id: str, payload: ProprietePayload, utilisateur=Depends(utilisateur_courant)):
     if payload.type not in TYPES_PROPRIETES_CONNUS:
         raise erreur_api(422, "TYPE_DE_PROPRIETE_INVALIDE")
-    propriete = _ajouter_propriete(utilisateur.id, base_id, payload.nom, payload.type, payload.options)
+    propriete = _ajouter_propriete(utilisateur.id, base_id, payload.nom, payload.type, payload.options, payload.config)
     if propriete is None:
         raise erreur_api(404, "BASE_INTROUVABLE")
     return propriete

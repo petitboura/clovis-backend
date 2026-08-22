@@ -51,6 +51,15 @@ TYPES_BLOCS_CONNUS = {
     "separateur",
     "equation",
     "base_donnees",  # lot 3/5 -- contenu = {"base_donnees_id": "..."}
+    # Partie 2, 22/08/2026 -- ajoutés ici aussi pour rester cohérent avec
+    # api/pages_notion.py (voir le bug corrigé le 21/08 : ces deux listes
+    # avaient divergé). "image"/"fichier" volontairement PAS repris ici --
+    # ils nécessitent un vrai upload binaire (POST /api/blocs/upload),
+    # hors de portée d'un outil texte MCP ; les créer via l'IA donnerait
+    # un bloc sans url exploitable.
+    "video",
+    "embed",
+    "bascule",
 }
 
 # Lot 2/5 -- pages carrefour : une page carrefour pointe vers un ou

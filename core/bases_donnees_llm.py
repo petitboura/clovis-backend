@@ -34,7 +34,21 @@ supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
 
 logging.basicConfig(level=logging.INFO)
 
-TYPES_PROPRIETES_CONNUS = {"texte", "nombre", "date", "statut", "case_a_cocher"}
+TYPES_PROPRIETES_CONNUS = {
+    "texte", "nombre", "date", "statut", "case_a_cocher",
+    # Partie 2, 22/08/2026 -- propriétés avancées, décision explicitement
+    # revenue par Bourama (voir migration 2026_08_22_..., qui documente le
+    # changement par rapport à la note du 20/08). Portée volontairement
+    # limitée ("simple et fiable") :
+    #   - relation : cible une AUTRE base de données du MÊME dépôt (même
+    #     page) uniquement -- pas de recherche globale de base cible
+    #   - rollup : agrège UNE propriété d'une relation (nombre/somme/texte)
+    #   - formule : opération à deux opérandes entre deux propriétés de la
+    #     même ligne (pas de langage d'expression complet)
+    # Config détaillée dans bases_donnees_proprietes.config (jsonb), voir
+    # la migration pour le schéma exact.
+    "relation", "rollup", "formule",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +201,9 @@ def obtenir_base(user_id: str, base_id: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def ajouter_propriete(user_id: str, base_id: str, nom: str, type_propriete: str, options: list | None = None) -> dict | None:
+def ajouter_propriete(
+    user_id: str, base_id: str, nom: str, type_propriete: str, options: list | None = None, config: dict | None = None
+) -> dict | None:
     if not user_id or not base_appartient_a(base_id, user_id):
         return None
     type_propriete = type_propriete if type_propriete in TYPES_PROPRIETES_CONNUS else "texte"
@@ -200,6 +216,7 @@ def ajouter_propriete(user_id: str, base_id: str, nom: str, type_propriete: str,
                     "nom": (nom or "").strip(),
                     "type": type_propriete,
                     "options": options or [],
+                    "config": config or {},
                 }
             )
             .execute()
