@@ -451,9 +451,15 @@ def ajouter_document_bibliotheque(
     extension (mapping standard extension -> type MIME) -- n'importe
     quel type de fichier est accepté, pas seulement ceux cités en
     exemple. Ces deux champs restent obligatoires pour l'outil, mais
-    c'est TOI qui les remplis, jamais l'utilisateur -- ne t'arrête pour
-    lui demander que si aucun fichier n'a réellement été joint dans la
-    conversation (aucun nom, aucune URL disponible nulle part).
+    c'est TOI qui les remplis, jamais l'utilisateur.
+
+    SI AUCUN FICHIER N'A ÉTÉ JOINT DU TOUT dans cette conversation
+    (aucun "[Document joint : ...]", "[Image jointe : ...]", etc. --
+    donc ni nom ni URL disponibles nulle part) : n'appelle PAS cet
+    outil et ne demande surtout pas de lien ou de contenu base64 (trop
+    technique). Dis simplement à l'utilisateur d'uploader/joindre le
+    fichier dans la conversation, rien d'autre -- une fois joint, tu
+    pourras l'ajouter directement sans lui redemander quoi que ce soit.
 
     Fournir SOIT `url_fichier` SOIT `contenu_base64` (jamais les deux à
     vide) : `url_fichier` -- lien réel d'un fichier déjà joint dans
