@@ -173,11 +173,29 @@ def lister_comportements(agent_id: str, etudiant_id: str) -> list[dict]:
     """Liste ordonnée (plus ancien -> plus récent) des instructions
     perso de cet étudiant pour cet agent. Liste vide si rien
     d'enregistré -- jamais None, pour simplifier les appelants (endpoint
-    GET, petit routeur, et injection prompt)."""
+    GET, petit routeur, et injection prompt).
+
+    22/08/2026, demande Bourama (distinguer les 4 origines d'un skill
+    dans "Mes skills" -- créé, téléchargé du public, attaché à un
+    emplacement, issu d'un audit) : ajoute depuis_audit (colonne directe)
+    et depuis_public (déduit via un JOIN léger sur
+    comportement_public_activations, aucune colonne dédiée sur
+    comportements_etudiants pour ça -- voir migration
+    2026_08_21_actif_comportements_publics_bibliotheque_publique.sql).
+    Les deux origines peuvent se cumuler avec un lien_type/lien_id
+    (un skill d'audit a TOUJOURS un lien, un skill téléchargé PEUT être
+    attaché après coup) -- volontairement pas exclusif, laissé au
+    frontend de décider dans quel(s) onglet(s) afficher quoi.
+
+    22/08/2026, suite (demande Bourama : "les audits regroupés par
+    matière") : ajoute matiere_id/matiere_nom pour les skills liés à un
+    CHAPITRE -- résolus en 2 requêtes groupées (chapitres puis matieres),
+    jamais une requête par ligne, pour ne pas exploser en N+1 sur les
+    dizaines de skills d'audit par chapitre."""
     try:
         res = (
             supabase.table("comportements_etudiants")
-            .select("id, texte, description, nom, lien_type, lien_id, actif")
+            .select("id, texte, description, nom, lien_type, lien_id, actif, depuis_audit")
             .eq("agent_id", agent_id)
             .eq("etudiant_id", etudiant_id)
             .order("created_at")
@@ -186,19 +204,71 @@ def lister_comportements(agent_id: str, etudiant_id: str) -> list[dict]:
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (lecture comportements {agent_id}/{etudiant_id}) : {e}")
         return []
-    return [
-        {
-            "id": ligne["id"],
-            "texte": ligne["texte"],
-            "description": ligne.get("description") or "",
-            "nom": ligne.get("nom") or "",
-            "lien_type": ligne.get("lien_type"),
-            "lien_id": ligne.get("lien_id"),
-            "actif": ligne.get("actif", True),
-        }
-        for ligne in (res.data or [])
-        if ligne.get("texte", "").strip()
-    ]
+
+    lignes = [ligne for ligne in (res.data or []) if ligne.get("texte", "").strip()]
+
+    ids_depuis_public: set[str] = set()
+    if lignes:
+        try:
+            activations = (
+                supabase.table("comportement_public_activations")
+                .select("comportement_etudiant_id")
+                .eq("active_par", etudiant_id)
+                .execute()
+            )
+            ids_depuis_public = {
+                a["comportement_etudiant_id"] for a in (activations.data or []) if a.get("comportement_etudiant_id")
+            }
+        except Exception as e:
+            logging.error(f"ERREUR SUPABASE (lecture activations publiques {etudiant_id}) : {e}")
+            # Silencieux -- depuis_public reste False pour tout le monde plutôt
+            # que de faire planter toute la liste pour un souci secondaire.
+
+    # Résolution mati_id/nom pour les skills liés à un chapitre -- batch,
+    # pas de N+1.
+    chapitre_ids = {l["lien_id"] for l in lignes if l.get("lien_type") == "chapitre" and l.get("lien_id")}
+    matiere_id_par_chapitre: dict[str, str] = {}
+    if chapitre_ids:
+        try:
+            chapitres = (
+                supabase.table("chapitres").select("id, matiere_id").in_("id", list(chapitre_ids)).execute()
+            )
+            matiere_id_par_chapitre = {c["id"]: c["matiere_id"] for c in (chapitres.data or [])}
+        except Exception as e:
+            logging.error(f"ERREUR SUPABASE (résolution matières des chapitres) : {e}")
+
+    matiere_ids = set(matiere_id_par_chapitre.values())
+    nom_matiere_par_id: dict[str, str] = {}
+    if matiere_ids:
+        try:
+            matieres = supabase.table("matieres").select("id, nom").in_("id", list(matiere_ids)).execute()
+            nom_matiere_par_id = {m["id"]: m["nom"] for m in (matieres.data or [])}
+        except Exception as e:
+            logging.error(f"ERREUR SUPABASE (lecture noms matières) : {e}")
+
+    resultat = []
+    for ligne in lignes:
+        matiere_id = None
+        matiere_nom = None
+        if ligne.get("lien_type") == "chapitre" and ligne.get("lien_id"):
+            matiere_id = matiere_id_par_chapitre.get(ligne["lien_id"])
+            matiere_nom = nom_matiere_par_id.get(matiere_id) if matiere_id else None
+        resultat.append(
+            {
+                "id": ligne["id"],
+                "texte": ligne["texte"],
+                "description": ligne.get("description") or "",
+                "nom": ligne.get("nom") or "",
+                "lien_type": ligne.get("lien_type"),
+                "lien_id": ligne.get("lien_id"),
+                "actif": ligne.get("actif", True),
+                "depuis_audit": ligne.get("depuis_audit", False),
+                "depuis_public": ligne["id"] in ids_depuis_public,
+                "matiere_id": matiere_id,
+                "matiere_nom": matiere_nom,
+            }
+        )
+    return resultat
 
 
 def separer_comportements_par_niveau(comportements: list[dict]) -> tuple[list[dict], list[dict]]:

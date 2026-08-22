@@ -56,6 +56,19 @@ class Comportement(BaseModel):
     lien_id: str | None = None
     lien_libelle: str | None = None
     actif: bool = True
+    # 22/08/2026, demande Bourama : distinguer les 4 origines d'un skill
+    # dans "Mes skills" (créé / téléchargé du public / attaché / audit).
+    # Peuvent être vrais en même temps qu'un lien_type/lien_id -- voir
+    # core/comportements_etudiants.py::lister_comportements.
+    depuis_audit: bool = False
+    depuis_public: bool = False
+    # 22/08/2026, demande Bourama ("les audits regroupés par matière") :
+    # renseigné uniquement pour un skill lié à un chapitre -- permet au
+    # frontend de regrouper les skills d'audit par matière sans requête
+    # supplémentaire. None pour tout le reste (lien matière/programme/
+    # autre, ou pas de lien).
+    matiere_id: str | None = None
+    matiere_nom: str | None = None
 
 
 class ComportementPayload(BaseModel):
