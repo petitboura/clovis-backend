@@ -15,6 +15,8 @@ from configuration import get_system_prompt
 from comportements_etudiants import (
     lister_comportements as lister_comportements_etudiant,
     choisir_comportements_pertinents,
+    separer_comportements_par_niveau,
+    lister_comportements_chapitres_pour_matiere,
 )
 from programme_llm import lister_mes_programmes_legers
 from codes_partage import lister_comportements_recus, lister_programmes_recus_legers
@@ -2683,14 +2685,48 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     # entré est fusionné avec ses propres comportements/programmes AVANT
     # le petit routeur "à la skill" -- même traitement, même pertinence
     # jugée par message, pas d'affichage systématique.
-    comportements_etudiant = (
-        choisir_comportements_pertinents(
-            message_utilisateur,
+    # Routage en deux niveaux (22/08/2026, demande Bourama -- corrige la
+    # saturation du petit routeur causée par l'audit qui a créé un skill
+    # par chapitre, cf. discussion) : niveau 1 (générique/programme/matière)
+    # d'abord, tout comme avant l'audit. Niveau 2 (chapitres) SEULEMENT pour
+    # les matières que le niveau 1 a retenues -- jamais les ~70 skills de
+    # chapitre d'un coup. Contrairement au niveau 1 (invisible), le niveau 2
+    # est affiché comme un vrai résultat d'outil (voir
+    # core/registre_outils.py::consulter_skills_chapitres_matiere) même si
+    # c'est ce petit routeur qui décide de le déclencher, pas le grand LLM.
+    comportements_etudiant = []
+    if user_id and message_utilisateur:
+        tous_comportements = (
             [c for c in lister_comportements_etudiant(agent_id, user_id) if c.get("actif", True)]
-            + lister_comportements_recus(user_id),
+            + lister_comportements_recus(user_id)
         )
-        if user_id and message_utilisateur else []
-    )
+        candidats_niveau1, candidats_chapitre = separer_comportements_par_niveau(tous_comportements)
+        retenus_niveau1 = choisir_comportements_pertinents(message_utilisateur, candidats_niveau1)
+        comportements_etudiant = list(retenus_niveau1)
+
+        matieres_retenues = {
+            c["lien_id"] for c in retenus_niveau1
+            if c.get("lien_type") == "matiere" and c.get("lien_id")
+        }
+        candidats_niveau2 = []
+        for matiere_id in matieres_retenues:
+            candidats_niveau2 += lister_comportements_chapitres_pour_matiere(candidats_chapitre, matiere_id)
+
+        if candidats_niveau2:
+            nom_outil_niveau2 = "consulter_skills_chapitres_matiere"
+            yield {"type": "statut", "texte": f"{_nom_lisible(nom_outil_niveau2)}..."}
+            retenus_niveau2 = choisir_comportements_pertinents(message_utilisateur, candidats_niveau2)
+            yield {"type": "statut_termine", "texte": f"{_nom_lisible(nom_outil_niveau2)} effectuée"}
+            yield {
+                "type": "outil_resultat",
+                "nom_outil": nom_outil_niveau2,
+                "nom_lisible": _nom_lisible(nom_outil_niveau2),
+                "resultat": (
+                    f"{len(candidats_niveau2)} skill(s) de chapitre trouvé(s), "
+                    f"{len(retenus_niveau2)} retenu(s) comme pertinent(s)."
+                ),
+            }
+            comportements_etudiant += retenus_niveau2
     mes_programmes = (lister_mes_programmes_legers(user_id) + lister_programmes_recus_legers(user_id)) if user_id else []
     outils_forces_contexte = []
     if comportements_etudiant:

@@ -439,5 +439,13 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "modifier_comportement": {"label": "Modification d'un skill", "icone": "ScrollText", "onglet": None},
     "consulter_comportement": {"label": "Consultation d'un skill", "icone": "ScrollText", "onglet": None},
     "supprimer_comportement": {"label": "Suppression d'un skill", "icone": "Trash2", "onglet": None},
+    # Routage en deux niveaux (22/08/2026, demande Bourama) : jamais un
+    # outil que le grand LLM appelle lui-même (pas de tool MCP réel), c'est
+    # le petit routeur "à la skill" (core/main.py) qui déclenche ça en
+    # coulisse -- mais on veut quand même que ça s'affiche comme un
+    # résultat d'outil normal dans le fil de conversation (voir
+    # OutilResultatBulle.tsx), d'où cette entrée dans ce registre bien qu'il
+    # n'existe aucun outil MCP de ce nom.
+    "consulter_skills_chapitres_matiere": {"label": "Consultation des skills des chapitres", "icone": "ScrollText", "onglet": None},
 }
 

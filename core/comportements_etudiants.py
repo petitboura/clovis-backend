@@ -201,6 +201,52 @@ def lister_comportements(agent_id: str, etudiant_id: str) -> list[dict]:
     ]
 
 
+def separer_comportements_par_niveau(comportements: list[dict]) -> tuple[list[dict], list[dict]]:
+    """
+    Sépare une liste de comportements (forme de lister_comportements, avec
+    lien_type/lien_id) en deux groupes (22/08/2026, demande Bourama --
+    correctif au bug de saturation du petit routeur causé par l'audit qui a
+    créé un skill par chapitre) :
+    - niveau 1 : comportements génériques (lien_type vide/None) + liés à un
+      programme + liés à une matière -- catalogue montré d'office au petit
+      routeur (choisir_comportements_pertinents), comme avant l'audit.
+    - niveau 2 (chapitre) : comportements liés à un chapitre -- PLUS montrés
+      d'office. Ils sont filtrés par matière ensuite (voir
+      lister_comportements_chapitres_pour_matiere) et seulement si le niveau
+      1 a retenu cette matière comme pertinente.
+    """
+    niveau1 = [c for c in comportements if c.get("lien_type") != "chapitre"]
+    niveau2_chapitre = [c for c in comportements if c.get("lien_type") == "chapitre"]
+    return niveau1, niveau2_chapitre
+
+
+def lister_comportements_chapitres_pour_matiere(comportements_chapitre: list[dict], matiere_id: str) -> list[dict]:
+    """
+    Filtre `comportements_chapitre` (lien_type == "chapitre") pour ne garder
+    que ceux dont le chapitre appartient à `matiere_id`. Requête une seule
+    fois `chapitres.matiere_id` pour les lien_id concernés -- jamais un
+    aller-retour Supabase par comportement.
+    """
+    if not comportements_chapitre:
+        return []
+    chapitre_ids = list({c["lien_id"] for c in comportements_chapitre if c.get("lien_id")})
+    if not chapitre_ids:
+        return []
+    try:
+        res = (
+            supabase.table("chapitres")
+            .select("id, matiere_id")
+            .in_("id", chapitre_ids)
+            .eq("matiere_id", matiere_id)
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (chapitres pour matiere {matiere_id}) : {e}")
+        return []
+    ids_valides = {ligne["id"] for ligne in (res.data or [])}
+    return [c for c in comportements_chapitre if c.get("lien_id") in ids_valides]
+
+
 def obtenir_comportement_skill(agent_id: str, etudiant_id: str, comportement_id: str) -> str | None:
     """
     Skill complet (frontmatter + corps markdown) d'UN comportement précis,
