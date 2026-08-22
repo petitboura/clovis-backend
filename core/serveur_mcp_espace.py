@@ -429,7 +429,8 @@ def ajouter_texte_bibliotheque(contenu: str, titre: str, ctx: Context) -> str:
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
 )
 def ajouter_document_bibliotheque(
-    nom_fichier: str, type_mime: str, contenu_base64: str, titre: str, description: str, ctx: Context,
+    nom_fichier: str, type_mime: str, titre: str, description: str, ctx: Context,
+    contenu_base64: str = "", url_fichier: str = "",
     type_emplacement: str = "", emplacement_id: str = "",
 ) -> str:
     """
@@ -439,10 +440,18 @@ def ajouter_document_bibliotheque(
     avec son extension (ex. "cours_svt.pdf"). `type_mime` : type MIME
     exact du fichier (ex. "application/pdf", "image/png", "audio/mpeg",
     "video/mp4", ou tout autre type MIME -- n'importe quel type de
-    fichier est accepté). `contenu_base64` : contenu du fichier encodé en
-    base64 (jamais de contenu brut binaire). `titre`/`description` :
-    optionnels, repli sur le nom du fichier si absents. Limite : 50 Mo.
-    `type_emplacement`/`emplacement_id` : optionnels -- si fournis
+    fichier est accepté). Fournir SOIT `url_fichier` SOIT
+    `contenu_base64` (jamais les deux à vide) : `url_fichier` -- lien
+    réel d'un fichier déjà joint dans CETTE conversation (celui donné
+    entre crochets "[Lien réel du fichier : ...]" après un upload chat)
+    -- à privilégier systématiquement quand ce lien est disponible, le
+    fichier est alors récupéré directement par le serveur, sans jamais
+    faire transiter son contenu par le modèle. `contenu_base64` --
+    contenu du fichier encodé en base64 (jamais de contenu brut
+    binaire), seulement si aucun lien réel n'existe déjà (fichier généré
+    ou fourni autrement). `titre`/`description` : optionnels, repli sur
+    le nom du fichier si absents. Limite : 50 Mo. `type_emplacement`/
+    `emplacement_id` : optionnels -- si fournis
     ("programme"/"matiere"/"chapitre"/"exercice"/"examen" + son id),
     classe directement ce document à cet endroit du programme dès
     l'ajout (équivalent à appeler classer_document_dans_programme
@@ -456,11 +465,25 @@ def ajouter_document_bibliotheque(
     if not type_mime:
         return "Erreur : type de fichier manquant."
 
-    import base64
-    try:
-        contenu = base64.b64decode(contenu_base64, validate=True)
-    except Exception:
-        return "Erreur : contenu_base64 invalide (doit être du base64 valide)."
+    url_fichier = (url_fichier or "").strip()
+    contenu_base64 = (contenu_base64 or "").strip()
+    if not url_fichier and not contenu_base64:
+        return "Erreur : fournis url_fichier (lien réel d'un fichier déjà joint dans la conversation) ou contenu_base64."
+
+    if url_fichier:
+        try:
+            reponse = requests.get(url_fichier, timeout=30)
+            reponse.raise_for_status()
+            contenu = reponse.content
+        except Exception as e:
+            logging.error(f"ERREUR outil ajouter_document_bibliotheque (url_fichier={url_fichier}) : {e}")
+            return "Erreur : impossible de récupérer le fichier à cette URL."
+    else:
+        import base64
+        try:
+            contenu = base64.b64decode(contenu_base64, validate=True)
+        except Exception:
+            return "Erreur : contenu_base64 invalide (doit être du base64 valide)."
 
     if len(contenu) == 0:
         return "Erreur : fichier vide."
