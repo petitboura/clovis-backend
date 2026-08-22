@@ -175,6 +175,16 @@ from core.bibliotheque_programme import (
     TYPES_EMPLACEMENT_BIBLIOTHEQUE,
     TYPES_LIEN_COMPORTEMENT,
 )
+from core.dossiers_bibliotheque import (
+    _proprietaire_dossier,
+    creer_dossier as _creer_dossier,
+    lister_dossiers as _lister_dossiers,
+    lister_fichiers_ids_dossier as _lister_fichiers_ids_dossier,
+    ranger_fichier as _ranger_fichier,
+    renommer_dossier as _renommer_dossier,
+    retirer_fichier as _retirer_fichier,
+    supprimer_dossier as _supprimer_dossier,
+)
 from main import chat as _chat_generateur  # core/main.py:chat() -- import bare comme dans api/chat.py (core/ deja sur sys.path a ce point, voir api/main.py : api.chat importe avant core.serveur_mcp_espace)
 from core.confirmations_mcp import (
     creer_confirmation as _creer_confirmation,
@@ -676,6 +686,244 @@ def retirer_document_du_programme(fichier_id: str, type_emplacement: str, emplac
     if not resultat["ok"]:
         return f"Erreur : {resultat['erreur']}"
     return "Document retiré de cet emplacement du programme."
+
+
+# --- Dossiers de la bibliothèque personnelle (22/08, demande Bourama) --
+# Organisation en dossiers/sous-dossiers, séparée du classement dans le
+# programme ci-dessus. Un fichier peut être dans plusieurs dossiers à la
+# fois. Voir core/dossiers_bibliotheque.py pour la logique complète et
+# le comportement de suppression (un fichier plus rattaché à aucun autre
+# dossier est supprimé avec le dossier, confirmé par Bourama).
+
+@mcp_espace.tool(
+    name="clovis_lister_dossiers_bibliotheque",
+    title="Lister les dossiers de la bibliothèque",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def lister_dossiers_bibliotheque(ctx: Context) -> str:
+    """
+    Liste tous les dossiers de la bibliothèque personnelle de cet
+    utilisateur, avec leur arborescence (dossier parent) et le nombre de
+    fichiers directement rangés dans chacun. Pour voir le CONTENU d'un
+    dossier précis (fichiers + sous-dossiers), utilise
+    consulter_dossier_bibliotheque avec son id.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        dossiers = _lister_dossiers(user_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil lister_dossiers_bibliotheque : {e}")
+        return "Erreur : impossible de lister les dossiers, réessaie."
+    if not dossiers:
+        return "Aucun dossier pour l'instant."
+    par_id = {d["id"]: d for d in dossiers}
+    lignes = []
+    for d in dossiers:
+        parent = par_id.get(d["dossier_parent_id"])
+        chemin = f"{parent['nom']} > {d['nom']}" if parent else d["nom"]
+        nb_fichiers = len(_lister_fichiers_ids_dossier(d["id"]))
+        lignes.append(f"- {chemin} [id: {d['id']}] ({nb_fichiers} fichier(s) direct(s))")
+    return "\n".join(lignes)
+
+
+@mcp_espace.tool(
+    name="clovis_consulter_dossier_bibliotheque",
+    title="Consulter un dossier de la bibliothèque",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def consulter_dossier_bibliotheque(dossier_id: str, ctx: Context) -> str:
+    """
+    Liste le contenu direct d'un dossier précis de la bibliothèque
+    personnelle : ses sous-dossiers et ses fichiers (description, type,
+    id). Ne descend pas récursivement dans les sous-dossiers -- rappelle
+    cet outil avec l'id d'un sous-dossier pour y entrer.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    proprietaire = _proprietaire_dossier(dossier_id)
+    if proprietaire is None:
+        return "Ce dossier est introuvable."
+    if proprietaire != user_id:
+        return "Ce dossier ne t'appartient pas."
+    try:
+        dossiers = _lister_dossiers(user_id)
+        sous_dossiers = [d for d in dossiers if d["dossier_parent_id"] == dossier_id]
+        fichier_ids = _lister_fichiers_ids_dossier(dossier_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_dossier_bibliotheque : {e}")
+        return "Erreur : impossible de consulter ce dossier, réessaie."
+
+    lignes = []
+    for sd in sous_dossiers:
+        lignes.append(f"- [dossier] {sd['nom']} [id: {sd['id']}]")
+    for f_id in fichier_ids:
+        try:
+            res = _supabase.table("fichiers_uploades").select("nom_fichier, description, type_mime").eq("id", f_id).maybe_single().execute()
+        except Exception as e:
+            logging.error(f"ERREUR outil consulter_dossier_bibliotheque (lecture fichier {f_id}) : {e}")
+            continue
+        if not res or not res.data:
+            continue
+        f = res.data
+        lignes.append(f"- [fichier] {f.get('description') or f.get('nom_fichier')} ({f.get('type_mime', 'inconnu')}) [id: {f_id}]")
+    if not lignes:
+        return "Ce dossier est vide."
+    return "\n".join(lignes)
+
+
+@mcp_espace.tool(
+    name="clovis_ajouter_dossier_bibliotheque",
+    title="Créer un dossier dans la bibliothèque",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
+def ajouter_dossier_bibliotheque(nom: str, dossier_parent_id: str = "", ctx: Context = None) -> str:
+    """
+    Crée un dossier dans la bibliothèque personnelle de cet utilisateur.
+    `dossier_parent_id` (optionnel) : id d'un dossier existant pour créer
+    un SOUS-dossier dedans ; laisse vide pour un dossier à la racine.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    nom = (nom or "").strip()
+    if not nom:
+        return "Erreur : nom de dossier manquant."
+    parent_id = (dossier_parent_id or "").strip() or None
+    if parent_id:
+        proprietaire = _proprietaire_dossier(parent_id)
+        if proprietaire is None:
+            return "Erreur : le dossier parent indiqué est introuvable."
+        if proprietaire != user_id:
+            return "Erreur : ce dossier parent ne t'appartient pas."
+    try:
+        dossier = _creer_dossier(user_id, nom, parent_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil ajouter_dossier_bibliotheque : {e}")
+        return "Erreur : impossible de créer ce dossier, réessaie."
+    return f"Dossier « {nom} » créé [id: {dossier['id']}]."
+
+
+@mcp_espace.tool(
+    name="clovis_renommer_dossier_bibliotheque",
+    title="Renommer un dossier de la bibliothèque",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def renommer_dossier_bibliotheque(dossier_id: str, nouveau_nom: str, ctx: Context) -> str:
+    """Renomme un dossier de la bibliothèque personnelle de cet utilisateur."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    proprietaire = _proprietaire_dossier(dossier_id)
+    if proprietaire is None:
+        return "Ce dossier est introuvable."
+    if proprietaire != user_id:
+        return "Ce dossier ne t'appartient pas."
+    nouveau_nom = (nouveau_nom or "").strip()
+    if not nouveau_nom:
+        return "Erreur : nouveau nom manquant."
+    try:
+        _renommer_dossier(dossier_id, nouveau_nom)
+    except Exception as e:
+        logging.error(f"ERREUR outil renommer_dossier_bibliotheque : {e}")
+        return "Erreur : impossible de renommer ce dossier, réessaie."
+    return f"Dossier renommé en « {nouveau_nom} »."
+
+
+@mcp_espace.tool(
+    name="clovis_ranger_fichier_dans_dossier",
+    title="Ranger un fichier dans un dossier",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def ranger_fichier_dans_dossier(fichier_id: str, dossier_id: str, ctx: Context) -> str:
+    """
+    Range un fichier de la bibliothèque personnelle dans un dossier. Un
+    fichier peut être rangé dans plusieurs dossiers à la fois : ranger
+    un fichier déjà présent ailleurs l'ajoute simplement à ce dossier en
+    plus, sans le retirer des autres.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    proprietaire = _proprietaire_dossier(dossier_id)
+    if proprietaire is None:
+        return "Ce dossier est introuvable."
+    if proprietaire != user_id:
+        return "Ce dossier ne t'appartient pas."
+    try:
+        res = _supabase.table("fichiers_uploades").select("user_id").eq("id", fichier_id).maybe_single().execute()
+    except Exception as e:
+        logging.error(f"ERREUR outil ranger_fichier_dans_dossier (lecture fichier) : {e}")
+        return "Erreur : impossible de ranger ce fichier, réessaie."
+    if not res or not res.data:
+        return "Ce fichier est introuvable."
+    if res.data["user_id"] != user_id:
+        return "Ce fichier ne t'appartient pas."
+    try:
+        _ranger_fichier(fichier_id, dossier_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil ranger_fichier_dans_dossier : {e}")
+        return "Erreur : impossible de ranger ce fichier, réessaie."
+    return "Fichier rangé dans le dossier."
+
+
+@mcp_espace.tool(
+    name="clovis_retirer_fichier_du_dossier",
+    title="Retirer un fichier d'un dossier",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def retirer_fichier_du_dossier(fichier_id: str, dossier_id: str, ctx: Context) -> str:
+    """
+    Retire un fichier d'un dossier précis (le fichier reste dans la
+    bibliothèque et dans ses autres dossiers éventuels : seul ce
+    rattachement précis disparaît).
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    proprietaire = _proprietaire_dossier(dossier_id)
+    if proprietaire is None:
+        return "Ce dossier est introuvable."
+    if proprietaire != user_id:
+        return "Ce dossier ne t'appartient pas."
+    try:
+        _retirer_fichier(fichier_id, dossier_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil retirer_fichier_du_dossier : {e}")
+        return "Erreur : impossible de retirer ce fichier, réessaie."
+    return "Fichier retiré du dossier."
+
+
+@mcp_espace.tool(
+    name="clovis_supprimer_dossier_bibliotheque",
+    title="Supprimer un dossier de la bibliothèque",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
+)
+def supprimer_dossier_bibliotheque(dossier_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT un dossier de la bibliothèque personnelle
+    (et ses sous-dossiers). Un fichier encore rattaché à au moins un
+    autre dossier est conservé (juste détaché de celui-ci) ; un fichier
+    qui n'était rattaché à AUCUN autre dossier est supprimé en même
+    temps que le dossier. SENSIBLE : le client doit confirmer avec
+    l'utilisateur avant d'appeler cet outil.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    proprietaire = _proprietaire_dossier(dossier_id)
+    if proprietaire is None:
+        return "Ce dossier est introuvable."
+    if proprietaire != user_id:
+        return "Ce dossier ne t'appartient pas."
+    try:
+        _supprimer_dossier(dossier_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_dossier_bibliotheque : {e}")
+        return "Erreur : impossible de supprimer ce dossier, réessaie."
+    return "Dossier supprimé."
 
 
 # --- Mémoire (résumé long-terme, "Ma mémoire" de "Mon espace") --------
