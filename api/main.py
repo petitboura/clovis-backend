@@ -42,6 +42,8 @@ from api.emplacements_bibliotheque_programme import router as emplacements_bibli
 from api.plugins_programme import router as plugins_router, router_programmes as plugins_programmes_router
 from api.comportements_publics import router as comportements_publics_router
 from api.bibliotheque_publique import router as bibliotheque_publique_router
+from api.signalements import router as signalements_router
+from api.contenu_legal import router as contenu_legal_router
 from api.codes_partage import router_mes_codes, router_rattachements
 from api.outils_registre import router as outils_registre_router
 from core.serveur_mcp_generation import mcp_generation
@@ -414,6 +416,8 @@ app.include_router(plugins_router)
 app.include_router(plugins_programmes_router)
 app.include_router(comportements_publics_router)
 app.include_router(bibliotheque_publique_router)
+app.include_router(signalements_router)
+app.include_router(contenu_legal_router)
 app.include_router(router_mes_codes)
 app.include_router(router_rattachements)
 app.include_router(outils_registre_router)

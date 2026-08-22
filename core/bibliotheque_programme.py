@@ -309,6 +309,23 @@ def declasser_document(user_id: str, fichier_id: str, type_cible: str, cible_id:
     return {"ok": True}
 
 
+def declasser_document_admin(fichier_id: str, type_cible: str, cible_id: str) -> dict:
+    """Variante admin de declasser_document ci-dessus (22/08, chantier
+    signalements) : retire un document d'UN emplacement précis SANS
+    vérification de propriété -- réservée à api/signalements.py après
+    vérification _est_admin en amont, jamais exposée directement. Ne
+    touche ni le fichier lui-même ni ses autres classements (même
+    portée que declasser_document)."""
+    try:
+        supabase.table("bibliotheque_emplacements_programme").delete().eq("fichier_id", fichier_id).eq(
+            "type_cible", type_cible
+        ).eq("cible_id", cible_id).execute()
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (déclassement admin document {fichier_id} -> {type_cible}={cible_id}) : {e}")
+        return {"ok": False, "erreur": "Erreur lors du retrait, réessaie."}
+    return {"ok": True}
+
+
 def lister_emplacements_document(fichier_id: str) -> list[dict]:
     """Tous les emplacements où ce document est classé, avec leur
     libellé résolu. Emplacements orphelins (cible supprimée depuis)
@@ -334,11 +351,17 @@ def lister_emplacements_document(fichier_id: str) -> list[dict]:
 def lister_documents_emplacement(type_cible: str, cible_id: str) -> list[dict]:
     """Tous les documents de la bibliothèque classés à cet emplacement
     précis (utilisé pour afficher les documents d'un chapitre/matière/
-    programme donné, ex. dans l'éditeur de programme)."""
+    programme donné, ex. dans l'éditeur de programme).
+
+    Renvoie `ajoute_par` par document (22/08, chantier signalements) :
+    permet au frontend de savoir si CE document, à CET emplacement, a
+    été ajouté par quelqu'un d'autre que le propriétaire (cas d'un
+    plugin contribution_libre) -- condition d'affichage du bouton
+    "Signaler", voir api/emplacements_bibliotheque_programme.py."""
     try:
         liens = (
             supabase.table("bibliotheque_emplacements_programme")
-            .select("fichier_id")
+            .select("fichier_id, ajoute_par")
             .eq("type_cible", type_cible)
             .eq("cible_id", cible_id)
             .execute()
@@ -346,6 +369,7 @@ def lister_documents_emplacement(type_cible: str, cible_id: str) -> list[dict]:
         if not liens:
             return []
         ids = [l["fichier_id"] for l in liens]
+        ajoute_par_par_fichier = {l["fichier_id"]: l.get("ajoute_par") for l in liens}
         fichiers = (
             supabase.table("fichiers_uploades")
             .select("id, nom_fichier, description, type_mime, url_publique, created_at")
@@ -355,6 +379,8 @@ def lister_documents_emplacement(type_cible: str, cible_id: str) -> list[dict]:
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (lecture documents emplacement {type_cible}={cible_id}) : {e}")
         return []
+    for f in fichiers:
+        f["ajoute_par"] = ajoute_par_par_fichier.get(f["id"])
     return fichiers
 
 

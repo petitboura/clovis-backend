@@ -24,7 +24,9 @@ MESSAGES_FR: dict[str, str] = {
     "AUCUN_TEXTE_TROUVE_DOCUMENT_SCANNE_IMAGE": "Aucun texte trouvé (document scanné/image sans OCR ?).",
     "AUDIO_TROP_LONG_20_MO_MAX": "Audio trop long (20 Mo max).",
     "CATEGORIE_INCONNUE": "Catégorie inconnue.",
+    "CIBLE_DU_SIGNALEMENT_MANQUANTE": "Précise le document ou l'emplacement concerné.",
     "COMPTE_NON_CREATEUR": "Ce compte n'a pas (encore) le statut créateur.",
+    "CONTENU_LEGAL_INTROUVABLE": "Contenu légal introuvable.",
     "CETTE_MATIERE_EST_DEJA_PRISE_PAR": "Cette matière est déjà prise par une autre IA.",
     "CETTE_PUBLICATION_NE_T_APPARTIENT_PAS": "Cette publication ne t'appartient pas.",
     "CET_AGENT_NE_T_APPARTIENT_PAS": "Cet agent ne t'appartient pas.",
@@ -187,6 +189,16 @@ MESSAGES_FR: dict[str, str] = {
     "COMPORTEMENT_INTROUVABLE": "Comportement introuvable.",
     "FRONTMATTER_INVALIDE": "Le skill doit commencer par --- et contenir un bloc d'en-tête valide.",
     "FRONTMATTER_INCOMPLET": "Le skill doit avoir une description et un corps de texte, tous les deux non vides.",
+    # 22/08, chantier signalements (bibliothèque publique + documents
+    # publics de programme) -- voir api/signalements.py.
+    "TYPE_DE_SIGNALEMENT_INVALIDE": "Type de signalement invalide.",
+    "MOTIF_REQUIS": "Précise le motif du signalement.",
+    "COORDONNEES_PLAIGNANT_REQUISES": "Ton nom et ton email sont requis.",
+    "DECLARATION_SUR_L_HONNEUR_REQUISE": "La déclaration sur l'honneur est requise.",
+    "PAS_LE_DROIT_ADMIN": "Réservé aux administrateurs.",
+    "ACTION_INVALIDE": "Action invalide.",
+    "SIGNALEMENT_INTROUVABLE": "Signalement introuvable.",
+    "SIGNALEMENT_DEJA_TRAITE": "Ce signalement a déjà été traité.",
 }
 
 

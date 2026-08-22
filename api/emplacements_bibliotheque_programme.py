@@ -49,6 +49,14 @@ class FichierEmplacementReponse(BaseModel):
     type_mime: str
     url_publique: str
     created_at: str
+    # 22/08, chantier signalements : ajoute_par (qui a classé CE document
+    # à CET emplacement) et emplacement_public (True si cet emplacement
+    # est couvert par un plugin contribution_libre) -- ensemble ils
+    # permettent au frontend d'afficher un bouton "Signaler" uniquement
+    # là où c'est pertinent (document visible publiquement), voir
+    # SectionDocumentsBibliotheque.tsx.
+    ajoute_par: str | None = None
+    emplacement_public: bool = False
 
 
 class ClasserDocumentPayload(BaseModel):
@@ -63,16 +71,23 @@ def lister(type_cible: TypeCible, cible_id: str, utilisateur=Depends(utilisateur
     proprietaire_id = proprietaire_emplacement(type_cible, cible_id)
     if proprietaire_id is None:
         raise erreur_api(404, "EMPLACEMENT_INTROUVABLE")
+    # Calculé une seule fois (22/08) : sert à la fois à la vérification de
+    # droit d'accès ci-dessous (non-propriétaire) et à l'indicateur
+    # emplacement_public renvoyé au frontend, jamais recalculé deux fois.
+    est_public = emplacement_couvert_par_plugin_public(type_cible, cible_id)
     if proprietaire_id != utilisateur.id:
         # Pas propriétaire : autorisé quand même en lecture seule si cet
         # emplacement appartient à un plugin en contribution_libre (20/08)
         # -- n'importe qui doit pouvoir voir les documents d'un plugin
         # public, pas seulement son auteur. Couvre aussi les examens
         # transverses (voir emplacement_couvert_par_plugin_public).
-        if not emplacement_couvert_par_plugin_public(type_cible, cible_id):
+        if not est_public:
             raise erreur_api(403, "PAS_LE_DROIT_SUR_CET_EMPLACEMENT")
 
-    return lister_documents_emplacement(type_cible, cible_id)
+    documents = lister_documents_emplacement(type_cible, cible_id)
+    for d in documents:
+        d["emplacement_public"] = est_public
+    return documents
 
 
 @router.post("/{type_cible}/{cible_id}/documents", status_code=201)
