@@ -1366,6 +1366,28 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         "moi\" (mon cours, mon exercice, mon fichier) -> "
         "consulter_bibliotheque ; \"Clovis / l'application\" (même "
         "vaguement) -> le groupe base de connaissances.\n\n"
+        # AJOUT 2026-08-22 (demande Bourama : "les skills ont été
+        # corrigés visuellement, mais intérieurement non, il faut que
+        # le LLM soit au courant") : lister_comportements/
+        # consulter_comportement existaient déjà dans le catalogue, mais
+        # rien n'apprenait au routeur que "skill(s)" -- le SEUL terme
+        # utilisé partout dans l'interface -- désigne cette
+        # fonctionnalité ("comportement" reste un nom interne, jamais vu
+        # par l'utilisateur). Sans cette règle, une question comme
+        # "quels sont mes skills ?" ne matchait rien : le routeur ne
+        # proposait pas lister_comportements, et le grand modèle
+        # répondait à côté (confusion avec "compétences personnelles").
+        "IMPORTANT : lister_comportements DOIT être suggéré dès que "
+        "l'utilisateur demande à voir/lister ses \"skills\" (le SEUL mot "
+        "utilisé dans toute l'interface Clovis pour cette "
+        "fonctionnalité -- \"comportement\" est un nom interne, ignore-le "
+        "pour reconnaître l'intention). Exemples qui DOIVENT suggérer cet "
+        "outil : \"quels sont mes skills ?\", \"montre-moi mes skills\", "
+        "\"liste mes skills/comportements\", \"j'ai combien de skills ?\". "
+        "Ne confonds JAMAIS ça avec une question sur les compétences, "
+        "talents ou aptitudes personnelles de l'utilisateur (\"qu'est-ce "
+        "que je sais bien faire ?\") -- aucun rapport, ne suggère rien "
+        "dans ce cas.\n\n"
         f"Outils disponibles :\n{catalogue}\n\n"
         f"{contexte}"
         f"Question de l'utilisateur : {message_utilisateur}\n\n"
@@ -1449,7 +1471,8 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     if comportements_etudiant:
         candidats = "\n".join(f"- id={c['id']} : {c['description']}" for c in comportements_etudiant)
         system_final += (
-            "\n\nINSTRUCTIONS PERSONNELLES POTENTIELLEMENT PERTINENTES POUR CE MESSAGE (écrites par cet "
+            "\n\nINSTRUCTIONS PERSONNELLES POTENTIELLEMENT PERTINENTES POUR CE MESSAGE -- appelées "
+            "\"skill(s)\" dans TOUTE l'interface Clovis, \"comportement\" seulement en interne (écrites par cet "
             "utilisateur lui-même, ou reçues d'un autre utilisateur via un code -- la description précise "
             "\"(reçu de ...)\" dans ce second cas) :\n"
             f"{candidats}\n"

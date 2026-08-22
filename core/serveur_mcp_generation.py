@@ -1085,6 +1085,15 @@ def lister_comportements(ctx: Context) -> str:
     Liste les instructions personnelles que CET utilisateur a écrites
     lui-même (section "Mes comportements" de "Mon espace") pour Clovis.
     Renvoie pour chacune : id, description courte, texte complet.
+
+    IMPORTANT (22/08/2026, terme utilisateur) : dans TOUTE l'interface,
+    cette fonctionnalité s'appelle "skill(s)" -- l'utilisateur ne dira
+    presque jamais "comportement". Utilise cet outil dès qu'il demande
+    "mes skills", "quels sont mes skills", "montre-moi mes skills/mes
+    comportements", etc. -- pas seulement quand un skill semble déjà
+    pertinent pour le message en cours (ça, c'est géré par la liste de
+    candidats du message système, voir consulter_comportement) : ici,
+    c'est une vraie demande d'énumération, réponds-y avec cet outil.
     """
     requete = ctx.request_context.request
     user_id = requete.query_params.get("user_id")
@@ -1113,9 +1122,10 @@ def lister_comportements(ctx: Context) -> str:
 def consulter_comportement(comportement_id: str, ctx: Context) -> str:
     """
     Lit le skill COMPLET (format Claude, frontmatter + instructions) d'une
-    instruction personnelle -- que cet utilisateur l'ait écrite lui-même
-    (section "Mes comportements"), ou qu'il l'ait reçue d'un autre
-    utilisateur via un code (id préfixé "recu:", voir
+    instruction personnelle -- appelée "skill" dans toute l'interface,
+    "comportement" seulement en interne -- que cet utilisateur l'ait
+    écrite lui-même (section "Mes comportements"), ou qu'il l'ait reçue
+    d'un autre utilisateur via un code (id préfixé "recu:", voir
     core/codes_partage.py) -- à partir de son id. Le message système t'a
     déjà donné une courte description de ceux qui semblent pertinents
     pour ce message -- utilise cet outil quand l'un d'eux semble
@@ -1144,10 +1154,11 @@ def consulter_comportement(comportement_id: str, ctx: Context) -> str:
 def ajouter_comportement(texte: str, ctx: Context) -> str:
     """
     Enregistre une nouvelle instruction personnelle pour CET étudiant
-    (section "Mes comportements"), à utiliser SEULEMENT quand il exprime
-    CLAIREMENT et EXPLICITEMENT une préférence ou une règle à retenir
-    pour la suite (ex: "explique-moi toujours avec des schémas", "ne me
-    donne jamais la réponse directe, guide-moi"). S'ajoute EN PLUS de ses
+    (section "Mes comportements", appelée "skill" dans l'interface), à
+    utiliser SEULEMENT quand il exprime CLAIREMENT et EXPLICITEMENT une
+    préférence ou une règle à retenir pour la suite (ex: "explique-moi
+    toujours avec des schémas", "ne me donne jamais la réponse directe,
+    guide-moi", "crée-moi un skill qui..."). S'ajoute EN PLUS de ses
     autres comportements, ne les remplace pas.
 
     N'UTILISE JAMAIS CET OUTIL SUR UNE SUPPOSITION. Si la demande est
@@ -1178,10 +1189,11 @@ def ajouter_comportement(texte: str, ctx: Context) -> str:
 def modifier_comportement(comportement_id: str, texte: str, ctx: Context) -> str:
     """
     Remplace le texte COMPLET d'un comportement existant de CET étudiant
-    (à partir de son id, vu via consulter_comportement ou la description
-    courte donnée dans le message système). Utilise cet outil quand
-    l'étudiant veut corriger ou préciser une instruction déjà enregistrée
-    -- pas pour en ajouter une nouvelle (voir ajouter_comportement).
+    (appelé "skill" dans l'interface) (à partir de son id, vu via
+    consulter_comportement ou la description courte donnée dans le
+    message système). Utilise cet outil quand l'étudiant veut corriger
+    ou préciser une instruction déjà enregistrée -- pas pour en ajouter
+    une nouvelle (voir ajouter_comportement).
     """
     try:
         requete = ctx.request_context.request
@@ -1201,9 +1213,10 @@ def modifier_comportement(comportement_id: str, texte: str, ctx: Context) -> str
 @mcp_generation.tool()
 def supprimer_comportement(comportement_id: str, ctx: Context) -> str:
     """
-    Supprime DÉFINITIVEMENT un comportement de CET étudiant (à partir de
-    son id). SENSIBLE : demande toujours confirmation à l'étudiant avant
-    d'être exécuté, quelle que soit la formulation de sa demande.
+    Supprime DÉFINITIVEMENT un comportement de CET étudiant (appelé
+    "skill" dans l'interface), à partir de son id. SENSIBLE : demande
+    toujours confirmation à l'étudiant avant d'être exécuté, quelle que
+    soit la formulation de sa demande.
     """
     try:
         requete = ctx.request_context.request

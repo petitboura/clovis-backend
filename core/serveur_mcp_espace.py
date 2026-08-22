@@ -766,16 +766,17 @@ def effacer_memoire(ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_consulter_comportement",
-    title="Consulter un comportement",
+    title="Consulter un skill",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def consulter_comportement(comportement_id: str, ctx: Context) -> str:
     """
     Lit le contenu COMPLET (frontmatter + instructions) d'une instruction
-    personnelle -- que cet utilisateur l'ait écrite lui-même (section
-    "Mes comportements"), ou qu'il l'ait reçue d'un autre utilisateur via
-    un code (id préfixé "recu:") -- à partir de son id, vu via
-    lister_comportements.
+    personnelle -- appelée "skill" dans TOUTE l'interface Clovis,
+    "comportement" seulement en interne -- que cet utilisateur l'ait
+    écrite lui-même (section "Mes comportements"), ou qu'il l'ait reçue
+    d'un autre utilisateur via un code (id préfixé "recu:") -- à partir
+    de son id, vu via lister_comportements.
     """
     user_id = _user_id_authentifie(ctx)
     if not user_id:
@@ -795,13 +796,18 @@ def consulter_comportement(comportement_id: str, ctx: Context) -> str:
 
 @mcp_espace.tool(
     name="clovis_lister_comportements",
-    title="Lister les comportements",
+    title="Lister les skills",
     annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def lister_comportements(ctx: Context, limit: int = 20, offset: int = 0) -> str:
     """
     Liste les instructions personnelles que cet utilisateur a écrites
-    lui-même (section "Mes comportements" de "Mon espace") pour Clovis.
+    lui-même (section "Mes comportements" de "Mon espace") pour Clovis --
+    appelées "skill(s)" dans TOUTE l'interface Clovis, "comportement"
+    seulement en interne. Utilise cet outil dès que l'utilisateur demande
+    "mes skills", "quels sont mes skills", "montre-moi mes skills/mes
+    comportements", etc. -- une vraie demande d'énumération, à ne pas
+    confondre avec ses compétences/talents personnels (aucun rapport).
     Renvoie pour chacune : id, description courte, texte complet.
     Résultats paginés : `limit` (défaut 20, max 100) entrées à partir de
     `offset` (défaut 0). Si d'autres entrées existent au-delà, un rappel
@@ -840,19 +846,20 @@ def lister_comportements(ctx: Context, limit: int = 20, offset: int = 0) -> str:
 
 @mcp_espace.tool(
     name="clovis_ajouter_comportement_espace",
-    title="Ajouter un comportement",
+    title="Ajouter un skill",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
 )
 def ajouter_comportement_espace(texte: str, ctx: Context, type_lien: str = "", lien_id: str = "") -> str:
     """
     Enregistre une nouvelle instruction personnelle pour cet utilisateur
-    (section "Mes comportements"). S'ajoute EN PLUS des comportements
-    déjà existants, ne les remplace pas. `type_lien`/`lien_id` :
-    optionnels -- si fournis, rattache ce comportement à un endroit
-    précis du programme ("programme"/"matiere"/"chapitre"/"document"/
-    "exercice"/"examen" + son id), comme si l'utilisateur avait rempli
-    une section dédiée à cet endroit du programme. Sans ces deux
-    paramètres, comportement générique comme avant (s'applique partout).
+    (section "Mes comportements", appelée "skill" dans l'interface).
+    S'ajoute EN PLUS des comportements déjà existants, ne les remplace
+    pas. `type_lien`/`lien_id` : optionnels -- si fournis, rattache ce
+    comportement à un endroit précis du programme ("programme"/"matiere"/
+    "chapitre"/"document"/"exercice"/"examen" + son id), comme si
+    l'utilisateur avait rempli une section dédiée à cet endroit du
+    programme. Sans ces deux paramètres, comportement générique comme
+    avant (s'applique partout).
     """
     user_id = _user_id_authentifie(ctx)
     if not user_id:
@@ -881,13 +888,14 @@ def ajouter_comportement_espace(texte: str, ctx: Context, type_lien: str = "", l
 
 @mcp_espace.tool(
     name="clovis_modifier_comportement_espace",
-    title="Modifier un comportement",
+    title="Modifier un skill",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def modifier_comportement_espace(comportement_id: str, texte: str, ctx: Context) -> str:
     """
     Remplace le texte complet d'un comportement existant de cet
-    utilisateur, à partir de son id (voir lister_comportements).
+    utilisateur (appelé "skill" dans l'interface), à partir de son id
+    (voir lister_comportements).
     """
     user_id = _user_id_authentifie(ctx)
     if not user_id:
@@ -907,12 +915,13 @@ def modifier_comportement_espace(comportement_id: str, texte: str, ctx: Context)
 
 @mcp_espace.tool(
     name="clovis_attacher_comportement_espace",
-    title="Attacher/détacher un comportement",
+    title="Attacher/détacher un skill",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
 )
 def attacher_comportement_espace(comportement_id: str, ctx: Context, type_lien: str = "", lien_id: str = "") -> str:
     """
-    Attache un comportement DÉJÀ EXISTANT à un endroit du programme
+    Attache un comportement (appelé "skill" dans l'interface) DÉJÀ
+    EXISTANT à un endroit du programme
     ("programme"/"matiere"/"chapitre"/"document"/"exercice"/"examen"/
     "section" + son id) -- séparé de ajouter_comportement_espace exprès
     (20/08/2026, demande Bourama : "au moment de la création ou après
@@ -944,14 +953,15 @@ def attacher_comportement_espace(comportement_id: str, ctx: Context, type_lien: 
 
 @mcp_espace.tool(
     name="clovis_supprimer_comportement_espace",
-    title="Supprimer un comportement",
+    title="Supprimer un skill",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
 )
 def supprimer_comportement_espace(comportement_id: str, ctx: Context) -> str:
     """
-    Supprime DÉFINITIVEMENT un comportement de cet utilisateur, à partir
-    de son id (voir lister_comportements). SENSIBLE : le client doit
-    confirmer avec l'utilisateur avant d'appeler cet outil.
+    Supprime DÉFINITIVEMENT un comportement de cet utilisateur (appelé
+    "skill" dans l'interface), à partir de son id (voir
+    lister_comportements). SENSIBLE : le client doit confirmer avec
+    l'utilisateur avant d'appeler cet outil.
     """
     user_id = _user_id_authentifie(ctx)
     if not user_id:
