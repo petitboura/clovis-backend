@@ -1084,7 +1084,6 @@ def lister_comportements(ctx: Context) -> str:
     """
     Liste les instructions personnelles que CET utilisateur a écrites
     lui-même (section "Mes comportements" de "Mon espace") pour Clovis.
-    Renvoie pour chacune : id, description courte, texte complet.
 
     IMPORTANT (22/08/2026, terme utilisateur) : dans TOUTE l'interface,
     cette fonctionnalité s'appelle "skill(s)" -- l'utilisateur ne dira
@@ -1094,6 +1093,9 @@ def lister_comportements(ctx: Context) -> str:
     pertinent pour le message en cours (ça, c'est géré par la liste de
     candidats du message système, voir consulter_comportement) : ici,
     c'est une vraie demande d'énumération, réponds-y avec cet outil.
+    Renvoie pour chacune : id, description courte, emplacement lié le
+    cas échéant -- PAS le texte complet (utilise consulter_comportement
+    avec l'id pour lire un comportement précis en entier).
     """
     requete = ctx.request_context.request
     user_id = requete.query_params.get("user_id")
@@ -1109,7 +1111,7 @@ def lister_comportements(ctx: Context) -> str:
         return "Aucun comportement enregistré pour l'instant."
     lignes = []
     for c in comportements:
-        ligne = f"- {c['description']}\n  texte : {c['texte']}"
+        ligne = f"- {c['description']}"
         if c.get("lien_type") and c.get("lien_id"):
             libelle = _libelle_emplacement(c["lien_type"], c["lien_id"]) if c["lien_type"] in TYPES_EMPLACEMENT_BIBLIOTHEQUE else None
             ligne += f"\n  lié à : {libelle or (c['lien_type'] + ' ' + c['lien_id'])}"

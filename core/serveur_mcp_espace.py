@@ -808,7 +808,9 @@ def lister_comportements(ctx: Context, limit: int = 20, offset: int = 0) -> str:
     "mes skills", "quels sont mes skills", "montre-moi mes skills/mes
     comportements", etc. -- une vraie demande d'énumération, à ne pas
     confondre avec ses compétences/talents personnels (aucun rapport).
-    Renvoie pour chacune : id, description courte, texte complet.
+    Renvoie pour chacune : id, description courte, emplacement lié le
+    cas échéant -- PAS le texte complet (utilise consulter_comportement
+    avec l'id pour lire un comportement précis en entier).
     Résultats paginés : `limit` (défaut 20, max 100) entrées à partir de
     `offset` (défaut 0). Si d'autres entrées existent au-delà, un rappel
     est ajouté en fin de réponse avec l'offset suivant à utiliser.
@@ -829,7 +831,7 @@ def lister_comportements(ctx: Context, limit: int = 20, offset: int = 0) -> str:
     page = comportements[offset:offset + limit]
     lignes = []
     for c in page:
-        ligne = f"- {c['description']}\n  texte : {c['texte']}"
+        ligne = f"- {c['description']}"
         if c.get("lien_type") and c.get("lien_id"):
             libelle = _libelle_emplacement(c["lien_type"], c["lien_id"]) if c["lien_type"] in TYPES_LIEN_COMPORTEMENT else None
             ligne += f"\n  lié à : {libelle or (c['lien_type'] + ' ' + c['lien_id'])}"
