@@ -55,6 +55,15 @@ from supabase import create_client
 MCP_NOTION_URL = "https://mcp.notion.com/mcp"
 DECOUVERTE_URL = "https://mcp.notion.com/.well-known/oauth-authorization-server"
 
+# Redirect_uri dedie a l'app mobile (Lot 5 Partie 3, 23/08/2026) : schema
+# d'URI personnalise intercepte directement par ASWebAuthenticationSession
+# (iOS) / un intent-filter dedie (Android), sans jamais passer par
+# classgpt-frontend -- pas de changement cote frontend web necessaire.
+# Enregistre en tant que redirect_uri SUPPLEMENTAIRE aupres de Notion (DCR
+# accepte un tableau), en plus de URL_RETOUR (web). Pas un secret : c'est un
+# identifiant de protocole fixe, pas une cle.
+REDIRECT_URI_MOBILE = "clovismobile://oauth-callback"
+
 # Marge de securite : on rafraichit un peu avant l'expiration reelle plutot
 # que d'attendre un 401, comme recommande par Notion.
 MARGE_RAFRAICHISSEMENT = timedelta(minutes=5)
@@ -115,8 +124,8 @@ def _client_dcr_actif(metadata):
     reponse = httpx.post(
         metadata["registration_endpoint"],
         json={
-            "client_name": "Djiguigne",
-            "redirect_uris": [URL_RETOUR],
+            "client_name": "Clovis",
+            "redirect_uris": [URL_RETOUR, REDIRECT_URI_MOBILE],
             "grant_types": ["authorization_code", "refresh_token"],
             "response_types": ["code"],
             "token_endpoint_auth_method": "none",
@@ -139,10 +148,16 @@ def _client_dcr_actif(metadata):
     return ligne_creee["id"], creds["client_id"], creds.get("client_secret")
 
 
-def demarrer_connexion_notion(user_id, agent_id):
+def demarrer_connexion_notion(user_id, agent_id, redirect_uri=None):
     """
     Premiere etape : genere l'URL d'autorisation Notion a ouvrir pour
     l'utilisateur. Retourne None si la config manque.
+
+    redirect_uri : REDIRECT_URI_MOBILE pour l'app mobile (Lot 5 Partie 3),
+    ou None/omis pour le flux web existant (utilise alors URL_RETOUR). La
+    valeur choisie ici doit etre celle renvoyee, inchangee, a
+    finaliser_connexion_notion (Notion l'exige identique entre les deux
+    etapes) -- on la stocke donc dans notion_oauth_temp le temps du flow.
 
     agent_id est enregistre avec la tentative dans notion_oauth_temp
     uniquement pour savoir vers quel agent rediriger l'utilisateur une fois
@@ -152,6 +167,8 @@ def demarrer_connexion_notion(user_id, agent_id):
     if not URL_RETOUR:
         logging.error("Connexion Notion impossible : URL_RETOUR_APP manquant.")
         return None
+
+    redirect_uri_effectif = redirect_uri or URL_RETOUR
 
     try:
         metadata = _decouvrir_metadata()
@@ -170,6 +187,7 @@ def demarrer_connexion_notion(user_id, agent_id):
             "agent_id": agent_id,
             "code_verifier": code_verifier,
             "client_ref": client_ref,
+            "redirect_uri": redirect_uri_effectif,
         }).execute()
     except Exception as e:
         logging.error(f"ERREUR ECRITURE notion_oauth_temp : {e}")
@@ -178,7 +196,7 @@ def demarrer_connexion_notion(user_id, agent_id):
     params = {
         "response_type": "code",
         "client_id": client_id,
-        "redirect_uri": URL_RETOUR,
+        "redirect_uri": redirect_uri_effectif,
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
         "state": state,
@@ -218,6 +236,10 @@ def finaliser_connexion_notion(code, state):
     # connexion Notion elle-meme est desormais scopee par user_id seul.
     code_verifier = tentative["code_verifier"]
     client_ref = tentative["client_ref"]
+    # Notion exige exactement le meme redirect_uri qu'a l'etape 1 (web ou
+    # mobile) -- on ne reconstruit jamais cette valeur, on la relit telle
+    # que stockee par demarrer_connexion_notion.
+    redirect_uri_effectif = tentative.get("redirect_uri") or URL_RETOUR
 
     supabase.table("notion_oauth_temp").delete().eq("state", state).execute()
 
@@ -232,7 +254,7 @@ def finaliser_connexion_notion(code, state):
         corps = {
             "grant_type": "authorization_code",
             "code": code,
-            "redirect_uri": URL_RETOUR,
+            "redirect_uri": redirect_uri_effectif,
             "client_id": client_id,
             "code_verifier": code_verifier,
         }
