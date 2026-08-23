@@ -1,5 +1,5 @@
 -- 22/08/2026, demande Bourama : "rendre la section bibliothèque plus
--- sérieuse, notamment la version publique" -- suite du guide Notion
+-- sérieuse, notamment la version publique", suite du guide Notion
 -- "Guide pour droit d'auteur" (Phase 1 : CGU + politique copyright +
 -- formulaire de signalement + procédure de retrait), appliquée aux DEUX
 -- surfaces publiques identifiées à l'audit :
@@ -27,7 +27,7 @@ alter table bibliotheque_publique add column if not exists retire_le timestamptz
 
 create index if not exists idx_bibliotheque_publique_statut on bibliotheque_publique(statut);
 
--- 2) Signalements -- couvre les deux surfaces ci-dessus avec une seule
+-- 2) Signalements : couvre les deux surfaces ci-dessus avec une seule
 -- table (type_signalement distingue laquelle). Toujours une seule des
 -- deux paires de colonnes cible renseignée selon le type. `lien_document`
 -- est un libellé de repli affiché à l'admin même si l'entrée ciblée a
@@ -42,7 +42,7 @@ create table if not exists signalements_bibliotheque (
 
   -- Cible si type_signalement = 'document_programme' : le document ET
   -- l'emplacement précis (many-to-many, voir bibliotheque_emplacements_
-  -- programme) -- le retrait ne déclasse QUE cet emplacement-là, jamais
+  -- programme). Le retrait ne déclasse QUE cet emplacement-là, jamais
   -- le fichier lui-même ni ses autres classements.
   fichier_id uuid references fichiers_uploades(id) on delete cascade,
   type_emplacement text,
@@ -67,10 +67,10 @@ create table if not exists signalements_bibliotheque (
 create index if not exists idx_signalements_bibliotheque_statut on signalements_bibliotheque(statut);
 create index if not exists idx_signalements_bibliotheque_created_at on signalements_bibliotheque(created_at desc);
 
--- 3) Contenu légal (CGU + politique de copyright) -- éditable sans
+-- 3) Contenu légal (CGU + politique de copyright), éditable sans
 -- déploiement de code, même principe que agents_administrateurs :
 -- table peuplée/modifiable directement par Bourama via le dashboard
--- Supabase (repli volontaire, pas de source Notion pour ce lot -- déjà
+-- Supabase (repli volontaire, pas de source Notion pour ce lot, déjà
 -- utilisée pour le system prompt, pas branchée ici pour rester simple).
 create table if not exists contenu_legal (
   cle text primary key check (cle in ('cgu', 'copyright')),

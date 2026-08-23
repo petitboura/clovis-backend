@@ -1,5 +1,5 @@
 """
-Contenu légal (CGU, politique de copyright) -- 22/08/2026, chantier
+Contenu légal (CGU, politique de copyright). 22/08/2026, chantier
 "rendre la bibliothèque publique plus sérieuse" (voir guide Notion
 "Guide pour droit d'auteur"). Lecture publique uniquement, aucune
 route d'écriture ici : la table `contenu_legal` est éditée directement

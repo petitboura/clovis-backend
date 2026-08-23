@@ -51,7 +51,7 @@ class FichierEmplacementReponse(BaseModel):
     created_at: str
     # 22/08, chantier signalements : ajoute_par (qui a classé CE document
     # à CET emplacement) et emplacement_public (True si cet emplacement
-    # est couvert par un plugin contribution_libre) -- ensemble ils
+    # est couvert par un plugin contribution_libre) : ensemble ils
     # permettent au frontend d'afficher un bouton "Signaler" uniquement
     # là où c'est pertinent (document visible publiquement), voir
     # SectionDocumentsBibliotheque.tsx.

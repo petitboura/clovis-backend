@@ -56,7 +56,7 @@ def lister_bibliotheque_publique(q: str | None = None):
     # Filtre statut="publie" (22/08, chantier signalements) : une entrée
     # retirée par un admin suite à un signalement reste en base (trace
     # pour l'audit) mais ne doit plus jamais réapparaître dans le
-    # catalogue -- voir api/signalements.py.
+    # catalogue, voir api/signalements.py.
     requete = (
         supabase.table("bibliotheque_publique")
         .select("id, nom, description, nom_fichier, type_mime, taille_octets, url_publique, created_at")

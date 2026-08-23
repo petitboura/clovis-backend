@@ -1,15 +1,15 @@
 """
 Signalements de contenu (bibliothèque publique + documents publics de
-programme) -- 22/08/2026, chantier "rendre la bibliothèque plus
+programme). 22/08/2026, chantier "rendre la bibliothèque plus
 sérieuse" (voir guide Notion "Guide pour droit d'auteur", Phase 1 :
 formulaire de signalement + procédure de retrait).
 
 Mode de modération choisi par Bourama : publication immédiate, retrait
 a posteriori sur signalement traité par un admin (_est_admin, voir
-api/permissions_hierarchie.py) -- pas de validation a priori.
+api/permissions_hierarchie.py), pas de validation a priori.
 
 Création ouverte à TOUT LE MONDE, y compris sans compte (un ayant
-droit externe -- éditeur, auteur -- n'a aucune raison d'avoir un compte
+droit externe (éditeur, auteur) n'a aucune raison d'avoir un compte
 Djiguignè) : utilisateur_optionnel, jamais utilisateur_courant, sur la
 route POST. Lecture/traitement réservés à l'admin.
 """

@@ -312,7 +312,7 @@ def declasser_document(user_id: str, fichier_id: str, type_cible: str, cible_id:
 def declasser_document_admin(fichier_id: str, type_cible: str, cible_id: str) -> dict:
     """Variante admin de declasser_document ci-dessus (22/08, chantier
     signalements) : retire un document d'UN emplacement précis SANS
-    vérification de propriété -- réservée à api/signalements.py après
+    vérification de propriété. Réservée à api/signalements.py après
     vérification _est_admin en amont, jamais exposée directement. Ne
     touche ni le fichier lui-même ni ses autres classements (même
     portée que declasser_document)."""
@@ -356,7 +356,7 @@ def lister_documents_emplacement(type_cible: str, cible_id: str) -> list[dict]:
     Renvoie `ajoute_par` par document (22/08, chantier signalements) :
     permet au frontend de savoir si CE document, à CET emplacement, a
     été ajouté par quelqu'un d'autre que le propriétaire (cas d'un
-    plugin contribution_libre) -- condition d'affichage du bouton
+    plugin contribution_libre) : condition d'affichage du bouton
     "Signaler", voir api/emplacements_bibliotheque_programme.py."""
     try:
         liens = (
