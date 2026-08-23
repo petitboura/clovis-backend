@@ -34,7 +34,7 @@ from groq import Groq
 
 from api.auth import supabase
 from core.main import get_secret, GROQ_PRIMARY, _construire_system_prompt, _ressemble_a_du_json_casse
-from core.notifications_push import envoyer_notification_push, notifications_push_disponible
+from core.notifications_push import envoyer_notification_push, un_canal_push_disponible
 
 COOLDOWN_VERIFICATION = timedelta(hours=6)  # ne re-vérifie pas une paire (agent, utilisateur) plus souvent que ça
 NB_MESSAGES_CONTEXTE = 10  # historique récent donné au modèle pour juger (réduit du 25/07 -- voir TAILLE_MAX_MESSAGE)
@@ -198,7 +198,7 @@ def verifier_relances_proactives() -> int:
     COOLDOWN_RELANCE -- puis laisse l'agent décider (_decider_relance).
     Renvoie le nombre de relances effectivement envoyées.
     """
-    if not notifications_push_disponible():
+    if not un_canal_push_disponible():
         return 0
 
     try:

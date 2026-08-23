@@ -48,7 +48,7 @@ from api.codes_partage import router_mes_codes, router_rattachements
 from api.outils_registre import router as outils_registre_router
 from api.appareils_mobiles import router as appareils_mobiles_router
 from core.serveur_mcp_generation import mcp_generation
-from core.notifications_push import traiter_rappels_echus, notifications_push_disponible
+from core.notifications_push import traiter_rappels_echus, un_canal_push_disponible
 from core.proactivite import verifier_relances_proactives
 from core.audit_programme import executer_audits_hebdomadaires
 from core.serveur_mcp_github import mcp_github
@@ -144,7 +144,7 @@ async def _lifespan(app: FastAPI):
     ):
         tache_planificateur = None
         tache_proactivite = None
-        if notifications_push_disponible():
+        if un_canal_push_disponible():
             tache_planificateur = asyncio.create_task(_boucle_planificateur_rappels())
             tache_proactivite = asyncio.create_task(_boucle_planificateur_proactivite())
         tache_audits = asyncio.create_task(_boucle_planificateur_audits())

@@ -19,3 +19,6 @@ weasyprint
 markdown
 pywebpush
 sympy
+google-auth
+PyJWT[crypto]
+h2

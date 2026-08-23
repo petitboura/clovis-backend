@@ -54,7 +54,7 @@ from core.generation_images import generer_image as _generer_image, image_genera
 from core.calcul_symbolique import calculer_symbolique as _calculer_symbolique, ErreurCalculSymbolique
 from core.notifications_push import (
     planifier_rappel as _planifier_rappel,
-    notifications_push_disponible,
+    un_canal_push_disponible,
 )
 from api.roles import (
     resoudre_destinataire_autorise as _resoudre_destinataire_autorise,
@@ -2779,16 +2779,19 @@ if site_deploiement_disponible():
             return "Erreur : le déploiement du site a échoué, réessaie."
 
 
-# Enregistré conditionnellement, gate par les clés VAPID (voir
-# notifications_push.py). Outil de ce fichier qui a besoin de connaître
-# l'identité de l'appelant (user_id/agent_id) : récupérés via
-# ctx.request_context.request.query_params, transmis dans l'URL par
-# _url_generation() (registre_outils.py) -- même mécanique reprise par
-# envoyer_message ci-dessous. NON TESTÉ EN CONDITIONS RÉELLES : si ça
-# échoue au premier essai, vérifier en premier que request_context.request
-# est bien accessible dans ce mode (stateless_http) -- c'est le point
-# d'incertitude documenté ici.
-if notifications_push_disponible():
+# Enregistré conditionnellement, gate par un_canal_push_disponible()
+# (voir notifications_push.py) -- élargi le 23/08/2026 (Lot 3 Partie 3
+# mobile) : VAPID (navigateur) OU FCM (Android) OU APNs (iOS), le
+# rappel part maintenant vers tous les canaux dont dispose
+# l'utilisateur, l'outil IA lui-même ne change pas. Outil de ce fichier
+# qui a besoin de connaître l'identité de l'appelant (user_id/agent_id) :
+# récupérés via ctx.request_context.request.query_params, transmis dans
+# l'URL par _url_generation() (registre_outils.py) -- même mécanique
+# reprise par envoyer_message ci-dessous. NON TESTÉ EN CONDITIONS
+# RÉELLES : si ça échoue au premier essai, vérifier en premier que
+# request_context.request est bien accessible dans ce mode
+# (stateless_http) -- c'est le point d'incertitude documenté ici.
+if un_canal_push_disponible():
     @mcp_generation.tool()
     def planifier_rappel(contenu: str, dans_minutes: int, ctx: Context) -> str:
         """

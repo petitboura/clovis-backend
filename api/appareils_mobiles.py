@@ -1,5 +1,10 @@
 """
 Ajoute le 23/08/2026, Bourama : Lot 1 Partie 3 (app mobile), socle.
+Etendu le 23/08/2026, Lot 3 (notifications & rappels) : enregistrement
+du token push natif (FCM/APNs), voir core/notifications_push.py pour
+la logique d'envoi (etendue, pas dupliquee -- meme systeme que les
+rappels navigateur existants).
+Etendu le 23/08/2026, Lot 5 (connecteurs tiers) : connecteurs Notion.
 
 Canal dedie entre l'app mobile Clovis (Android/iOS, depot
 clovis-mobile) et ce backend. Reutilise l'auth Supabase standard deja
@@ -7,10 +12,10 @@ en place (voir api/auth.py) : l'app mobile se connecte directement a
 Supabase avec le SDK natif, puis envoie son access_token en Bearer sur
 ces routes, exactement comme le fait clovis-frontend.
 
-Pour l'instant, deux capacites : synchroniser le temps passe par app
-(UsageStatsManager cote Android, Lot 1) et connecteurs tiers via
-clovis-backend (Lot 5, Notion en premier). Les autres capacites (lots
-2 a 4) viendront sur ce meme routeur ou des routeurs freres.
+Capacites couvertes ici : usage (Lot 1), token push natif (Lot 3),
+connecteurs tiers -- Notion en premier (Lot 5). Les autres capacites
+(fichiers -- Lot 2, controles de session -- Lot 4) viendront sur ce
+meme routeur ou des routeurs freres, a construire lot par lot.
 """
 
 import logging
@@ -23,6 +28,7 @@ from pydantic import BaseModel
 from api.auth import utilisateur_courant
 from core.erreurs import erreur_api
 from core.usage_appareil_mobile import enregistrer_usage, lire_usage
+from core.notifications_push import enregistrer_token_natif, supprimer_token_natif
 from connexions.notion import (
     demarrer_connexion_notion,
     finaliser_connexion_notion,
@@ -88,6 +94,45 @@ def obtenir_usage(jours: int = 7, utilisateur=Depends(utilisateur_courant)):
         raise erreur_api(500, "ECHEC_LECTURE_USAGE")
 
     return {"usage": lignes}
+
+
+class TokenPush(BaseModel):
+    plateforme: str  # "android" ou "ios"
+    token: str
+
+
+@router.post("/push-token", status_code=204)
+def enregistrer_push_token(payload: TokenPush, utilisateur=Depends(utilisateur_courant)):
+    """
+    CONTRAT APP MOBILE : appeler a chaque obtention/renouvellement du
+    token FCM (Android, onNewToken) ou APNs (iOS,
+    didRegisterForRemoteNotificationsWithDeviceToken) -- pas seulement
+    au premier lancement, le SDK peut renouveler ce token a tout moment.
+    """
+    if payload.plateforme not in ("android", "ios"):
+        raise erreur_api(400, "PLATEFORME_INCONNUE")
+    if not payload.token.strip():
+        raise erreur_api(400, "TOKEN_VIDE")
+
+    try:
+        enregistrer_token_natif(utilisateur.id, payload.plateforme, payload.token)
+    except Exception as e:
+        logging.error(f"ERREUR enregistrement token push mobile (utilisateur {utilisateur.id}) : {e}")
+        raise erreur_api(500, "ECHEC_ENREGISTREMENT_TOKEN")
+
+
+@router.delete("/push-token", status_code=204)
+def desinscrire_push_token(token: str, utilisateur=Depends(utilisateur_courant)):
+    """
+    CONTRAT APP MOBILE : appeler a la deconnexion (l'utilisateur se
+    deconnecte de son compte Clovis sur ce telephone) pour ne plus
+    recevoir de rappels sur cet appareil.
+    """
+    try:
+        supprimer_token_natif(utilisateur.id, token)
+    except Exception as e:
+        logging.error(f"ERREUR desinscription token push mobile (utilisateur {utilisateur.id}) : {e}")
+        raise erreur_api(500, "ECHEC_DESINSCRIPTION_TOKEN")
 
 
 # --- Lot 5 : connecteurs tiers (Notion en premier) ---
