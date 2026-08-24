@@ -1,0 +1,14 @@
+-- 24/08/2026, correction Bourama : la bibliothèque publique était cassée
+-- (lecture ET ajout impossibles, "Une erreur est survenue" côté frontend,
+-- confirmé par les logs Railway : "column bibliotheque_publique.nom_fichier
+-- does not exist").
+--
+-- Cause : la migration 2026_08_21_bibliotheque_publique_vrai_fichier.sql
+-- avait ajouté chemin_stockage/url_publique/type_mime/taille_octets pour
+-- stocker un vrai fichier uploadé, mais avait oublié nom_fichier -- alors
+-- que api/bibliotheque_publique.py lit et écrit cette colonne depuis le
+-- début (même schéma que fichiers_uploades, voir
+-- core/bibliotheque_fichiers.py). Appliquée en urgence directement sur
+-- Supabase le 24/08, ce fichier reprend la même migration pour garder
+-- l'historique cohérent avec le reste du dossier migrations/.
+alter table bibliotheque_publique add column if not exists nom_fichier text;
