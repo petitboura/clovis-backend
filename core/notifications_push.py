@@ -287,6 +287,123 @@ def _envoyer_apns(token: str, titre: str, corps: str) -> bool:
         return False
 
 
+def _envoyer_fcm_action(token: str, action_id: str, type_action: str) -> bool:
+    """
+    Meme contrat de retour que _envoyer_fcm, mais payload `data` different
+    et volontairement SANS title/body : ce n'est pas une notification a
+    montrer a l'utilisateur, c'est un signal d'execution silencieux (voir
+    onMessageReceived cote ClovisFirebaseMessagingService.kt, qui doit
+    distinguer type="action" de type="rappel" avant d'afficher quoi que
+    ce soit). Priorite haute pour les memes raisons Doze/App Standby que
+    _envoyer_fcm.
+    """
+    projet = _get_secret("FCM_PROJECT_ID")
+    url = f"https://fcm.googleapis.com/v1/projects/{projet}/messages:send"
+    corps_requete = {
+        "message": {
+            "token": token,
+            "data": {"type": "action", "action_id": action_id, "type_action": type_action},
+            "android": {"priority": "high"},
+        }
+    }
+    try:
+        reponse = httpx.post(
+            url,
+            headers={"Authorization": f"Bearer {_access_token_fcm()}"},
+            json=corps_requete,
+            timeout=10,
+        )
+        if reponse.status_code == 200:
+            return True
+        if reponse.status_code in (404,) or "UNREGISTERED" in reponse.text:
+            return False
+        logging.error(f"ERREUR FCM action (token={token[:12]}...) : {reponse.status_code} {reponse.text}")
+        return False
+    except Exception as e:
+        logging.error(f"ERREUR envoi FCM action (token={token[:12]}...) : {e}")
+        return False
+
+
+def _envoyer_apns_action(token: str, action_id: str, type_action: str) -> bool:
+    """
+    Equivalent iOS de _envoyer_fcm_action : push "content-available"
+    silencieux (pas d'alerte/son), l'app recoit l'evenement en tache de
+    fond via application(_:didReceiveRemoteNotification:) sans rien
+    afficher, exactement comme onMessageReceived cote Android.
+    """
+    url = f"https://api.push.apple.com/3/device/{token}"
+    corps_requete = {
+        "aps": {"content-available": 1},
+        "type": "action",
+        "action_id": action_id,
+        "type_action": type_action,
+    }
+    try:
+        with httpx.Client(http2=True) as client:
+            reponse = client.post(
+                url,
+                headers={
+                    "authorization": f"bearer {_jeton_apns()}",
+                    "apns-topic": APNS_BUNDLE_ID,
+                    "apns-priority": "5",  # priorite basse obligatoire pour un push silencieux (regle Apple)
+                    "apns-push-type": "background",
+                },
+                json=corps_requete,
+                timeout=10,
+            )
+        if reponse.status_code == 200:
+            return True
+        if reponse.status_code == 410 or (
+            reponse.status_code == 400 and "BadDeviceToken" in reponse.text
+        ):
+            return False
+        logging.error(f"ERREUR APNs action (token={token[:12]}...) : {reponse.status_code} {reponse.text}")
+        return False
+    except Exception as e:
+        logging.error(f"ERREUR envoi APNs action (token={token[:12]}...) : {e}")
+        return False
+
+
+def envoyer_action_appareil(user_id: str, action_id: str, type_action: str) -> int:
+    """
+    Reveille le telephone pour qu'il aille chercher une action en attente
+    (voir core/actions_appareil_mobile.py). Push SILENCIEUX -- contrairement
+    a envoyer_notification_push, ce n'est pas une notification a montrer a
+    l'utilisateur mais un signal d'execution. Seulement les canaux natifs
+    (FCM/APNs) : Web Push exclu, aucun mecanisme d'execution cote
+    navigateur pour ce lot (l'agent ne pilote que le telephone, pas
+    l'appareil sur lequel tourne clovis-frontend dans un onglet).
+    """
+    if not (_fcm_disponible() or _apns_disponible()):
+        raise RuntimeError("Aucun canal natif (FCM/APNs) configure pour les actions appareil.")
+
+    envoyes = 0
+    try:
+        res = supabase.table("appareils_mobiles_push_tokens").select(
+            "plateforme, token"
+        ).eq("user_id", user_id).execute()
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture tokens natifs pour action user={user_id}) : {e}")
+        return 0
+
+    for appareil in res.data or []:
+        plateforme, token = appareil["plateforme"], appareil["token"]
+        ok = False
+        if plateforme == "android" and _fcm_disponible():
+            ok = _envoyer_fcm_action(token, action_id, type_action)
+        elif plateforme == "ios" and _apns_disponible():
+            ok = _envoyer_apns_action(token, action_id, type_action)
+        else:
+            continue  # canal de cette plateforme pas configure, on ignore ce token
+
+        if ok:
+            envoyes += 1
+        else:
+            supprimer_token_natif(user_id, token)
+
+    return envoyes
+
+
 def envoyer_notification_push(user_id: str, titre: str, corps: str, url: str = None) -> int:
     """
     Envoie une notification push à TOUS les canaux de user_id --

@@ -5,6 +5,12 @@ du token push natif (FCM/APNs), voir core/notifications_push.py pour
 la logique d'envoi (etendue, pas dupliquee -- meme systeme que les
 rappels navigateur existants).
 Etendu le 23/08/2026, Lot 5 (connecteurs tiers) : connecteurs Notion.
+Etendu le 24/08/2026, Lot 1A (brancher le cerveau) : canal de decision
+generique -- l'app recoit une action via push (voir
+core/notifications_push.envoyer_action_appareil), vient la chercher ici,
+puis rapporte le resultat. Voir core/actions_appareil_mobile.py pour le
+detail et pour ce qui N'EST PAS encore branche a ce canal (aucun
+type_action reel emis par l'agent pour l'instant, voir ce module).
 
 Canal dedie entre l'app mobile Clovis (Android/iOS, depot
 clovis-mobile) et ce backend. Reutilise l'auth Supabase standard deja
@@ -29,6 +35,7 @@ from api.auth import utilisateur_courant
 from core.erreurs import erreur_api
 from core.usage_appareil_mobile import enregistrer_usage, lire_usage
 from core.notifications_push import enregistrer_token_natif, supprimer_token_natif
+from core.actions_appareil_mobile import lire_action, lire_actions_en_attente, marquer_resultat
 from connexions.notion import (
     demarrer_connexion_notion,
     finaliser_connexion_notion,
@@ -133,6 +140,58 @@ def desinscrire_push_token(token: str, utilisateur=Depends(utilisateur_courant))
     except Exception as e:
         logging.error(f"ERREUR desinscription token push mobile (utilisateur {utilisateur.id}) : {e}")
         raise erreur_api(500, "ECHEC_DESINSCRIPTION_TOKEN")
+
+
+# --- Lot 1A : canal de decision generique (brancher le cerveau) ---
+#
+# Aucune route ici ne DECIDE une action -- ca reste a construire cote agent
+# (voir core/actions_appareil_mobile.py, TODO note en tete de ce module).
+# Ces routes exposent seulement le canal generique de lecture/rapport.
+
+
+@router.get("/actions/en-attente")
+def obtenir_actions_en_attente(utilisateur=Depends(utilisateur_courant)):
+    """
+    CONTRAT APP MOBILE : filet de secours a appeler a chaque ouverture de
+    l'app, pour rattraper les actions decidees par Clovis pendant qu'elle
+    etait fermee/hors ligne (le push peut ne pas etre arrive).
+    """
+    return {"actions": lire_actions_en_attente(utilisateur.id)}
+
+
+@router.get("/actions/{action_id}")
+def obtenir_action(action_id: str, utilisateur=Depends(utilisateur_courant)):
+    """
+    CONTRAT APP MOBILE : appeler des reception du push type="action"
+    (action_id fourni dans le payload) pour recuperer type_action et
+    parametres complets.
+    """
+    action = lire_action(action_id, utilisateur.id)
+    if action is None:
+        raise erreur_api(404, "ACTION_INTROUVABLE")
+    return action
+
+
+class ResultatAction(BaseModel):
+    succes: bool
+    resultat: str = ""
+
+
+@router.post("/actions/{action_id}/resultat", status_code=204)
+def rapporter_resultat_action(
+    action_id: str, payload: ResultatAction, utilisateur=Depends(utilisateur_courant)
+):
+    """
+    CONTRAT APP MOBILE : appeler systematiquement apres avoir tente
+    d'executer une action recue (succes OU echec, y compris "type_action
+    non reconnu") pour que l'agent puisse relayer le resultat reel a
+    l'etudiant dans la conversation plutot que de rester silencieux.
+    """
+    try:
+        marquer_resultat(action_id, utilisateur.id, payload.succes, payload.resultat)
+    except Exception as e:
+        logging.error(f"ERREUR rapport resultat action (id={action_id}) : {e}")
+        raise erreur_api(500, "ECHEC_RAPPORT_RESULTAT")
 
 
 # --- Lot 5 : connecteurs tiers (Notion en premier) ---
