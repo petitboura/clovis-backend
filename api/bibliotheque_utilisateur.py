@@ -39,6 +39,74 @@ from codes_partage import propager_fichier_bibliotheque, propager_lien_bibliothe
 router = APIRouter(prefix="/api/bibliotheque", tags=["bibliotheque-utilisateur"])
 
 TAILLE_MAX_OCTETS = 50 * 1024 * 1024  # 50 Mo, même limite que la bibliothèque niveau agent
+BUCKET_BIBLIOTHEQUE_PUBLIQUE = "bibliotheque"  # même bucket que core/bibliotheque_fichiers.py, sous-dossier "publique/"
+
+
+def _indexer_et_propager(contenu, type_mime, nom_fichier, description, ligne, utilisateur, request):
+    """
+    Factorisé le 25/08 (Bourama : "rendre les fichiers de la bibliothèque
+    publique copiables vers sa bibliothèque privée") entre un upload
+    classique (uploader_document ci-dessous) et une copie depuis la
+    bibliothèque publique (copier_depuis_bibliotheque_publique plus bas) :
+    vectorisation selon le type réel du fichier, journal, et propagation
+    aux codes de partage -- identique dans les deux cas, seule la source
+    du contenu diffère (upload direct vs téléchargement depuis le storage
+    de la bibliothèque publique).
+    """
+    if type_mime == "application/pdf":
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(contenu)
+            chemin_temp = tmp.name
+        try:
+            indexer_pdf_bibliotheque(chemin_temp, fichier_id=ligne["id"], user_id=utilisateur.id)
+        except Exception as e:
+            # Non bloquant : le fichier est déjà stocké et retrouvable par
+            # chercher_fichier, seule la recherche par CONTENU (consulter_
+            # bibliotheque) sera indisponible pour celui-ci. On log fort
+            # pour pouvoir réindexer manuellement si besoin, mais on ne
+            # fait pas échouer l'upload -- déjà réussi à ce stade.
+            logging.error(f"ERREUR vectorisation PDF bibliothèque perso (fichier_id={ligne['id']}) : {e}")
+        finally:
+            try:
+                os.remove(chemin_temp)
+            except OSError:
+                pass
+    elif (type_mime or "").startswith("image/"):
+        # 17/08, Bourama : une image (photo de feuille d'exercice, etc.)
+        # doit être retrouvable par son contenu réel, pas seulement par
+        # son nom de fichier. Best-effort comme le PDF ci-dessus.
+        try:
+            description_image = decrire_image_bibliotheque(contenu, type_mime)
+            if description_image:
+                indexer_texte_bibliotheque(description_image, fichier_id=ligne["id"], user_id=utilisateur.id)
+        except Exception as e:
+            logging.error(f"ERREUR vectorisation image bibliothèque perso (fichier_id={ligne['id']}) : {e}")
+    elif (type_mime or "").startswith("audio/"):
+        try:
+            transcription_audio = transcrire_audio_bibliotheque(contenu, nom_fichier)
+            if transcription_audio:
+                indexer_texte_bibliotheque(transcription_audio, fichier_id=ligne["id"], user_id=utilisateur.id)
+        except Exception as e:
+            logging.error(f"ERREUR vectorisation audio bibliothèque perso (fichier_id={ligne['id']}) : {e}")
+
+    journaliser(
+        action="bibliotheque_perso.ajoute",
+        user_id=utilisateur.id,
+        cible_type="utilisateur",
+        cible_id=utilisateur.id,
+        details={"description": description, "type_mime": type_mime},
+        request=request,
+    )
+
+    # Propagation (14/08, système de codes de partage) : non bloquant, ne
+    # doit jamais faire échouer l'ajout original -- voir sa propre
+    # gestion d'erreur interne dans core/codes_partage.py.
+    try:
+        propager_fichier_bibliotheque(utilisateur.id, contenu, nom_fichier, type_mime, description)
+    except Exception as e:
+        logging.error(f"ERREUR propagation bibliothèque (fichier, {utilisateur.id}) : {e}")
+
+    return ligne
 
 
 @router.post("", status_code=201)
@@ -93,60 +161,69 @@ async def uploader_document(
     except Exception:
         raise erreur_api(500, "ECHEC_DU_STOCKAGE_REESSAIE")
 
-    if fichier.content_type == "application/pdf":
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(contenu)
-            chemin_temp = tmp.name
-        try:
-            indexer_pdf_bibliotheque(chemin_temp, fichier_id=ligne["id"], user_id=utilisateur.id)
-        except Exception as e:
-            # Non bloquant : le fichier est déjà stocké et retrouvable par
-            # chercher_fichier, seule la recherche par CONTENU (consulter_
-            # bibliotheque) sera indisponible pour celui-ci. On log fort
-            # pour pouvoir réindexer manuellement si besoin, mais on ne
-            # fait pas échouer l'upload -- déjà réussi à ce stade.
-            logging.error(f"ERREUR vectorisation PDF bibliothèque perso (fichier_id={ligne['id']}) : {e}")
-        finally:
-            try:
-                os.remove(chemin_temp)
-            except OSError:
-                pass
-    elif (fichier.content_type or "").startswith("image/"):
-        # 17/08, Bourama : une image (photo de feuille d'exercice, etc.)
-        # doit être retrouvable par son contenu réel, pas seulement par
-        # son nom de fichier. Best-effort comme le PDF ci-dessus.
-        try:
-            description_image = decrire_image_bibliotheque(contenu, fichier.content_type)
-            if description_image:
-                indexer_texte_bibliotheque(description_image, fichier_id=ligne["id"], user_id=utilisateur.id)
-        except Exception as e:
-            logging.error(f"ERREUR vectorisation image bibliothèque perso (fichier_id={ligne['id']}) : {e}")
-    elif (fichier.content_type or "").startswith("audio/"):
-        try:
-            transcription_audio = transcrire_audio_bibliotheque(contenu, nom_original)
-            if transcription_audio:
-                indexer_texte_bibliotheque(transcription_audio, fichier_id=ligne["id"], user_id=utilisateur.id)
-        except Exception as e:
-            logging.error(f"ERREUR vectorisation audio bibliothèque perso (fichier_id={ligne['id']}) : {e}")
+    return _indexer_et_propager(contenu, fichier.content_type, nom_original, description_finale, ligne, utilisateur, request)
 
-    journaliser(
-        action="bibliotheque_perso.ajoute",
-        user_id=utilisateur.id,
-        cible_type="utilisateur",
-        cible_id=utilisateur.id,
-        details={"description": description_finale, "type_mime": fichier.content_type},
-        request=request,
+
+@router.post("/copier-depuis-publique/{entree_id}", status_code=201)
+async def copier_depuis_bibliotheque_publique(
+    entree_id: str,
+    request: Request,
+    utilisateur=Depends(utilisateur_courant),
+):
+    """
+    Copie un fichier de la bibliothèque publique vers la bibliothèque
+    personnelle de l'utilisateur connecté (25/08, demande Bourama :
+    "rendre les fichiers de la bibliothèque publique uploadables/
+    copiables vers la bibliothèque privée"). Va chercher le fichier
+    directement dans le storage (même bucket que core/bibliotheque_
+    fichiers.py, sous-dossier "publique/", voir api/bibliotheque_
+    publique.py) plutôt que de re-télécharger l'URL publique en HTTP --
+    plus fiable, pas de dépendance réseau externe.
+
+    Traitement ensuite IDENTIQUE à un upload classique (_indexer_et_
+    propager) : vectorisation PDF/image/audio, journal, propagation aux
+    codes de partage -- une copie doit se comporter exactement comme si
+    l'utilisateur avait uploadé le fichier lui-même.
+    """
+    res = (
+        supabase.table("bibliotheque_publique")
+        .select("nom, description, nom_fichier, type_mime, chemin_stockage, statut")
+        .eq("id", entree_id)
+        .maybe_single()
+        .execute()
     )
+    if not res or not res.data or res.data["statut"] != "publie":
+        raise erreur_api(404, "ENTREE_INTROUVABLE")
 
-    # Propagation (14/08, système de codes de partage) : non bloquant, ne
-    # doit jamais faire échouer l'ajout original -- voir sa propre
-    # gestion d'erreur interne dans core/codes_partage.py.
+    entree = res.data
     try:
-        propager_fichier_bibliotheque(utilisateur.id, contenu, nom_original, fichier.content_type, description_finale)
+        contenu = supabase.storage.from_(BUCKET_BIBLIOTHEQUE_PUBLIQUE).download(entree["chemin_stockage"])
     except Exception as e:
-        logging.error(f"ERREUR propagation bibliothèque (fichier, {utilisateur.id}) : {e}")
+        logging.error(f"ERREUR téléchargement fichier bibliothèque publique ({entree_id}) : {e}")
+        raise erreur_api(500, "ECHEC_DU_STOCKAGE_REESSAIE")
 
-    return ligne
+    if len(contenu) == 0:
+        raise erreur_api(400, "FICHIER_VIDE")
+
+    nom_original = entree["nom_fichier"] or entree["nom"]
+    description_finale = (entree["description"] or "").strip() or entree["nom"]
+
+    try:
+        ligne = enregistrer_fichier(
+            contenu=contenu,
+            nom_fichier=nom_original,
+            type_mime=entree["type_mime"],
+            niveau="utilisateur",
+            uploade_par=utilisateur.id,
+            user_id=utilisateur.id,
+            description=description_finale,
+        )
+    except Exception:
+        raise erreur_api(500, "ECHEC_DU_STOCKAGE_REESSAIE")
+
+    return _indexer_et_propager(
+        contenu, entree["type_mime"], nom_original, description_finale, ligne, utilisateur, request
+    )
 
 
 class AjouterLienPayload(BaseModel):
