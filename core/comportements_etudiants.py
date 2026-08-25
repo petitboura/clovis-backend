@@ -503,6 +503,43 @@ def ajouter_comportement(
     }
 
 
+def importer_comportement_depuis_skill_md(
+    agent_id: str, etudiant_id: str, nom: str, skill_md: str, lien_type: str | None = None, lien_id: str | None = None
+) -> dict:
+    """25/08/2026, demande Bourama : uploader un fichier .md directement
+    dans "Mes comportements", GARDÉ TEL QUEL -- contrairement à
+    ajouter_comportement ci-dessus, ne passe PAS par _generer_skill
+    (Bourama : "gardé tel quel, sans y toucher"). `texte` (colonne
+    NOT NULL) est rempli avec le skill_md lui-même faute de "texte brut"
+    distinct ; `description` (envoyée au petit routeur) est extraite du
+    frontmatter s'il y en a un, vide sinon -- un skill sans description
+    reste sélectionnable manuellement en clic direct, seul le routeur
+    automatique risque de moins bien le proposer."""
+    correspondance = re.search(r"^description:\s*(.+)$", skill_md, re.MULTILINE)
+    description = correspondance.group(1).strip().strip('"') if correspondance else ""
+    ligne_a_inserer = {
+        "agent_id": agent_id,
+        "etudiant_id": etudiant_id,
+        "texte": skill_md,
+        "description": description,
+        "skill_md": skill_md,
+        "nom": nom.strip() or "Sans nom",
+        "lien_type": lien_type,
+        "lien_id": lien_id,
+    }
+    res = supabase.table("comportements_etudiants").insert(ligne_a_inserer).execute()
+    ligne = res.data[0]
+    return {
+        "id": ligne["id"],
+        "texte": ligne["texte"],
+        "description": ligne.get("description") or "",
+        "nom": ligne.get("nom") or "",
+        "lien_type": ligne.get("lien_type"),
+        "lien_id": ligne.get("lien_id"),
+        "actif": ligne.get("actif", True),
+    }
+
+
 def modifier_comportement(
     agent_id: str, etudiant_id: str, comportement_id: str, texte: str, nom: str | None = None
 ) -> dict | None:
@@ -696,6 +733,29 @@ def publier_comportement_public(agent_id: str, etudiant_id: str, comportement_id
             "description": source.data.get("description") or "",
             "texte": source.data["texte"],
             "skill_md": source.data.get("skill_md") or "",
+        })
+        .execute()
+    )
+    return ligne.data[0]
+
+
+def uploader_comportement_public(auteur_id: str, nom: str, description: str, skill_md: str) -> dict:
+    """25/08/2026, demande Bourama : uploader directement un fichier .md
+    dans le catalogue public des skills, publié immédiatement pour tout
+    le monde -- pas de passage par "Mes comportements" ni par le bouton
+    "Publier" existant (voir publier_comportement_public ci-dessus pour
+    ce second chemin). `texte` (colonne NOT NULL, normalement le texte
+    brut ayant servi à générer le skill via _generer_skill) est ici
+    rempli avec le contenu du .md lui-même : il n'y a pas de "texte brut"
+    séparé quand on uploade un skill déjà rédigé."""
+    ligne = (
+        supabase.table("comportements_publics")
+        .insert({
+            "auteur_id": auteur_id,
+            "nom": nom.strip() or "Sans nom",
+            "description": (description or "").strip(),
+            "texte": skill_md,
+            "skill_md": skill_md,
         })
         .execute()
     )

@@ -23,7 +23,7 @@ que sans_enseignant côté chat -- inoffensif si jamais appelé pour un
 agent qui n'affiche pas la section).
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel
 
 from api.auth import utilisateur_courant
@@ -32,6 +32,7 @@ from core.comportements_etudiants import (
     lister_comportements,
     lister_comportements_par_lien,
     ajouter_comportement,
+    importer_comportement_depuis_skill_md,
     modifier_comportement,
     attacher_comportement,
     supprimer_comportement,
@@ -137,6 +138,28 @@ def ajouter_mon_comportement(agent_id: str, payload: ComportementPayload, utilis
             agent_id, utilisateur.id, payload.texte, nom=payload.nom, lien_type=payload.lien_type, lien_id=payload.lien_id
         )
     )
+
+
+@router.post("/importer", response_model=Comportement, status_code=201)
+async def importer_mon_comportement(
+    agent_id: str,
+    fichier: UploadFile = File(...),
+    nom: str = Form(...),
+    utilisateur=Depends(utilisateur_courant),
+):
+    """25/08/2026, demande Bourama : uploader un fichier .md directement
+    dans "Mes comportements", gardé TEL QUEL (pas de régénération via
+    l'IA) -- voir importer_comportement_depuis_skill_md."""
+    if not nom.strip():
+        raise erreur_api(400, "NOM_REQUIS")
+    if not (fichier.filename or "").lower().endswith(".md"):
+        raise erreur_api(400, "FICHIER_MD_REQUIS")
+
+    contenu = (await fichier.read()).decode("utf-8", errors="replace").strip()
+    if not contenu:
+        raise erreur_api(400, "FICHIER_VIDE")
+
+    return _avec_libelle(importer_comportement_depuis_skill_md(agent_id, utilisateur.id, nom, contenu))
 
 
 @router.patch("/{comportement_id}", response_model=Comportement)
