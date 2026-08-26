@@ -196,7 +196,11 @@ OUTILS_SENSIBLES = {
     # que côté MCP externe (destructive_hint=True là-bas), transposées
     # ici via OUTILS_SENSIBLES puisque c'est le mécanisme propre à
     # l'agent interne.
-    "supprimer_document_bibliotheque",
+    # Consolidé le 26/08 en une action de gerer_document_bibliotheque (et
+    # non plus un outil séparé) : clé "nom_outil:action" -- seule cette
+    # action précise est sensible, pas les 11 autres du même outil (voir
+    # _est_outil_sensible dans main.py, qui sait lire ce format composite).
+    "gerer_document_bibliotheque:supprimer",
     "effacer_memoire",
     # Section "Notion-like" (Partie 2, lot 1/5, 20/08) -- même logique que
     # les suppressions programme ci-dessus : irréversible, toujours confirmé.
@@ -269,8 +273,14 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "tavily_map": {"label": "Cartographie d'un site", "icone": "Map", "onglet": "rechercher"},
     "tavily_research": {"label": "Recherche approfondie", "icone": "BookOpen", "onglet": "rechercher"},
     "chercher_fichier": {"label": "Recherche d'un fichier", "icone": "FolderSearch", "onglet": "rechercher"},
-    "consulter_bibliotheque": {"label": "Consultation de la bibliothèque", "icone": "Library", "onglet": "rechercher"},
-    "consulter_bibliotheque_publique": {"label": "Consultation des plugins publics", "icone": "Library", "onglet": "rechercher"},
+    # gerer_document_bibliotheque (consolidé le 26/08, ex 12 outils
+    # séparés -- consulter_bibliotheque, consulter_bibliotheque_publique,
+    # lister/ajouter/supprimer/classer/déclasser/ranger/retirer/lire_entier,
+    # voir serveur_mcp_generation.py) : une seule entrée d'affichage
+    # désormais, même onglet "rechercher" que l'ancien consulter_bibliotheque
+    # (seule action manuellement cliquable, les autres restent onglet=None
+    # en pratique côté modèle -- pas besoin de doublon d'entrée pour ça).
+    "gerer_document_bibliotheque": {"label": "Bibliothèque personnelle", "icone": "Library", "onglet": "rechercher"},
     "chercher_dans_base_connaissances": {"label": "Recherche dans la base de connaissances", "icone": "BookMarked", "onglet": "rechercher"},
     "lire_article_connaissance": {"label": "Lecture complète d'un article de la base de connaissances", "icone": "BookMarked", "onglet": "rechercher"},
     "liste_articles_connaissance": {"label": "Liste des articles de la base de connaissances", "icone": "BookMarked", "onglet": "rechercher"},
@@ -360,31 +370,21 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "ui_dessin": {"label": "Dessiner (géométrie, graphe, croquis)", "icone": "PenLine", "onglet": "utilitaires"},
     "ui_mode_vocal": {"label": "Mode vocal (bientôt disponible)", "icone": "AudioLines", "onglet": "utilitaires"},
 
-    # --- Bibliothèque (gestion, portée le 17/08 depuis serveur_mcp_espace.py) ---
-    # onglet=None comme le bloc "Programme adaptatif" juste en dessous et
-    # pour la même raison (bug corrigé le 17/08, voir son commentaire) :
-    # ce sont des outils que le modèle appelle lui-même en autonomie
-    # pendant la conversation, jamais des boutons à cliquer. Seule
-    # exception : consulter_bibliotheque (recherche par contenu, dans
-    # serveur_mcp_generation.py) reste "rechercher", inchangé, pas
-    # concerné par ce bloc.
-    "lister_bibliotheque": {"label": "Liste de la bibliothèque", "icone": "Library", "onglet": None},
-    "ajouter_lien_bibliotheque": {"label": "Ajout d'un lien à la bibliothèque", "icone": "Link", "onglet": None},
-    "ajouter_texte_bibliotheque": {"label": "Ajout d'une note à la bibliothèque", "icone": "FileText", "onglet": None},
-    "ajouter_document_bibliotheque": {"label": "Ajout d'un fichier à la bibliothèque", "icone": "FileUp", "onglet": None},
-    "supprimer_document_bibliotheque": {"label": "Suppression d'un document de la bibliothèque", "icone": "Trash2", "onglet": None},
-    "classer_document_dans_programme": {"label": "Classement d'un document dans le programme", "icone": "FolderInput", "onglet": None},
-    "retirer_document_du_programme": {"label": "Retrait d'un document du programme", "icone": "FolderOutput", "onglet": None},
+    # --- Bibliothèque (gestion) --- toutes les actions de gestion
+    # (lister/ajouter/supprimer/classer/déclasser/ranger/retirer/lire_entier)
+    # sont désormais dans gerer_document_bibliotheque ci-dessus (fusion du
+    # 26/08) -- plus d'entrées séparées ici, onglet=None n'avait de toute
+    # façon aucun effet visuel puisque ces actions n'étaient jamais des
+    # boutons cliquables (autonomie du modèle).
 
-    # --- Dossiers de la bibliothèque (22/08, demande Bourama) : même
-    # logique que le bloc juste au-dessus, onglet=None (autonomie du
-    # modèle, pas des boutons cliqués par l'utilisateur).
+    # --- Dossiers de la bibliothèque (22/08, demande Bourama) : NON
+    # consolidés (groupe distinct, resource "dossier" plutôt que
+    # "document"), onglet=None (autonomie du modèle, pas des boutons
+    # cliqués par l'utilisateur).
     "lister_dossiers_bibliotheque": {"label": "Liste des dossiers de la bibliothèque", "icone": "FolderTree", "onglet": None},
     "consulter_dossier_bibliotheque": {"label": "Consultation d'un dossier de la bibliothèque", "icone": "FolderOpen", "onglet": None},
     "ajouter_dossier_bibliotheque": {"label": "Création d'un dossier dans la bibliothèque", "icone": "FolderPlus", "onglet": None},
     "renommer_dossier_bibliotheque": {"label": "Renommage d'un dossier de la bibliothèque", "icone": "Pencil", "onglet": None},
-    "ranger_fichier_dans_dossier": {"label": "Rangement d'un fichier dans un dossier", "icone": "FolderInput", "onglet": None},
-    "retirer_fichier_du_dossier": {"label": "Retrait d'un fichier d'un dossier", "icone": "FolderOutput", "onglet": None},
     "supprimer_dossier_bibliotheque": {"label": "Suppression d'un dossier de la bibliothèque", "icone": "FolderX", "onglet": None},
 
     # --- Historique (porté le 17/08 depuis serveur_mcp_espace.py) ---

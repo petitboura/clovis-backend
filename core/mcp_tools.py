@@ -228,19 +228,16 @@ def lister_outils_autorises_pour_agent(get_secret, user_id=None, agent_id=None):
             outils_autorises = serveur.get("outils_autorises")
             if nom == "generation":
                 outils_autorises = _outils_generation_disponibles()
-                # consulter_bibliotheque (2026-08-01) : bibliothèque
-                # PERSONNELLE de l'utilisateur (voir "Mon espace"),
-                # scopée par user_id côté core/bibliotheque_rag.py, pas
-                # par la liste registre_outils_plateforme. Toujours
-                # proposée dès qu'un utilisateur est connecté.
-                if user_id and "consulter_bibliotheque" not in outils_autorises:
-                    outils_autorises = [*outils_autorises, "consulter_bibliotheque"]
-                # consulter_bibliotheque_publique (20/08) : même logique,
-                # pour les plugins publics (contribution_libre) -- pas
-                # scopée par registre_outils_plateforme non plus, voir
-                # docstring de l'outil dans serveur_mcp_generation.py.
-                if user_id and "consulter_bibliotheque_publique" not in outils_autorises:
-                    outils_autorises = [*outils_autorises, "consulter_bibliotheque_publique"]
+                # gerer_document_bibliotheque (2026-08-01, étendu 20/08,
+                # consolidé 26/08 -- ex consulter_bibliotheque +
+                # consulter_bibliotheque_publique + 10 autres outils) :
+                # bibliothèque PERSONNELLE et plugins publics de
+                # l'utilisateur (voir "Mon espace"), scopés par user_id
+                # côté core/bibliotheque_rag.py, pas par la liste
+                # registre_outils_plateforme. Toujours proposé dès qu'un
+                # utilisateur est connecté.
+                if user_id and "gerer_document_bibliotheque" not in outils_autorises:
+                    outils_autorises = [*outils_autorises, "gerer_document_bibliotheque"]
             if outils_autorises is not None:
                 outils = [o for o in outils if o.name in outils_autorises]
 

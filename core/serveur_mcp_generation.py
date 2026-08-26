@@ -399,458 +399,385 @@ def chercher_fichier(recherche: str, agent_id: str = None, user_id: str = None) 
 
 
 @mcp_generation.tool()
-def consulter_bibliotheque(question: str, ctx: Context) -> str:
-    """
-    Cherche dans la bibliothèque personnelle de documents PDF de CET
-    utilisateur (voir "Mon espace" côté app) les passages les plus
-    pertinents pour répondre à `question`, quel que soit l'agent avec
-    qui la conversation a lieu -- cette bibliothèque n'appartient à
-    aucun agent en particulier, elle est propre à l'utilisateur, et
-    invisible pour tout autre utilisateur.
-    Renvoie les extraits trouvés (à utiliser directement pour répondre),
-    chacun accompagné du nom et du lien de son document d'origine --
-    si tu juges utile de montrer un de ces documents en entier plutôt
-    que de le résumer, inclus son lien dans ta réponse (![...](url)
-    pour une image, [...](url) pour les autres types), il s'affichera
-    alors correctement selon son type. Renvoie un message si rien de
-    pertinent n'a été trouvé.
-    """
-    # BUG corrigé le 14/08 (constaté en prod : "Rien de pertinent trouvé"
-    # alors que la bibliothèque contenait bien des documents indexés) --
-    # `user_id` était avant un paramètre texte laissé au LLM (`user_id:
-    # str = None`), qui pouvait l'halluciner/inventer au lieu de recopier
-    # celui de ses instructions système (constaté : un UUID totalement
-    # inexistant en base). Même faille que consulter_memoire_utilisateur
-    # évitait déjà : on récupère maintenant le vrai user_id authentifié
-    # via ctx (query params de l'URL construite serveur-côté, voir
-    # _url_generation dans registre_outils.py), jamais depuis un
-    # paramètre que le modèle pourrait remplir lui-même -- ça fermait
-    # aussi une fuite potentielle (un utilisateur aurait pu, en théorie,
-    # demander à lire la bibliothèque d'un autre en donnant son id).
-    requete = ctx.request_context.request
-    user_id = requete.query_params.get("user_id")
-    if not user_id:
-        return "Aucune bibliothèque disponible : utilisateur non connecté."
-
-    try:
-        resultats = _chercher_bibliotheque(question, user_id=user_id)
-    except Exception:
-        return "Erreur : la recherche dans la bibliothèque a échoué, réessaie."
-
-    if not resultats:
-        return "Rien de pertinent trouvé dans la bibliothèque pour cette question."
-
-    # Correction du 17/08 (Bourama : "il faut que l'IA puisse le
-    # récupérer en entier aussi pour l'afficher s'il le décide, pas
-    # uniquement les vecteurs") -- avant ça, seul le texte des extraits
-    # était renvoyé, sans jamais dire de quel fichier ça venait. Chaque
-    # extrait porte maintenant sa source (nom + lien, voir
-    # recherche_bibliotheque et bibliotheque_rag.py) : à toi de choisir,
-    # une fois la question répondue à partir des extraits, si montrer le
-    # document original en entier apporte quelque chose -- pas besoin
-    # de le relire en entier pour ça, uniquement d'inclure son lien dans
-    # ta réponse (![...](url) pour une image, [...](url) pour les
-    # autres types) pour qu'il s'affiche correctement selon son type.
-    blocs = []
-    for r in resultats:
-        bloc = r["contenu"]
-        if r.get("nom_fichier") and r.get("url_publique"):
-            bloc += f"\n(Source : {r['nom_fichier']}, {r['url_publique']})"
-        blocs.append(bloc)
-
-    return "\n\n---\n\n".join(blocs)
-
-
-@mcp_generation.tool()
-def consulter_bibliotheque_publique(question: str, ctx: Context) -> str:
-    """
-    Cherche dans les PLUGINS PUBLICS (bibliothèques partagées, alimentées
-    par n'importe quel étudiant, voir migrations/2026_08_20_plugin_
-    bibliotheque_publique.sql) les passages les plus pertinents pour
-    répondre à `question`. Distinct de consulter_bibliotheque : ici les
-    documents ne sont pas propres à l'utilisateur, ils viennent de
-    plugins publiés par l'équipe et alimentés par toute la communauté.
-    La recherche se limite aux plugins publics du (des) niveau(x) de
-    l'utilisateur -- si aucun programme personnel n'est trouvé, cherche
-    dans tous les plugins publics, tous niveaux confondus.
-    Renvoie les extraits trouvés (à utiliser directement pour répondre),
-    chacun avec le nom et le lien de son document d'origine -- inclus ce
-    lien dans ta réponse si tu juges utile de montrer le document
-    (![...](url) pour une image, [...](url) pour les autres types).
-    Renvoie un message si rien de pertinent n'a été trouvé.
-    """
-    requete = ctx.request_context.request
-    user_id = requete.query_params.get("user_id")
-    if not user_id:
-        return "Aucune bibliothèque publique disponible : utilisateur non connecté."
-
-    try:
-        programmes = (
-            _supabase_memoire.table("programmes").select("niveau").eq("proprietaire_id", user_id).execute()
-        )
-        niveaux = list({p["niveau"] for p in (programmes.data or []) if p.get("niveau")})
-    except Exception as e:
-        logging.error(f"ERREUR consulter_bibliotheque_publique (niveaux user {user_id}) : {e}")
-        niveaux = []
-
-    try:
-        fichier_ids = _fichiers_des_plugins_publics(niveaux)
-        resultats = _chercher_bibliotheque_publique(question, fichier_ids)
-    except Exception:
-        return "Erreur : la recherche dans les plugins publics a échoué, réessaie."
-
-    if not resultats:
-        return "Rien de pertinent trouvé dans les plugins publics pour cette question."
-
-    blocs = []
-    for r in resultats:
-        bloc = r["contenu"]
-        if r.get("nom_fichier") and r.get("url_publique"):
-            bloc += f"\n(Source : {r['nom_fichier']}, {r['url_publique']})"
-        blocs.append(bloc)
-
-    return "\n\n---\n\n".join(blocs)
-
-
-# --- Bibliothèque (gestion en écriture) ---------------------------------
-# Ajouté le 17/08/2026 (demande Bourama : "ajoute à Clovis tout ce que
-# Claude peut faire") -- jusqu'ici seule la recherche par contenu
-# (consulter_bibliotheque, ci-dessus) existait côté agent interne, la
-# gestion (lister/ajouter/supprimer) n'existait que côté MCP externe
-# (core/serveur_mcp_espace.py). Même logique réutilisée telle quelle
-# (core/bibliotheque_fichiers.py, core/bibliotheque_rag.py,
-# core/codes_partage.py), seule l'enveloppe MCP change.
-
-@mcp_generation.tool()
-def lister_bibliotheque(ctx: Context) -> str:
-    """
-    Liste les documents/liens/notes de la bibliothèque personnelle de
-    CET utilisateur (section "Bibliothèque" de "Mon espace"), sans
-    recherche par contenu (voir consulter_bibliotheque pour ça).
-    Renvoie pour chaque entrée : id, description, type, date d'ajout.
-    """
-    user_id = ctx.request_context.request.query_params.get("user_id")
-    if not user_id:
-        return "Aucune bibliothèque disponible : utilisateur non connecté."
-    try:
-        fichiers = _lister_fichiers("utilisateur", user_id=user_id, origine="bibliotheque")
-    except Exception as e:
-        logging.error(f"ERREUR outil lister_bibliotheque : {e}")
-        return "Erreur : impossible de lister la bibliothèque, réessaie."
-    if not fichiers:
-        return "Bibliothèque vide pour l'instant."
-    lignes = []
-    for f in fichiers:
-        ligne = (
-            f"- {f.get('description') or f.get('nom_fichier')} "
-            f"({f.get('type_mime', 'inconnu')}, ajouté le {f.get('created_at', '?')})"
-        )
-        emplacements = _lister_emplacements_document(f["id"])
-        if emplacements:
-            ligne += " | classé dans : " + ", ".join(e["libelle"] for e in emplacements)
-        ligne += f" [id: {f['id']}]"
-        lignes.append(ligne)
-    return "\n".join(lignes)
-
-
-@mcp_generation.tool()
-def ajouter_lien_bibliotheque(url: str, titre: str, ctx: Context) -> str:
-    """
-    Ajoute un lien à la bibliothèque personnelle de CET utilisateur.
-    `url` : l'adresse à enregistrer. `titre` : nom donné à cette entrée
-    (utilise l'URL elle-même si aucun titre pertinent n'est fourni).
-    """
-    user_id = ctx.request_context.request.query_params.get("user_id")
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    url = (url or "").strip()
-    if not url:
-        return "Erreur : url manquante."
-    titre_final = (titre or url).strip()
-    try:
-        ligne = _enregistrer_lien(
-            url=url,
-            nom_fichier=titre_final,
-            niveau="utilisateur",
-            uploade_par=user_id,
-            user_id=user_id,
-            description=titre_final,
-        )
-    except Exception as e:
-        logging.error(f"ERREUR outil ajouter_lien_bibliotheque : {e}")
-        return "Erreur : impossible d'enregistrer ce lien, réessaie."
-    try:
-        _propager_lien_bibliotheque(user_id, url, titre_final, titre_final)
-    except Exception as e:
-        logging.error(f"ERREUR propagation ajouter_lien_bibliotheque : {e}")
-    return f"Lien ajouté (id {ligne['id']})."
-
-
-@mcp_generation.tool()
-def ajouter_texte_bibliotheque(contenu: str, titre: str, ctx: Context) -> str:
-    """
-    Ajoute une note de texte libre à la bibliothèque personnelle de CET
-    utilisateur (immédiatement consultable par consulter_bibliotheque).
-    `contenu` : le texte à enregistrer. `titre` : nom donné à cette note.
-    """
-    user_id = ctx.request_context.request.query_params.get("user_id")
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    contenu = (contenu or "").strip()
-    if not contenu:
-        return "Erreur : contenu vide."
-    titre = (titre or "").strip()
-    nom_fichier = f"{titre or 'Note'}.txt"
-    description = titre or (contenu[:80] + ("…" if len(contenu) > 80 else ""))
-    try:
-        ligne = _enregistrer_fichier(
-            contenu=contenu.encode("utf-8"),
-            nom_fichier=nom_fichier,
-            type_mime="text/plain",
-            niveau="utilisateur",
-            uploade_par=user_id,
-            user_id=user_id,
-            description=description,
-        )
-    except Exception as e:
-        logging.error(f"ERREUR outil ajouter_texte_bibliotheque : {e}")
-        return "Erreur : impossible d'enregistrer cette note, réessaie."
-    try:
-        _indexer_texte_bibliotheque(contenu, fichier_id=ligne["id"], user_id=user_id)
-    except Exception as e:
-        logging.error(f"ERREUR vectorisation ajouter_texte_bibliotheque : {e}")
-    try:
-        _propager_fichier_bibliotheque(user_id, contenu.encode("utf-8"), nom_fichier, "text/plain", titre or None)
-    except Exception as e:
-        logging.error(f"ERREUR propagation ajouter_texte_bibliotheque : {e}")
-    return f"Note ajoutée (id {ligne['id']})."
-
-
-@mcp_generation.tool()
-def ajouter_document_bibliotheque(
-    nom_fichier: str, type_mime: str, ctx: Context,
-    titre: str = "", description: str = "",
-    contenu_base64: str = "", url_fichier: str = "",
-    type_emplacement: str = "", emplacement_id: str = "",
+def gerer_document_bibliotheque(
+    action: str,
+    ctx: Context,
+    question: str = "",
+    fichier_id: str = "",
+    url: str = "",
+    titre: str = "",
+    contenu: str = "",
+    nom_fichier: str = "",
+    type_mime: str = "",
+    description: str = "",
+    contenu_base64: str = "",
+    url_fichier: str = "",
+    type_emplacement: str = "",
+    emplacement_id: str = "",
+    dossier_id: str = "",
 ) -> str:
     """
-    Ajoute un fichier (PDF, image, audio ou vidéo) à la bibliothèque
-    personnelle de CET utilisateur -- même effet que s'il l'avait
-    uploadé lui-même depuis "Mon espace".
+    Gère la bibliothèque personnelle de documents/liens/notes de CET
+    utilisateur (section "Bibliothèque" de "Mon espace") -- un seul outil,
+    plusieurs actions, au lieu de 12 outils séparés (consolidé le 26/08,
+    demande Bourama : "un outil puis paramètres c'est pas mieux que
+    plusieurs outils si on peut regrouper", pattern "action + paramètres"
+    -- réduit le catalogue envoyé au routeur/modèle et limite les
+    confusions de noms d'outils proches).
 
-    IMPORTANT -- ne jamais demander nom_fichier ni type_mime à
-    l'utilisateur, ce sont des détails techniques qu'il n'a pas à
-    connaître : déduis-les TOUJOURS toi-même du contexte déjà présent
-    dans la conversation. `nom_fichier` (avec son extension, ex.
-    "cours_svt.pdf") : reprends le nom donné entre crochets juste après
-    un upload ("[Document joint : cours_svt.pdf]", "[Image jointe :
-    ...]", etc.), ou à défaut l'extension visible à la fin de
-    `url_fichier` lui-même. `type_mime` (ex. "application/pdf",
-    "image/png", "audio/mpeg", "video/mp4") : déduis-le de cette même
-    extension (mapping standard extension -> type MIME) -- n'importe
-    quel type de fichier est accepté, pas seulement ceux cités en
-    exemple. Ces deux champs restent obligatoires pour l'outil, mais
-    c'est TOI qui les remplis, jamais l'utilisateur.
+    `action` doit être l'une de :
+    - "chercher" : cherche par contenu dans la bibliothèque PERSONNELLE.
+      Paramètre : `question`.
+    - "chercher_publique" : cherche par contenu dans les PLUGINS PUBLICS
+      (bibliothèques partagées par la communauté). Paramètre : `question`.
+    - "lister" : liste les documents/liens/notes de la bibliothèque
+      personnelle, sans recherche par contenu. Aucun paramètre.
+    - "ajouter_lien" : ajoute un lien. Paramètres : `url`, `titre`.
+    - "ajouter_texte" : ajoute une note de texte libre. Paramètres :
+      `contenu`, `titre`.
+    - "ajouter_fichier" : ajoute un fichier (PDF, image, audio ou vidéo).
+      Paramètres : `nom_fichier`, `type_mime` (obligatoires, à déduire
+      TOI-MÊME du contexte -- ne jamais les demander à l'utilisateur, ce
+      sont des détails techniques qu'il n'a pas à connaître : reprends le
+      nom donné entre crochets juste après un upload, ex. "[Document
+      joint : cours_svt.pdf]", ou l'extension visible à la fin de
+      `url_fichier` ; `type_mime` se déduit de cette même extension,
+      mapping standard extension -> type MIME). `titre`/`description`
+      optionnels. Fournir SOIT `url_fichier` (lien réel d'un fichier déjà
+      joint dans CETTE conversation, entre crochets "[Lien réel du
+      fichier : ...]" -- à privilégier systématiquement) SOIT
+      `contenu_base64` (jamais les deux vides). SI AUCUN FICHIER N'A ÉTÉ
+      JOINT dans cette conversation : n'appelle PAS cette action, dis
+      simplement à l'utilisateur d'uploader/joindre le fichier (bouton
+      trombone). `type_emplacement`/`emplacement_id` optionnels
+      ("programme"/"matiere"/"chapitre"/"exercice"/"examen" + son id) :
+      classe directement ce document à cet endroit du programme dès
+      l'ajout. Limite : 50 Mo.
+    - "supprimer" : supprime DÉFINITIVEMENT un document/lien/note.
+      Paramètre : `fichier_id`. SENSIBLE : demande toujours confirmation
+      à l'utilisateur avant d'être exécuté, quelle que soit la
+      formulation de sa demande.
+    - "classer" : classe un document existant à un emplacement du
+      programme. Paramètres : `fichier_id`, `type_emplacement` ("programme",
+      "matiere", "chapitre", "exercice" ou "examen"), `emplacement_id`. Un
+      même document peut être classé à plusieurs emplacements (appeler
+      plusieurs fois) ; reclasser au même endroit ne crée pas de doublon.
+    - "declasser" : retire un document d'un emplacement du programme (le
+      document reste dans la bibliothèque, seul ce classement précis
+      disparaît). Mêmes paramètres que "classer".
+    - "ranger_dossier" : range un fichier dans un dossier. Paramètres :
+      `fichier_id`, `dossier_id`. Un fichier peut être rangé dans
+      plusieurs dossiers à la fois.
+    - "retirer_dossier" : retire un fichier d'un dossier précis (le
+      fichier reste dans la bibliothèque et ses autres dossiers
+      éventuels). Paramètres : `fichier_id`, `dossier_id`.
+    - "lire_entier" : renvoie le texte intégral d'un document PDF/texte
+      déjà indexé (obtiens `fichier_id` via "chercher" ou chercher_fichier).
+      À utiliser quand les extraits de "chercher" ne suffisent pas. Ne
+      fonctionne que pour les documents PDF/texte (images/audio/vidéo non
+      vectorisés aujourd'hui -- utilise leur lien pour les afficher).
+      Paramètre : `fichier_id`.
 
-    SI AUCUN FICHIER N'A ÉTÉ JOINT DU TOUT dans cette conversation
-    (aucun "[Document joint : ...]", "[Image jointe : ...]", etc. --
-    donc ni nom ni URL disponibles nulle part) : n'appelle PAS cet
-    outil et ne demande surtout pas de lien ou de contenu base64 (trop
-    technique). Dis simplement à l'utilisateur d'uploader/joindre le
-    fichier dans la conversation (bouton trombone), rien d'autre --
-    une fois joint, tu pourras l'ajouter directement sans lui
-    redemander quoi que ce soit.
-
-    Fournir SOIT `url_fichier` SOIT `contenu_base64` (jamais les deux à
-    vide) : `url_fichier` -- lien réel d'un fichier déjà joint dans
-    CETTE conversation (celui donné entre crochets "[Lien réel du
-    fichier : ...]" après un upload chat) -- à privilégier
-    systématiquement quand ce lien est disponible, le fichier est alors
-    récupéré directement par le serveur, sans jamais faire transiter son
-    contenu par le modèle. `contenu_base64` -- contenu du fichier encodé
-    en base64 (jamais de contenu brut binaire), seulement si aucun lien
-    réel n'existe déjà. `titre`/`description` : vraiment optionnels,
-    propose-les si tu veux mais ne bloque jamais dessus -- repli
-    automatique sur le nom du fichier si absents. Limite : 50 Mo.
-    `type_emplacement`/`emplacement_id` : optionnels -- si fournis
-    ("programme"/"matiere"/"chapitre"/"exercice"/"examen" + son id),
-    classe directement ce document à cet endroit du programme dès
-    l'ajout.
+    Pour les dossiers eux-mêmes (créer/lister/renommer/supprimer un
+    dossier), voir les outils dédiés (section "Dossiers de la
+    bibliothèque personnelle" plus bas) -- non consolidés ici.
     """
     user_id = ctx.request_context.request.query_params.get("user_id")
     if not user_id:
         return "Erreur : utilisateur non authentifié."
 
-    type_mime = (type_mime or "").strip().lower()
-    if not type_mime:
-        return "Erreur : type de fichier manquant."
-
-    url_fichier = (url_fichier or "").strip()
-    contenu_base64 = (contenu_base64 or "").strip()
-    if not url_fichier and not contenu_base64:
-        return "Erreur : fournis url_fichier (lien réel d'un fichier déjà joint dans la conversation) ou contenu_base64."
-
-    if url_fichier:
+    if action == "chercher":
+        # BUG corrigé le 14/08 (constaté en prod : "Rien de pertinent
+        # trouvé" alors que la bibliothèque contenait bien des documents
+        # indexés) -- user_id vient de ctx (authentifié), jamais d'un
+        # paramètre que le modèle pourrait halluciner/inventer.
         try:
-            reponse = requests.get(url_fichier, timeout=30)
-            reponse.raise_for_status()
-            contenu = reponse.content
-        except Exception as e:
-            logging.error(f"ERREUR outil ajouter_document_bibliotheque (url_fichier={url_fichier}) : {e}")
-            return "Erreur : impossible de récupérer le fichier à cette URL."
-    else:
-        try:
-            contenu = base64.b64decode(contenu_base64, validate=True)
+            resultats = _chercher_bibliotheque(question, user_id=user_id)
         except Exception:
-            return "Erreur : contenu_base64 invalide (doit être du base64 valide)."
+            return "Erreur : la recherche dans la bibliothèque a échoué, réessaie."
+        if not resultats:
+            return "Rien de pertinent trouvé dans la bibliothèque pour cette question."
+        blocs = []
+        for r in resultats:
+            bloc = r["contenu"]
+            if r.get("nom_fichier") and r.get("url_publique"):
+                bloc += f"\n(Source : {r['nom_fichier']}, {r['url_publique']})"
+            blocs.append(bloc)
+        return "\n\n---\n\n".join(blocs)
 
-    if len(contenu) == 0:
-        return "Erreur : fichier vide."
-    if len(contenu) > _TAILLE_MAX_OCTETS_BIBLIOTHEQUE:
-        return "Erreur : fichier trop lourd (50 Mo max)."
-
-    nom_original = (nom_fichier or "fichier").strip()
-    titre = (titre or "").strip()
-    description = (description or "").strip()
-    description_finale = (
-        f"{titre} — {description}" if titre and description
-        else (description or titre or nom_original)
-    )
-
-    try:
-        ligne = _enregistrer_fichier(
-            contenu=contenu,
-            nom_fichier=nom_original,
-            type_mime=type_mime,
-            niveau="utilisateur",
-            uploade_par=user_id,
-            user_id=user_id,
-            description=description_finale,
-        )
-    except Exception as e:
-        logging.error(f"ERREUR outil ajouter_document_bibliotheque : {e}")
-        return "Erreur : impossible d'enregistrer ce fichier, réessaie."
-
-    if type_mime == "application/pdf":
-        chemin_temp = None
+    if action == "chercher_publique":
         try:
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-                tmp.write(contenu)
-                chemin_temp = tmp.name
-            _indexer_pdf_bibliotheque(chemin_temp, fichier_id=ligne["id"], user_id=user_id)
+            programmes = (
+                _supabase_memoire.table("programmes").select("niveau").eq("proprietaire_id", user_id).execute()
+            )
+            niveaux = list({p["niveau"] for p in (programmes.data or []) if p.get("niveau")})
         except Exception as e:
-            logging.error(f"ERREUR vectorisation ajouter_document_bibliotheque (fichier_id={ligne['id']}) : {e}")
-        finally:
-            if chemin_temp:
-                try:
-                    os.remove(chemin_temp)
-                except OSError:
-                    pass
-    elif type_mime.startswith("image/"):
+            logging.error(f"ERREUR gerer_document_bibliotheque (chercher_publique, niveaux user {user_id}) : {e}")
+            niveaux = []
         try:
-            description_image = _decrire_image_bibliotheque(contenu, type_mime)
-            if description_image:
-                _indexer_texte_bibliotheque(description_image, fichier_id=ligne["id"], user_id=user_id)
-        except Exception as e:
-            logging.error(f"ERREUR vectorisation image ajouter_document_bibliotheque (fichier_id={ligne['id']}) : {e}")
-    elif type_mime.startswith("audio/"):
+            fichier_ids = _fichiers_des_plugins_publics(niveaux)
+            resultats = _chercher_bibliotheque_publique(question, fichier_ids)
+        except Exception:
+            return "Erreur : la recherche dans les plugins publics a échoué, réessaie."
+        if not resultats:
+            return "Rien de pertinent trouvé dans les plugins publics pour cette question."
+        blocs = []
+        for r in resultats:
+            bloc = r["contenu"]
+            if r.get("nom_fichier") and r.get("url_publique"):
+                bloc += f"\n(Source : {r['nom_fichier']}, {r['url_publique']})"
+            blocs.append(bloc)
+        return "\n\n---\n\n".join(blocs)
+
+    if action == "lister":
         try:
-            transcription_audio = _transcrire_audio_bibliotheque(contenu, nom_original)
-            if transcription_audio:
-                _indexer_texte_bibliotheque(transcription_audio, fichier_id=ligne["id"], user_id=user_id)
+            fichiers = _lister_fichiers("utilisateur", user_id=user_id, origine="bibliotheque")
         except Exception as e:
-            logging.error(f"ERREUR vectorisation audio ajouter_document_bibliotheque (fichier_id={ligne['id']}) : {e}")
+            logging.error(f"ERREUR gerer_document_bibliotheque (lister) : {e}")
+            return "Erreur : impossible de lister la bibliothèque, réessaie."
+        if not fichiers:
+            return "Bibliothèque vide pour l'instant."
+        lignes = []
+        for f in fichiers:
+            ligne = (
+                f"- {f.get('description') or f.get('nom_fichier')} "
+                f"({f.get('type_mime', 'inconnu')}, ajouté le {f.get('created_at', '?')})"
+            )
+            emplacements = _lister_emplacements_document(f["id"])
+            if emplacements:
+                ligne += " | classé dans : " + ", ".join(e["libelle"] for e in emplacements)
+            ligne += f" [id: {f['id']}]"
+            lignes.append(ligne)
+        return "\n".join(lignes)
 
-    try:
-        _propager_fichier_bibliotheque(user_id, contenu, nom_original, type_mime, description_finale)
-    except Exception as e:
-        logging.error(f"ERREUR propagation ajouter_document_bibliotheque : {e}")
+    if action == "ajouter_lien":
+        url_val = (url or "").strip()
+        if not url_val:
+            return "Erreur : url manquante."
+        titre_final = (titre or url_val).strip()
+        try:
+            ligne = _enregistrer_lien(
+                url=url_val,
+                nom_fichier=titre_final,
+                niveau="utilisateur",
+                uploade_par=user_id,
+                user_id=user_id,
+                description=titre_final,
+            )
+        except Exception as e:
+            logging.error(f"ERREUR gerer_document_bibliotheque (ajouter_lien) : {e}")
+            return "Erreur : impossible d'enregistrer ce lien, réessaie."
+        try:
+            _propager_lien_bibliotheque(user_id, url_val, titre_final, titre_final)
+        except Exception as e:
+            logging.error(f"ERREUR propagation gerer_document_bibliotheque (ajouter_lien) : {e}")
+        return f"Lien ajouté (id {ligne['id']})."
 
-    message = f"Fichier ajouté (id {ligne['id']})."
-    if type_emplacement and emplacement_id:
-        if type_emplacement not in TYPES_EMPLACEMENT_BIBLIOTHEQUE:
-            message += f" Attention : type d'emplacement invalide ({type_emplacement}), pas classé dans le programme."
+    if action == "ajouter_texte":
+        contenu_val = (contenu or "").strip()
+        if not contenu_val:
+            return "Erreur : contenu vide."
+        titre_val = (titre or "").strip()
+        nom_fichier_note = f"{titre_val or 'Note'}.txt"
+        description_note = titre_val or (contenu_val[:80] + ("…" if len(contenu_val) > 80 else ""))
+        try:
+            ligne = _enregistrer_fichier(
+                contenu=contenu_val.encode("utf-8"),
+                nom_fichier=nom_fichier_note,
+                type_mime="text/plain",
+                niveau="utilisateur",
+                uploade_par=user_id,
+                user_id=user_id,
+                description=description_note,
+            )
+        except Exception as e:
+            logging.error(f"ERREUR gerer_document_bibliotheque (ajouter_texte) : {e}")
+            return "Erreur : impossible d'enregistrer cette note, réessaie."
+        try:
+            _indexer_texte_bibliotheque(contenu_val, fichier_id=ligne["id"], user_id=user_id)
+        except Exception as e:
+            logging.error(f"ERREUR vectorisation gerer_document_bibliotheque (ajouter_texte) : {e}")
+        try:
+            _propager_fichier_bibliotheque(user_id, contenu_val.encode("utf-8"), nom_fichier_note, "text/plain", titre_val or None)
+        except Exception as e:
+            logging.error(f"ERREUR propagation gerer_document_bibliotheque (ajouter_texte) : {e}")
+        return f"Note ajoutée (id {ligne['id']})."
+
+    if action == "ajouter_fichier":
+        type_mime_val = (type_mime or "").strip().lower()
+        if not type_mime_val:
+            return "Erreur : type de fichier manquant."
+        url_fichier_val = (url_fichier or "").strip()
+        contenu_base64_val = (contenu_base64 or "").strip()
+        if not url_fichier_val and not contenu_base64_val:
+            return "Erreur : fournis url_fichier (lien réel d'un fichier déjà joint dans la conversation) ou contenu_base64."
+        if url_fichier_val:
+            try:
+                reponse = requests.get(url_fichier_val, timeout=30)
+                reponse.raise_for_status()
+                contenu_fichier = reponse.content
+            except Exception as e:
+                logging.error(f"ERREUR gerer_document_bibliotheque (ajouter_fichier, url_fichier={url_fichier_val}) : {e}")
+                return "Erreur : impossible de récupérer le fichier à cette URL."
         else:
-            resultat = _classer_document(user_id, ligne["id"], type_emplacement, emplacement_id)
-            if resultat["ok"]:
-                libelle = _libelle_emplacement(type_emplacement, emplacement_id) or emplacement_id
-                message += f" Classé dans : {libelle}."
-            else:
-                message += f" Attention : pas classé dans le programme ({resultat['erreur']})"
-    return message
-
-
-@mcp_generation.tool()
-def supprimer_document_bibliotheque(fichier_id: str, ctx: Context) -> str:
-    """
-    Supprime DÉFINITIVEMENT un document/lien/note de la bibliothèque
-    personnelle de CET utilisateur, à partir de son id (voir
-    lister_bibliotheque). SENSIBLE : demande toujours confirmation à
-    l'utilisateur avant d'être exécuté, quelle que soit la formulation
-    de sa demande.
-    """
-    user_id = ctx.request_context.request.query_params.get("user_id")
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        res = (
-            _supabase_memoire.table("fichiers_uploades")
-            .select("user_id")
-            .eq("id", fichier_id)
-            .maybe_single()
-            .execute()
+            try:
+                contenu_fichier = base64.b64decode(contenu_base64_val, validate=True)
+            except Exception:
+                return "Erreur : contenu_base64 invalide (doit être du base64 valide)."
+        if len(contenu_fichier) == 0:
+            return "Erreur : fichier vide."
+        if len(contenu_fichier) > _TAILLE_MAX_OCTETS_BIBLIOTHEQUE:
+            return "Erreur : fichier trop lourd (50 Mo max)."
+        nom_original = (nom_fichier or "fichier").strip()
+        titre_val = (titre or "").strip()
+        description_val = (description or "").strip()
+        description_finale = (
+            f"{titre_val} — {description_val}" if titre_val and description_val
+            else (description_val or titre_val or nom_original)
         )
-    except Exception as e:
-        logging.error(f"ERREUR outil supprimer_document_bibliotheque (lecture) : {e}")
-        return "Erreur : impossible de supprimer ce document, réessaie."
-    if not res or not res.data:
-        return "Ce document est introuvable."
-    if res.data["user_id"] != user_id:
-        return "Ce document ne t'appartient pas."
-    try:
-        _supprimer_fichier(fichier_id)
-    except Exception as e:
-        logging.error(f"ERREUR outil supprimer_document_bibliotheque (suppression) : {e}")
-        return "Erreur : impossible de supprimer ce document, réessaie."
-    return "Document supprimé."
+        try:
+            ligne = _enregistrer_fichier(
+                contenu=contenu_fichier,
+                nom_fichier=nom_original,
+                type_mime=type_mime_val,
+                niveau="utilisateur",
+                uploade_par=user_id,
+                user_id=user_id,
+                description=description_finale,
+            )
+        except Exception as e:
+            logging.error(f"ERREUR gerer_document_bibliotheque (ajouter_fichier) : {e}")
+            return "Erreur : impossible d'enregistrer ce fichier, réessaie."
+        if type_mime_val == "application/pdf":
+            chemin_temp = None
+            try:
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                    tmp.write(contenu_fichier)
+                    chemin_temp = tmp.name
+                _indexer_pdf_bibliotheque(chemin_temp, fichier_id=ligne["id"], user_id=user_id)
+            except Exception as e:
+                logging.error(f"ERREUR vectorisation gerer_document_bibliotheque (ajouter_fichier, fichier_id={ligne['id']}) : {e}")
+            finally:
+                if chemin_temp:
+                    try:
+                        os.remove(chemin_temp)
+                    except OSError:
+                        pass
+        elif type_mime_val.startswith("image/"):
+            try:
+                description_image = _decrire_image_bibliotheque(contenu_fichier, type_mime_val)
+                if description_image:
+                    _indexer_texte_bibliotheque(description_image, fichier_id=ligne["id"], user_id=user_id)
+            except Exception as e:
+                logging.error(f"ERREUR vectorisation image gerer_document_bibliotheque (ajouter_fichier, fichier_id={ligne['id']}) : {e}")
+        elif type_mime_val.startswith("audio/"):
+            try:
+                transcription_audio = _transcrire_audio_bibliotheque(contenu_fichier, nom_original)
+                if transcription_audio:
+                    _indexer_texte_bibliotheque(transcription_audio, fichier_id=ligne["id"], user_id=user_id)
+            except Exception as e:
+                logging.error(f"ERREUR vectorisation audio gerer_document_bibliotheque (ajouter_fichier, fichier_id={ligne['id']}) : {e}")
+        try:
+            _propager_fichier_bibliotheque(user_id, contenu_fichier, nom_original, type_mime_val, description_finale)
+        except Exception as e:
+            logging.error(f"ERREUR propagation gerer_document_bibliotheque (ajouter_fichier) : {e}")
+        message = f"Fichier ajouté (id {ligne['id']})."
+        if type_emplacement and emplacement_id:
+            if type_emplacement not in TYPES_EMPLACEMENT_BIBLIOTHEQUE:
+                message += f" Attention : type d'emplacement invalide ({type_emplacement}), pas classé dans le programme."
+            else:
+                resultat = _classer_document(user_id, ligne["id"], type_emplacement, emplacement_id)
+                if resultat["ok"]:
+                    libelle = _libelle_emplacement(type_emplacement, emplacement_id) or emplacement_id
+                    message += f" Classé dans : {libelle}."
+                else:
+                    message += f" Attention : pas classé dans le programme ({resultat['erreur']})"
+        return message
 
+    if action == "supprimer":
+        try:
+            res = (
+                _supabase_memoire.table("fichiers_uploades")
+                .select("user_id")
+                .eq("id", fichier_id)
+                .maybe_single()
+                .execute()
+            )
+        except Exception as e:
+            logging.error(f"ERREUR gerer_document_bibliotheque (supprimer, lecture) : {e}")
+            return "Erreur : impossible de supprimer ce document, réessaie."
+        if not res or not res.data:
+            return "Ce document est introuvable."
+        if res.data["user_id"] != user_id:
+            return "Ce document ne t'appartient pas."
+        try:
+            _supprimer_fichier(fichier_id)
+        except Exception as e:
+            logging.error(f"ERREUR gerer_document_bibliotheque (supprimer, suppression) : {e}")
+            return "Erreur : impossible de supprimer ce document, réessaie."
+        return "Document supprimé."
 
-@mcp_generation.tool()
-def classer_document_dans_programme(fichier_id: str, type_emplacement: str, emplacement_id: str, ctx: Context) -> str:
-    """
-    Classe un document de la bibliothèque personnelle à un emplacement
-    du programme de CET utilisateur. `type_emplacement` : "programme",
-    "matiere", "chapitre", "exercice" ou "examen". `emplacement_id` : id
-    de cet élément précis du programme. Un même document peut être
-    classé à plusieurs emplacements (appeler cet outil plusieurs fois) ;
-    reclasser au même endroit ne crée pas de doublon.
-    """
-    user_id = ctx.request_context.request.query_params.get("user_id")
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    if type_emplacement not in TYPES_EMPLACEMENT_BIBLIOTHEQUE:
-        return f"Erreur : type d'emplacement invalide, utilise l'un de {TYPES_EMPLACEMENT_BIBLIOTHEQUE}."
-    resultat = _classer_document(user_id, fichier_id, type_emplacement, emplacement_id)
-    if not resultat["ok"]:
-        return f"Erreur : {resultat['erreur']}"
-    libelle = _libelle_emplacement(type_emplacement, emplacement_id) or emplacement_id
-    return f"Document classé dans : {libelle}."
+    if action == "classer":
+        if type_emplacement not in TYPES_EMPLACEMENT_BIBLIOTHEQUE:
+            return f"Erreur : type d'emplacement invalide, utilise l'un de {TYPES_EMPLACEMENT_BIBLIOTHEQUE}."
+        resultat = _classer_document(user_id, fichier_id, type_emplacement, emplacement_id)
+        if not resultat["ok"]:
+            return f"Erreur : {resultat['erreur']}"
+        libelle = _libelle_emplacement(type_emplacement, emplacement_id) or emplacement_id
+        return f"Document classé dans : {libelle}."
 
+    if action == "declasser":
+        resultat = _declasser_document(user_id, fichier_id, type_emplacement, emplacement_id)
+        if not resultat["ok"]:
+            return f"Erreur : {resultat['erreur']}"
+        return "Document retiré de cet emplacement du programme."
 
-@mcp_generation.tool()
-def retirer_document_du_programme(fichier_id: str, type_emplacement: str, emplacement_id: str, ctx: Context) -> str:
-    """
-    Retire un document de la bibliothèque d'un emplacement du programme
-    (le document reste dans la bibliothèque, seul ce classement précis
-    disparaît). Mêmes paramètres que classer_document_dans_programme.
-    """
-    user_id = ctx.request_context.request.query_params.get("user_id")
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    resultat = _declasser_document(user_id, fichier_id, type_emplacement, emplacement_id)
-    if not resultat["ok"]:
-        return f"Erreur : {resultat['erreur']}"
-    return "Document retiré de cet emplacement du programme."
+    if action == "ranger_dossier":
+        proprietaire = _proprietaire_dossier(dossier_id)
+        if proprietaire is None:
+            return "Ce dossier est introuvable."
+        if proprietaire != user_id:
+            return "Ce dossier ne t'appartient pas."
+        try:
+            res = _supabase.table("fichiers_uploades").select("user_id").eq("id", fichier_id).maybe_single().execute()
+        except Exception as e:
+            logging.error(f"ERREUR gerer_document_bibliotheque (ranger_dossier, lecture fichier) : {e}")
+            return "Erreur : impossible de ranger ce fichier, réessaie."
+        if not res or not res.data:
+            return "Ce fichier est introuvable."
+        if res.data["user_id"] != user_id:
+            return "Ce fichier ne t'appartient pas."
+        try:
+            _ranger_fichier(fichier_id, dossier_id)
+        except Exception as e:
+            logging.error(f"ERREUR gerer_document_bibliotheque (ranger_dossier) : {e}")
+            return "Erreur : impossible de ranger ce fichier, réessaie."
+        return "Fichier rangé dans le dossier."
+
+    if action == "retirer_dossier":
+        proprietaire = _proprietaire_dossier(dossier_id)
+        if proprietaire is None:
+            return "Ce dossier est introuvable."
+        if proprietaire != user_id:
+            return "Ce dossier ne t'appartient pas."
+        try:
+            _retirer_fichier(fichier_id, dossier_id)
+        except Exception as e:
+            logging.error(f"ERREUR gerer_document_bibliotheque (retirer_dossier) : {e}")
+            return "Erreur : impossible de retirer ce fichier, réessaie."
+        return "Fichier retiré du dossier."
+
+    if action == "lire_entier":
+        texte = _lire_document_bibliotheque_en_entier(fichier_id, user_id=user_id)
+        if texte is None:
+            return "Rien à lire pour ce fichier : soit il n'existe pas ou ne t'appartient pas, soit ce n'est pas un PDF/texte indexé."
+        return texte
+
+    return (
+        f"Erreur : action '{action}' inconnue. Actions valides : chercher, chercher_publique, "
+        "lister, ajouter_lien, ajouter_texte, ajouter_fichier, supprimer, classer, declasser, "
+        "ranger_dossier, retirer_dossier, lire_entier."
+    )
 
 
 # --- Dossiers de la bibliothèque personnelle (22/08, demande Bourama,
@@ -979,60 +906,6 @@ def renommer_dossier_bibliotheque(dossier_id: str, nouveau_nom: str, ctx: Contex
     return f"Dossier renommé en « {nouveau_nom} »."
 
 
-@mcp_generation.tool()
-def ranger_fichier_dans_dossier(fichier_id: str, dossier_id: str, ctx: Context) -> str:
-    """
-    Range un fichier de la bibliothèque personnelle de CET utilisateur
-    dans un dossier. Un fichier peut être rangé dans plusieurs dossiers
-    à la fois : ranger un fichier déjà présent ailleurs l'ajoute
-    simplement à ce dossier en plus, sans le retirer des autres.
-    """
-    user_id = ctx.request_context.request.query_params.get("user_id")
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    proprietaire = _proprietaire_dossier(dossier_id)
-    if proprietaire is None:
-        return "Ce dossier est introuvable."
-    if proprietaire != user_id:
-        return "Ce dossier ne t'appartient pas."
-    try:
-        res = _supabase.table("fichiers_uploades").select("user_id").eq("id", fichier_id).maybe_single().execute()
-    except Exception as e:
-        logging.error(f"ERREUR outil ranger_fichier_dans_dossier (lecture fichier) : {e}")
-        return "Erreur : impossible de ranger ce fichier, réessaie."
-    if not res or not res.data:
-        return "Ce fichier est introuvable."
-    if res.data["user_id"] != user_id:
-        return "Ce fichier ne t'appartient pas."
-    try:
-        _ranger_fichier(fichier_id, dossier_id)
-    except Exception as e:
-        logging.error(f"ERREUR outil ranger_fichier_dans_dossier : {e}")
-        return "Erreur : impossible de ranger ce fichier, réessaie."
-    return "Fichier rangé dans le dossier."
-
-
-@mcp_generation.tool()
-def retirer_fichier_du_dossier(fichier_id: str, dossier_id: str, ctx: Context) -> str:
-    """
-    Retire un fichier d'un dossier précis (le fichier reste dans la
-    bibliothèque et dans ses autres dossiers éventuels : seul ce
-    rattachement précis disparaît).
-    """
-    user_id = ctx.request_context.request.query_params.get("user_id")
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    proprietaire = _proprietaire_dossier(dossier_id)
-    if proprietaire is None:
-        return "Ce dossier est introuvable."
-    if proprietaire != user_id:
-        return "Ce dossier ne t'appartient pas."
-    try:
-        _retirer_fichier(fichier_id, dossier_id)
-    except Exception as e:
-        logging.error(f"ERREUR outil retirer_fichier_du_dossier : {e}")
-        return "Erreur : impossible de retirer ce fichier, réessaie."
-    return "Fichier retiré du dossier."
 
 
 @mcp_generation.tool()
@@ -1058,29 +931,6 @@ def supprimer_dossier_bibliotheque(dossier_id: str, ctx: Context) -> str:
         logging.error(f"ERREUR outil supprimer_dossier_bibliotheque : {e}")
         return "Erreur : impossible de supprimer ce dossier, réessaie."
     return "Dossier supprimé."
-
-
-@mcp_generation.tool()
-def lire_document_bibliotheque_en_entier(fichier_id: str, ctx: Context) -> str:
-    """
-    Renvoie le texte intégral d'un document PDF/texte déjà indexé dans
-    la bibliothèque personnelle de CET utilisateur (obtiens `fichier_id`
-    via consulter_bibliotheque ou chercher_fichier). À utiliser quand
-    les extraits de consulter_bibliotheque ne suffisent pas et qu'il te
-    faut vraiment tout le contenu (17/08, demande Bourama). Ne
-    fonctionne que pour les documents PDF/texte (les images/audio/vidéo
-    ne sont pas vectorisés aujourd'hui, donc rien à recoller pour eux --
-    utilise leur lien pour les afficher plutôt).
-    """
-    requete = ctx.request_context.request
-    user_id = requete.query_params.get("user_id")
-    if not user_id:
-        return "Aucune bibliothèque disponible : utilisateur non connecté."
-
-    texte = _lire_document_bibliotheque_en_entier(fichier_id, user_id=user_id)
-    if texte is None:
-        return "Rien à lire pour ce fichier : soit il n'existe pas ou ne t'appartient pas, soit ce n'est pas un PDF/texte indexé."
-    return texte
 
 
 @mcp_generation.tool()

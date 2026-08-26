@@ -1293,33 +1293,37 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         # explicitement calcul simple, connaissance générale stable et
         # salutation/conversation normale.
         # CORRECTIF 2026-08-15 (signalé par Bourama, test réel :
-        # consulter_bibliotheque n'était suggéré que quand le mot
-        # "bibliothèque" apparaissait littéralement dans la question) :
-        # même leçon que le correctif du 31/07 ci-dessus -- un petit
-        # modèle 8B a besoin d'un exemple concret pour généraliser une
-        # intention, sinon il retombe sur du matching littéral. La
-        # description de l'outil dit CE QU'IL cherche (PDF de la
-        # bibliothèque perso), pas QUAND le déclencher -- c'est ce que
+        # gerer_document_bibliotheque (action "chercher") n'était suggéré
+        # que quand le mot "bibliothèque" apparaissait littéralement dans
+        # la question) : même leçon que le correctif du 31/07 ci-dessus --
+        # un petit modèle 8B a besoin d'un exemple concret pour
+        # généraliser une intention, sinon il retombe sur du matching
+        # littéral. La description de l'outil dit CE QU'IL cherche (PDF de
+        # la bibliothèque perso), pas QUAND le déclencher -- c'est ce que
         # cet exemple comble.
-        "IMPORTANT : consulter_bibliotheque doit être suggéré dès que la "
-        "question porte sur le contenu d'un cours, chapitre, exercice ou "
-        "document que l'étudiant a pu uploader dans sa bibliothèque "
-        "personnelle -- même si le mot \"bibliothèque\" n'apparaît jamais "
-        "dans la question. Exemples qui DOIVENT suggérer cet outil : "
-        "\"explique-moi le chapitre 3\", \"résume mon cours sur les "
-        "intégrales\", \"qu'est-ce que dit mon document sur la "
+        "IMPORTANT : gerer_document_bibliotheque (action \"chercher\") doit "
+        "être suggéré dès que la question porte sur le contenu d'un cours, "
+        "chapitre, exercice ou document que l'étudiant a pu uploader dans "
+        "sa bibliothèque personnelle -- même si le mot \"bibliothèque\" "
+        "n'apparaît jamais dans la question. Exemples qui DOIVENT suggérer "
+        "cet outil : \"explique-moi le chapitre 3\", \"résume mon cours "
+        "sur les intégrales\", \"qu'est-ce que dit mon document sur la "
         "photosynthèse ?\", \"aide-moi avec l'exercice 4\". Ne te fie "
         "jamais au mot \"bibliothèque\" lui-même.\n\n"
+        # MAJ 2026-08-26 (consolidation de 12 outils bibliothèque en un
+        # seul, gerer_document_bibliotheque) : ce renvoi de nom remplace
+        # l'ancien consulter_bibliotheque -- même règle, même exemples.
         # AJOUT 2026-08-18 (demande Bourama, test réel : confusion entre
-        # consulter_bibliotheque et chercher_dans_base_connaissances sur
-        # la question "où trouve-tu dans ma base de connaissance ?") : le
-        # routeur n'avait aucune règle pour ces outils, seul
-        # consulter_bibliotheque en avait une -- il retombait donc par
-        # défaut sur la bibliothèque à chaque fois qu'un utilisateur
-        # disait "base de connaissance", alors que ce sont deux choses
-        # différentes.
-        "IMPORTANT : ne confonds jamais consulter_bibliotheque (documents "
-        "PERSONNELS que l'étudiant a lui-même uploadés) avec le groupe "
+        # consulter_bibliotheque (devenu gerer_document_bibliotheque) et
+        # chercher_dans_base_connaissances sur la question "où trouve-tu
+        # dans ma base de connaissance ?") : le routeur n'avait aucune
+        # règle pour ces outils, seul consulter_bibliotheque en avait une
+        # -- il retombait donc par défaut sur la bibliothèque à chaque
+        # fois qu'un utilisateur disait "base de connaissance", alors que
+        # ce sont deux choses différentes.
+        "IMPORTANT : ne confonds jamais gerer_document_bibliotheque "
+        "(action \"chercher\", documents PERSONNELS que l'étudiant a "
+        "lui-même uploadés) avec le groupe "
         "chercher_dans_base_connaissances / lire_article_connaissance / "
         "liste_articles_connaissance / obtenir_fichier_connaissance "
         "(contenu de référence préparé à l'avance par l'équipe Clovis SUR "
@@ -1351,8 +1355,9 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         "liste exhaustive de cas valides. "
         "Règle de tri simple entre les deux mondes : \"mes documents à "
         "moi\" (mon cours, mon exercice, mon fichier) -> "
-        "consulter_bibliotheque ; \"Clovis / l'application\" (même "
-        "vaguement) -> le groupe base de connaissances.\n\n"
+        "gerer_document_bibliotheque (action \"chercher\") ; \"Clovis / "
+        "l'application\" (même vaguement) -> le groupe base de "
+        "connaissances.\n\n"
         # AJOUT 2026-08-22 (demande Bourama : "les skills ont été
         # corrigés visuellement, mais intérieurement non, il faut que
         # le LLM soit au courant") : lister_comportements/
@@ -1960,6 +1965,28 @@ def _extraire_fichiers_generes(resultat_brut):
     return fichiers
 
 
+def _est_outil_sensible(appel):
+    """
+    True si cet appel doit déclencher la confirmation utilisateur
+    (OUTILS_SENSIBLES). Gère deux formats dans OUTILS_SENSIBLES :
+    - un nom d'outil seul ("effacer_memoire") -> sensible quel que soit
+      l'appel.
+    - un composite "nom_outil:action" ("gerer_document_bibliotheque:supprimer")
+      -> sensible seulement si l'argument `action` de CET appel vaut
+      exactement cette valeur. Nécessaire depuis la consolidation du
+      26/08 (plusieurs outils fusionnés en un seul avec un paramètre
+      `action`, dont certaines actions sont sensibles et d'autres non).
+    """
+    if appel["name"] in OUTILS_SENSIBLES:
+        return True
+    try:
+        arguments = json.loads(appel["arguments"] or "{}")
+    except Exception:
+        arguments = {}
+    action = arguments.get("action")
+    return bool(action) and f"{appel['name']}:{action}" in OUTILS_SENSIBLES
+
+
 def _traiter_appels(appels, messages_agent, table_routage):
     """
     Execute une liste d'appels d'outils, en ajoutant le resultat de chacun
@@ -1977,7 +2004,7 @@ def _traiter_appels(appels, messages_agent, table_routage):
     valable meme dans le lot.
     """
     index_sensible = next(
-        (i for i, appel in enumerate(appels) if appel["name"] in OUTILS_SENSIBLES),
+        (i for i, appel in enumerate(appels) if _est_outil_sensible(appel)),
         None,
     )
     appels_surs = appels if index_sensible is None else appels[:index_sensible]
