@@ -786,151 +786,149 @@ def gerer_document_bibliotheque(
 # ci-dessus. Un fichier peut être dans plusieurs dossiers à la fois.
 
 @mcp_generation.tool()
-def lister_dossiers_bibliotheque(ctx: Context) -> str:
+def gerer_dossier_bibliotheque(
+    action: str,
+    ctx: Context,
+    dossier_id: str = "",
+    nom: str = "",
+    dossier_parent_id: str = "",
+    nouveau_nom: str = "",
+) -> str:
     """
-    Liste tous les dossiers de la bibliothèque personnelle de CET
-    utilisateur, avec leur arborescence (dossier parent) et le nombre de
-    fichiers directement rangés dans chacun. Pour voir le CONTENU d'un
-    dossier précis, utilise consulter_dossier_bibliotheque avec son id.
+    Gère les dossiers de la bibliothèque personnelle de CET utilisateur
+    (organisation des documents/liens/notes, distincte du classement
+    dans le programme -- voir gerer_document_bibliotheque pour ça) --
+    consolidé le 26/08, un seul outil, plusieurs actions (pattern
+    "action + paramètres", même logique que gerer_document_bibliotheque).
+
+    `action` doit être l'une de :
+    - "lister" : liste tous les dossiers avec leur arborescence (dossier
+      parent) et le nombre de fichiers directement rangés dans chacun.
+      Aucun paramètre.
+    - "consulter" : liste le contenu direct d'un dossier précis (ses
+      sous-dossiers et ses fichiers). Ne descend pas récursivement dans
+      les sous-dossiers, rappelle avec l'id d'un sous-dossier pour y
+      entrer. Paramètre : `dossier_id`.
+    - "creer" : crée un dossier. Paramètres : `nom` ; `dossier_parent_id`
+      optionnel (id d'un dossier existant pour créer un SOUS-dossier
+      dedans, laisse vide pour un dossier à la racine).
+    - "renommer" : renomme un dossier existant. Paramètres : `dossier_id`,
+      `nouveau_nom`.
+    - "supprimer" : supprime DÉFINITIVEMENT un dossier (et ses
+      sous-dossiers). Un fichier encore rattaché à au moins un autre
+      dossier est conservé (juste détaché de celui-ci) ; un fichier qui
+      n'était rattaché à AUCUN autre dossier est supprimé en même temps
+      que le dossier. Paramètre : `dossier_id`. SENSIBLE : demande
+      toujours confirmation à l'utilisateur avant d'être exécuté, quelle
+      que soit la formulation de sa demande.
+
+    Pour ranger/retirer un fichier DANS un dossier, ou pour les documents
+    eux-mêmes (chercher/lister/ajouter/supprimer/classer), voir l'outil
+    dédié gerer_document_bibliotheque.
     """
     user_id = ctx.request_context.request.query_params.get("user_id")
     if not user_id:
         return "Erreur : utilisateur non authentifié."
-    try:
-        dossiers = _lister_dossiers(user_id)
-    except Exception as e:
-        logging.error(f"ERREUR outil lister_dossiers_bibliotheque : {e}")
-        return "Erreur : impossible de lister les dossiers, réessaie."
-    if not dossiers:
-        return "Aucun dossier pour l'instant."
-    par_id = {d["id"]: d for d in dossiers}
-    lignes = []
-    for d in dossiers:
-        parent = par_id.get(d["dossier_parent_id"])
-        chemin = f"{parent['nom']} > {d['nom']}" if parent else d["nom"]
-        nb_fichiers = len(_lister_fichiers_ids_dossier(d["id"]))
-        lignes.append(f"- {chemin} [id: {d['id']}] ({nb_fichiers} fichier(s) direct(s))")
-    return "\n".join(lignes)
 
-
-@mcp_generation.tool()
-def consulter_dossier_bibliotheque(dossier_id: str, ctx: Context) -> str:
-    """
-    Liste le contenu direct d'un dossier précis de la bibliothèque
-    personnelle de CET utilisateur : ses sous-dossiers et ses fichiers
-    (description, type, id). Ne descend pas récursivement dans les
-    sous-dossiers, rappelle cet outil avec l'id d'un sous-dossier pour
-    y entrer.
-    """
-    user_id = ctx.request_context.request.query_params.get("user_id")
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    proprietaire = _proprietaire_dossier(dossier_id)
-    if proprietaire is None:
-        return "Ce dossier est introuvable."
-    if proprietaire != user_id:
-        return "Ce dossier ne t'appartient pas."
-    try:
-        dossiers = _lister_dossiers(user_id)
-        sous_dossiers = [d for d in dossiers if d["dossier_parent_id"] == dossier_id]
-        fichier_ids = _lister_fichiers_ids_dossier(dossier_id)
-    except Exception as e:
-        logging.error(f"ERREUR outil consulter_dossier_bibliotheque : {e}")
-        return "Erreur : impossible de consulter ce dossier, réessaie."
-
-    lignes = []
-    for sd in sous_dossiers:
-        lignes.append(f"- [dossier] {sd['nom']} [id: {sd['id']}]")
-    for f_id in fichier_ids:
+    if action == "lister":
         try:
-            res = _supabase.table("fichiers_uploades").select("nom_fichier, description, type_mime").eq("id", f_id).maybe_single().execute()
+            dossiers = _lister_dossiers(user_id)
         except Exception as e:
-            logging.error(f"ERREUR outil consulter_dossier_bibliotheque (lecture fichier {f_id}) : {e}")
-            continue
-        if not res or not res.data:
-            continue
-        f = res.data
-        lignes.append(f"- [fichier] {f.get('description') or f.get('nom_fichier')} ({f.get('type_mime', 'inconnu')}) [id: {f_id}]")
-    if not lignes:
-        return "Ce dossier est vide."
-    return "\n".join(lignes)
+            logging.error(f"ERREUR gerer_dossier_bibliotheque (lister) : {e}")
+            return "Erreur : impossible de lister les dossiers, réessaie."
+        if not dossiers:
+            return "Aucun dossier pour l'instant."
+        par_id = {d["id"]: d for d in dossiers}
+        lignes = []
+        for d in dossiers:
+            parent = par_id.get(d["dossier_parent_id"])
+            chemin = f"{parent['nom']} > {d['nom']}" if parent else d["nom"]
+            nb_fichiers = len(_lister_fichiers_ids_dossier(d["id"]))
+            lignes.append(f"- {chemin} [id: {d['id']}] ({nb_fichiers} fichier(s) direct(s))")
+        return "\n".join(lignes)
 
-
-@mcp_generation.tool()
-def ajouter_dossier_bibliotheque(nom: str, dossier_parent_id: str = "", ctx: Context = None) -> str:
-    """
-    Crée un dossier dans la bibliothèque personnelle de CET utilisateur.
-    `dossier_parent_id` (optionnel) : id d'un dossier existant pour créer
-    un SOUS-dossier dedans ; laisse vide pour un dossier à la racine.
-    """
-    user_id = ctx.request_context.request.query_params.get("user_id")
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    nom = (nom or "").strip()
-    if not nom:
-        return "Erreur : nom de dossier manquant."
-    parent_id = (dossier_parent_id or "").strip() or None
-    if parent_id:
-        proprietaire = _proprietaire_dossier(parent_id)
+    if action == "consulter":
+        proprietaire = _proprietaire_dossier(dossier_id)
         if proprietaire is None:
-            return "Erreur : le dossier parent indiqué est introuvable."
+            return "Ce dossier est introuvable."
         if proprietaire != user_id:
-            return "Erreur : ce dossier parent ne t'appartient pas."
-    try:
-        dossier = _creer_dossier(user_id, nom, parent_id)
-    except Exception as e:
-        logging.error(f"ERREUR outil ajouter_dossier_bibliotheque : {e}")
-        return "Erreur : impossible de créer ce dossier, réessaie."
-    return f"Dossier « {nom} » créé [id: {dossier['id']}]."
+            return "Ce dossier ne t'appartient pas."
+        try:
+            dossiers = _lister_dossiers(user_id)
+            sous_dossiers = [d for d in dossiers if d["dossier_parent_id"] == dossier_id]
+            fichier_ids = _lister_fichiers_ids_dossier(dossier_id)
+        except Exception as e:
+            logging.error(f"ERREUR gerer_dossier_bibliotheque (consulter) : {e}")
+            return "Erreur : impossible de consulter ce dossier, réessaie."
 
+        lignes = []
+        for sd in sous_dossiers:
+            lignes.append(f"- [dossier] {sd['nom']} [id: {sd['id']}]")
+        for f_id in fichier_ids:
+            try:
+                res = _supabase.table("fichiers_uploades").select("nom_fichier, description, type_mime").eq("id", f_id).maybe_single().execute()
+            except Exception as e:
+                logging.error(f"ERREUR gerer_dossier_bibliotheque (consulter, lecture fichier {f_id}) : {e}")
+                continue
+            if not res or not res.data:
+                continue
+            f = res.data
+            lignes.append(f"- [fichier] {f.get('description') or f.get('nom_fichier')} ({f.get('type_mime', 'inconnu')}) [id: {f_id}]")
+        if not lignes:
+            return "Ce dossier est vide."
+        return "\n".join(lignes)
 
-@mcp_generation.tool()
-def renommer_dossier_bibliotheque(dossier_id: str, nouveau_nom: str, ctx: Context) -> str:
-    """Renomme un dossier de la bibliothèque personnelle de CET utilisateur."""
-    user_id = ctx.request_context.request.query_params.get("user_id")
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    proprietaire = _proprietaire_dossier(dossier_id)
-    if proprietaire is None:
-        return "Ce dossier est introuvable."
-    if proprietaire != user_id:
-        return "Ce dossier ne t'appartient pas."
-    nouveau_nom = (nouveau_nom or "").strip()
-    if not nouveau_nom:
-        return "Erreur : nouveau nom manquant."
-    try:
-        _renommer_dossier(dossier_id, nouveau_nom)
-    except Exception as e:
-        logging.error(f"ERREUR outil renommer_dossier_bibliotheque : {e}")
-        return "Erreur : impossible de renommer ce dossier, réessaie."
-    return f"Dossier renommé en « {nouveau_nom} »."
+    if action == "creer":
+        nom_val = (nom or "").strip()
+        if not nom_val:
+            return "Erreur : nom de dossier manquant."
+        parent_id = (dossier_parent_id or "").strip() or None
+        if parent_id:
+            proprietaire = _proprietaire_dossier(parent_id)
+            if proprietaire is None:
+                return "Erreur : le dossier parent indiqué est introuvable."
+            if proprietaire != user_id:
+                return "Erreur : ce dossier parent ne t'appartient pas."
+        try:
+            dossier = _creer_dossier(user_id, nom_val, parent_id)
+        except Exception as e:
+            logging.error(f"ERREUR gerer_dossier_bibliotheque (creer) : {e}")
+            return "Erreur : impossible de créer ce dossier, réessaie."
+        return f"Dossier « {nom_val} » créé [id: {dossier['id']}]."
 
+    if action == "renommer":
+        proprietaire = _proprietaire_dossier(dossier_id)
+        if proprietaire is None:
+            return "Ce dossier est introuvable."
+        if proprietaire != user_id:
+            return "Ce dossier ne t'appartient pas."
+        nouveau_nom_val = (nouveau_nom or "").strip()
+        if not nouveau_nom_val:
+            return "Erreur : nouveau nom manquant."
+        try:
+            _renommer_dossier(dossier_id, nouveau_nom_val)
+        except Exception as e:
+            logging.error(f"ERREUR gerer_dossier_bibliotheque (renommer) : {e}")
+            return "Erreur : impossible de renommer ce dossier, réessaie."
+        return f"Dossier renommé en « {nouveau_nom_val} »."
 
+    if action == "supprimer":
+        proprietaire = _proprietaire_dossier(dossier_id)
+        if proprietaire is None:
+            return "Ce dossier est introuvable."
+        if proprietaire != user_id:
+            return "Ce dossier ne t'appartient pas."
+        try:
+            _supprimer_dossier(dossier_id)
+        except Exception as e:
+            logging.error(f"ERREUR gerer_dossier_bibliotheque (supprimer) : {e}")
+            return "Erreur : impossible de supprimer ce dossier, réessaie."
+        return "Dossier supprimé."
 
-
-@mcp_generation.tool()
-def supprimer_dossier_bibliotheque(dossier_id: str, ctx: Context) -> str:
-    """
-    Supprime DÉFINITIVEMENT un dossier de la bibliothèque personnelle de
-    CET utilisateur (et ses sous-dossiers). Un fichier encore rattaché à
-    au moins un autre dossier est conservé (juste détaché de celui-ci) ;
-    un fichier qui n'était rattaché à AUCUN autre dossier est supprimé
-    en même temps que le dossier.
-    """
-    user_id = ctx.request_context.request.query_params.get("user_id")
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    proprietaire = _proprietaire_dossier(dossier_id)
-    if proprietaire is None:
-        return "Ce dossier est introuvable."
-    if proprietaire != user_id:
-        return "Ce dossier ne t'appartient pas."
-    try:
-        _supprimer_dossier(dossier_id)
-    except Exception as e:
-        logging.error(f"ERREUR outil supprimer_dossier_bibliotheque : {e}")
-        return "Erreur : impossible de supprimer ce dossier, réessaie."
-    return "Dossier supprimé."
+    return (
+        f"Erreur : action '{action}' inconnue. Actions valides : lister, "
+        "consulter, creer, renommer, supprimer."
+    )
 
 
 @mcp_generation.tool()

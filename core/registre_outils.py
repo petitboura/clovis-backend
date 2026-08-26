@@ -212,7 +212,10 @@ OUTILS_SENSIBLES = {
     # peut supprimer des fichiers avec le dossier (voir
     # core/dossiers_bibliotheque.py:supprimer_dossier) -- irréversible,
     # toujours confirmé, même logique que les autres suppressions ci-dessus.
-    "supprimer_dossier_bibliotheque",
+    # Consolidé le 26/08 en une action de gerer_dossier_bibliotheque (voir
+    # format "nom_outil:action" expliqué au-dessus pour
+    # gerer_document_bibliotheque:supprimer).
+    "gerer_dossier_bibliotheque:supprimer",
 }
 
 
@@ -381,11 +384,11 @@ REGISTRE_AFFICHAGE_OUTILS = {
     # consolidés (groupe distinct, resource "dossier" plutôt que
     # "document"), onglet=None (autonomie du modèle, pas des boutons
     # cliqués par l'utilisateur).
-    "lister_dossiers_bibliotheque": {"label": "Liste des dossiers de la bibliothèque", "icone": "FolderTree", "onglet": None},
-    "consulter_dossier_bibliotheque": {"label": "Consultation d'un dossier de la bibliothèque", "icone": "FolderOpen", "onglet": None},
-    "ajouter_dossier_bibliotheque": {"label": "Création d'un dossier dans la bibliothèque", "icone": "FolderPlus", "onglet": None},
-    "renommer_dossier_bibliotheque": {"label": "Renommage d'un dossier de la bibliothèque", "icone": "Pencil", "onglet": None},
-    "supprimer_dossier_bibliotheque": {"label": "Suppression d'un dossier de la bibliothèque", "icone": "FolderX", "onglet": None},
+    # --- Dossiers de la bibliothèque (22/08, demande Bourama ; consolidé
+    # le 26/08 en un seul outil gerer_dossier_bibliotheque, ex 5 outils
+    # séparés) : onglet=None (autonomie du modèle, pas des boutons cliqués
+    # par l'utilisateur).
+    "gerer_dossier_bibliotheque": {"label": "Dossiers de la bibliothèque", "icone": "FolderTree", "onglet": None},
 
     # --- Historique (porté le 17/08 depuis serveur_mcp_espace.py) ---
     # Même onglet=None : section "Historique" à part entière de "Mon
