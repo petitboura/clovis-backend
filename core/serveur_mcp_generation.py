@@ -2723,7 +2723,7 @@ def envoyer_message(nom_destinataire: str, contenu: str, ctx: Context) -> str:
 # MCP, d'où la validation stricte ci-dessous et la liste exhaustive dans
 # le docstring (seule source de vérité pour le modèle).
 TYPES_ACTION_MOBILE_VALIDES = {
-    # Dossiers désignés (Lot 2) -- "dossier_nom"/"nouveau_dossier_nom"
+    # Dossiers désignés (Lot 2), "dossier_nom"/"nouveau_dossier_nom"
     # ciblent TOUJOURS un nom renvoyé par lister_dossiers_designes_mobile,
     # jamais une URI : l'app résout le nom en URI localement (voir
     # ActionsAppareilExecuteur.kt/.swift, clovis-frontend).
@@ -2732,7 +2732,7 @@ TYPES_ACTION_MOBILE_VALIDES = {
     "dossier_renommer": {"dossier_nom", "element_nom", "nouveau_nom"},
     "dossier_supprimer": {"dossier_nom", "element_nom"},
     "dossier_deplacer": {"dossier_nom", "element_nom", "nouveau_dossier_nom"},
-    # Accessibilité (Lot 6/7) -- flavor Android "externe" UNIQUEMENT,
+    # Accessibilité (Lot 6/7), flavor Android "externe" UNIQUEMENT,
     # échoue proprement sur flavor "play" et sur iOS (pas d'équivalent).
     "accessibilite_cliquer": {"texte_cible"},
     "accessibilite_saisir": {"texte_cible", "valeur"},
@@ -2745,7 +2745,7 @@ def lister_dossiers_designes_mobile(ctx: Context) -> str:
     Liste les noms des dossiers que l'étudiant a désignés sur son
     téléphone (accessibles à l'app Clovis mobile), avec la plateforme
     (android/ios). Utilise TOUJOURS cet outil avant executer_action_mobile
-    pour un type "dossier_*", afin de cibler un nom qui existe vraiment --
+    pour un type "dossier_*", afin de cibler un nom qui existe vraiment,
     ne devine jamais un nom de dossier.
     """
     user_id = ctx.request_context.request.query_params.get("user_id")
@@ -2769,7 +2769,7 @@ def executer_action_mobile(type_action: str, parametres: dict, ctx: Context) -> 
     au téléphone (ou rattrapée à sa prochaine ouverture s'il est hors
     ligne). LIMITE CONNUE : cet outil est asynchrone et son résultat
     (succès/échec) n'est PAS relayé automatiquement dans cette
-    conversation pour l'instant -- dis à l'étudiant que l'action a été
+    conversation pour l'instant : dis à l'étudiant que l'action a été
     envoyée, sans garantir qu'elle a déjà réussi.
 
     `type_action` doit être EXACTEMENT l'un de :
@@ -2783,7 +2783,7 @@ def executer_action_mobile(type_action: str, parametres: dict, ctx: Context) -> 
 
     Pour un type "dossier_*", "dossier_nom" (et "nouveau_dossier_nom" le
     cas échéant) DOIT être un nom renvoyé par
-    lister_dossiers_designes_mobile -- appelle cet outil avant si tu ne
+    lister_dossiers_designes_mobile, appelle cet outil avant si tu ne
     connais pas déjà la liste à jour. Les actions "accessibilite_*" ne
     fonctionnent que sur la version Android hors Play Store de l'étudiant
     (elles échouent proprement sinon, avec un message clair rapporté dans

@@ -1,12 +1,12 @@
 """
 Cree le 26/08/2026, Bourama : brancher le cerveau (suite Lot 1A/1B,
-actions_appareil_mobile.py) -- capacite "dossiers".
+actions_appareil_mobile.py), capacite "dossiers".
 
 Miroir cote backend de la liste des dossiers designes par l'etudiant sur
 son telephone (SAF Android / security-scoped bookmarks iOS). Contient
 UNIQUEMENT le nom de chaque dossier, jamais l'URI/bookmark reel : l'URI
 est propre a l'appareil, n'a aucun sens cote serveur, et l'agent ne doit
-jamais la manipuler -- voir migrations/2026_08_26_dossiers_designes_mobile.sql.
+jamais la manipuler, voir migrations/2026_08_26_dossiers_designes_mobile.sql.
 
 Synchronisation en mode MIROIR COMPLET, pas un upsert comme
 usage_appareil_mobile.py : un dossier peut etre retire par l'etudiant,
@@ -24,7 +24,7 @@ def synchroniser_dossiers_designes(user_id: str, plateforme: str, noms: list[str
     """
     Remplace la liste complete des dossiers designes pour cet
     utilisateur et cette plateforme. `noms` peut etre vide (tous les
-    dossiers ont ete retires) -- dans ce cas on supprime simplement
+    dossiers ont ete retires), dans ce cas on supprime simplement
     toutes les lignes existantes.
     """
     supabase.table("dossiers_designes_mobile").delete().eq("user_id", user_id).eq(

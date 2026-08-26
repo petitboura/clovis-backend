@@ -17,7 +17,7 @@ Cycle de vie d'une action :
 
 Branche le 26/08/2026 : l'outil agent executer_action_mobile (voir
 core/serveur_mcp_generation.py) appelle desormais creer_action() avec
-des types_action reels -- "dossier_*" (voir
+des types_action reels, "dossier_*" (voir
 core/dossiers_designes_mobile.py pour le miroir des noms de dossiers
 que l'agent peut cibler) et "accessibilite_*" (flavor Android externe
 uniquement, cliquer/saisir par texte cible). Liste exacte et forme des
@@ -26,7 +26,7 @@ verite a tenir a jour si de nouveaux types sont ajoutes.
 
 Reste volontairement HORS de ce lot : les actions de session DND/volume
 (etat initial capture en memoire cote app, deja identifie comme fragile
-si l'app est tuee pendant une session active) -- a trancher separement
+si l'app est tuee pendant une session active), a trancher separement
 avec Bourama.
 """
 

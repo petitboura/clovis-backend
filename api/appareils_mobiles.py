@@ -23,7 +23,7 @@ Supabase avec le SDK natif, puis envoie son access_token en Bearer sur
 ces routes, exactement comme le fait clovis-frontend.
 
 Capacites couvertes ici : usage (Lot 1), miroir des dossiers designes
-(Lot 2, 26/08), token push natif (Lot 3), connecteurs tiers -- Notion en
+(Lot 2, 26/08), token push natif (Lot 3), connecteurs tiers, Notion en
 premier (Lot 5), canal de decision generique (Lot 1A). Reste a faire :
 controles de session (Lot 4).
 """
