@@ -59,10 +59,10 @@ mcp_public = FastMCP(
         "personnalises et votre historique de conversation, directement "
         "depuis Claude."
     ),
-    website_url="https://classgpt-frontend.vercel.app/",
+    website_url="https://clovis-ai.vercel.app/",
     icons=[
         Icon(
-            src="https://classgpt-frontend.vercel.app/icone-512.png",
+            src="https://clovis-ai.vercel.app/icone-512.png",
             mime_type="image/png",
             sizes=["512x512"],
         ),

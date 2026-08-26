@@ -338,12 +338,10 @@ ORIGINES_AUTORISEES = [
 
 # Vercel donne une URL DIFFERENTE a chaque deploiement de preview (en plus
 # de l'alias stable) -- ce motif autorise automatiquement toutes les URLs
-# Vercel du projet Clovis (ex. clovis-frontend-bld5bmptn-petitbouras-
-# projects.vercel.app), sans avoir a retoucher ce fichier a chaque nouveau
-# lien. 11/08 : accepte encore "classgpt-frontend" en plus de
-# "clovis-frontend" le temps que le projet Vercel lui-meme soit renomme
-# (a retirer une fois fait dans ses Settings).
-MOTIF_ORIGINES_CLOVIS = r"https://(classgpt|clovis)-frontend[a-z0-9\-]*\.vercel\.app"
+# Vercel du projet Clovis (ex. clovis-ai-bld5bmptn-petitbouras-projects.
+# vercel.app), sans avoir a retoucher ce fichier a chaque nouveau lien.
+# 26/08 : lien stable renomme en clovis-ai.vercel.app (Bourama).
+MOTIF_ORIGINES_CLOVIS = r"https://clovis-ai[a-z0-9\-]*\.vercel\.app"
 
 app.add_middleware(
     CORSMiddleware,
