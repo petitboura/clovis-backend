@@ -15,17 +15,19 @@ Cycle de vie d'une action :
 3. L'app execute, puis rapporte via POST /actions/{id}/resultat.
 4. marquer_resultat met a jour le statut ici.
 
-IMPORTANT -- volontairement PAS FAIT dans ce lot : aucun outil agent
-(serveur_mcp_generation.py) n'appelle creer_action() pour l'instant, et
-`type_action` n'a donc aucune valeur "officielle" encore. Deux types
-candidats identifies pendant ce lot bloquent sur un point a trancher avec
-Bourama avant de les brancher : les actions fichiers (le backend n'a
-aujourd'hui aucune connaissance des dossiers designes, purs cote
-Android/SAF, rien ne synchronise leurs noms/URI ici) et les actions de
-session DND/volume (etat initial capture en memoire cote app, deja
-identifie comme fragile si l'app est tuee pendant une session active).
-Tant que ce choix n'est pas fait, ce module reste un canal generique
-teste et fonctionnel, sans type_action reel qui l'utilise encore.
+Branche le 26/08/2026 : l'outil agent executer_action_mobile (voir
+core/serveur_mcp_generation.py) appelle desormais creer_action() avec
+des types_action reels -- "dossier_*" (voir
+core/dossiers_designes_mobile.py pour le miroir des noms de dossiers
+que l'agent peut cibler) et "accessibilite_*" (flavor Android externe
+uniquement, cliquer/saisir par texte cible). Liste exacte et forme des
+`parametres` documentee dans le docstring de l'outil, seule source de
+verite a tenir a jour si de nouveaux types sont ajoutes.
+
+Reste volontairement HORS de ce lot : les actions de session DND/volume
+(etat initial capture en memoire cote app, deja identifie comme fragile
+si l'app est tuee pendant une session active) -- a trancher separement
+avec Bourama.
 """
 
 import logging

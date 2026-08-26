@@ -463,5 +463,12 @@ REGISTRE_AFFICHAGE_OUTILS = {
     # OutilResultatBulle.tsx), d'où cette entrée dans ce registre bien qu'il
     # n'existe aucun outil MCP de ce nom.
     "consulter_skills_chapitres_matiere": {"label": "Consultation des skills des chapitres", "icone": "ScrollText", "onglet": None},
+
+    # --- Actions sur le téléphone de l'étudiant (26/08/2026) ---
+    # onglet=None, même logique que les blocs "Programme adaptatif"/
+    # "Bibliothèque" plus haut : outils que le modèle appelle lui-même en
+    # autonomie pendant la conversation, jamais des boutons cliqués.
+    "lister_dossiers_designes_mobile": {"label": "Liste des dossiers désignés sur le téléphone", "icone": "FolderTree", "onglet": None},
+    "executer_action_mobile": {"label": "Action envoyée au téléphone", "icone": "Smartphone", "onglet": None},
 }
 

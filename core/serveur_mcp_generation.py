@@ -56,6 +56,8 @@ from core.notifications_push import (
     planifier_rappel as _planifier_rappel,
     un_canal_push_disponible,
 )
+from core.actions_appareil_mobile import creer_action as _creer_action_mobile
+from core.dossiers_designes_mobile import lire_dossiers_designes as _lire_dossiers_designes
 from api.roles import (
     resoudre_destinataire_autorise as _resoudre_destinataire_autorise,
     _inserer_message,
@@ -2856,3 +2858,113 @@ def envoyer_message(nom_destinataire: str, contenu: str, ctx: Context) -> str:
     except Exception as e:
         logging.error(f"ERREUR outil generation (envoyer_message) : {e}")
         return "Erreur : l'envoi du message a échoué, réessaie."
+
+
+# Ajouté le 26/08/2026, Bourama : brancher le cerveau sur l'app mobile
+# (voir core/actions_appareil_mobile.py). Toujours enregistré (pas de gate
+# comme planifier_rappel/un_canal_push_disponible) : même si aucun token
+# push n'est enregistré, l'action reste en base et l'app la rattrapera au
+# prochain lancement via GET /actions/en-attente (voir
+# rattraperActionsEnAttente, plugin PontNatif côté clovis-frontend).
+#
+# UN SEUL outil générique plutôt qu'un outil par capacité (décision prise
+# avec Bourama, 26/08) : colle à ce que core/actions_appareil_mobile.py
+# expose déjà (creer_action(type_action, parametres)), zéro outil à
+# ajouter/retirer plus tard, juste étendre TYPES_ACTION_MOBILE_VALIDES
+# ci-dessous. Contrepartie assumée : pas de schéma strict par type côté
+# MCP, d'où la validation stricte ci-dessous et la liste exhaustive dans
+# le docstring (seule source de vérité pour le modèle).
+TYPES_ACTION_MOBILE_VALIDES = {
+    # Dossiers désignés (Lot 2) -- "dossier_nom"/"nouveau_dossier_nom"
+    # ciblent TOUJOURS un nom renvoyé par lister_dossiers_designes_mobile,
+    # jamais une URI : l'app résout le nom en URI localement (voir
+    # ActionsAppareilExecuteur.kt/.swift, clovis-frontend).
+    "dossier_creer_fichier": {"dossier_nom", "nom"},  # "type_mime" optionnel
+    "dossier_creer_sous_dossier": {"dossier_nom", "nom"},
+    "dossier_renommer": {"dossier_nom", "element_nom", "nouveau_nom"},
+    "dossier_supprimer": {"dossier_nom", "element_nom"},
+    "dossier_deplacer": {"dossier_nom", "element_nom", "nouveau_dossier_nom"},
+    # Accessibilité (Lot 6/7) -- flavor Android "externe" UNIQUEMENT,
+    # échoue proprement sur flavor "play" et sur iOS (pas d'équivalent).
+    "accessibilite_cliquer": {"texte_cible"},
+    "accessibilite_saisir": {"texte_cible", "valeur"},
+}
+
+
+@mcp_generation.tool()
+def lister_dossiers_designes_mobile(ctx: Context) -> str:
+    """
+    Liste les noms des dossiers que l'étudiant a désignés sur son
+    téléphone (accessibles à l'app Clovis mobile), avec la plateforme
+    (android/ios). Utilise TOUJOURS cet outil avant executer_action_mobile
+    pour un type "dossier_*", afin de cibler un nom qui existe vraiment --
+    ne devine jamais un nom de dossier.
+    """
+    user_id = ctx.request_context.request.query_params.get("user_id")
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        dossiers = _lire_dossiers_designes(user_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil lister_dossiers_designes_mobile : {e}")
+        return "Erreur : impossible de lister les dossiers désignés, réessaie."
+    if not dossiers:
+        return "Aucun dossier désigné sur le téléphone de l'étudiant pour l'instant."
+    return "\n".join(f"- {d['nom']} ({d['plateforme']})" for d in dossiers)
+
+
+@mcp_generation.tool()
+def executer_action_mobile(type_action: str, parametres: dict, ctx: Context) -> str:
+    """
+    Décide une action à exécuter sur le téléphone de l'étudiant (app
+    Clovis mobile). L'action est mise en attente et poussée immédiatement
+    au téléphone (ou rattrapée à sa prochaine ouverture s'il est hors
+    ligne). LIMITE CONNUE : cet outil est asynchrone et son résultat
+    (succès/échec) n'est PAS relayé automatiquement dans cette
+    conversation pour l'instant -- dis à l'étudiant que l'action a été
+    envoyée, sans garantir qu'elle a déjà réussi.
+
+    `type_action` doit être EXACTEMENT l'un de :
+    - "dossier_creer_fichier" : {"dossier_nom", "nom", "type_mime"?}
+    - "dossier_creer_sous_dossier" : {"dossier_nom", "nom"}
+    - "dossier_renommer" : {"dossier_nom", "element_nom", "nouveau_nom"}
+    - "dossier_supprimer" : {"dossier_nom", "element_nom"}
+    - "dossier_deplacer" : {"dossier_nom", "element_nom", "nouveau_dossier_nom"}
+    - "accessibilite_cliquer" : {"texte_cible"}
+    - "accessibilite_saisir" : {"texte_cible", "valeur"}
+
+    Pour un type "dossier_*", "dossier_nom" (et "nouveau_dossier_nom" le
+    cas échéant) DOIT être un nom renvoyé par
+    lister_dossiers_designes_mobile -- appelle cet outil avant si tu ne
+    connais pas déjà la liste à jour. Les actions "accessibilite_*" ne
+    fonctionnent que sur la version Android hors Play Store de l'étudiant
+    (elles échouent proprement sinon, avec un message clair rapporté dans
+    la conversation).
+    """
+    user_id = ctx.request_context.request.query_params.get("user_id")
+    if not user_id:
+        return "Erreur : impossible d'identifier l'utilisateur pour cette action."
+
+    if type_action not in TYPES_ACTION_MOBILE_VALIDES:
+        return (
+            f"Erreur : type_action \"{type_action}\" inconnu. Types valides : "
+            + ", ".join(sorted(TYPES_ACTION_MOBILE_VALIDES))
+        )
+
+    cles_requises = TYPES_ACTION_MOBILE_VALIDES[type_action]
+    manquantes = cles_requises - set(parametres or {})
+    if manquantes:
+        return f"Erreur : paramètres manquants pour \"{type_action}\" : {', '.join(sorted(manquantes))}."
+
+    try:
+        _creer_action_mobile(user_id, type_action, parametres)
+    except Exception as e:
+        logging.error(f"ERREUR outil executer_action_mobile ({type_action}) : {e}")
+        return "Erreur : impossible de programmer cette action, réessaie."
+
+    return (
+        f"Action \"{type_action}\" envoyée au téléphone de l'étudiant. "
+        "Le résultat n'est pas encore relayé automatiquement ici : "
+        "informe l'étudiant que l'action a été envoyée, sans confirmer "
+        "qu'elle a déjà réussi."
+    )

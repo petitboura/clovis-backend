@@ -9,8 +9,12 @@ Etendu le 24/08/2026, Lot 1A (brancher le cerveau) : canal de decision
 generique -- l'app recoit une action via push (voir
 core/notifications_push.envoyer_action_appareil), vient la chercher ici,
 puis rapporte le resultat. Voir core/actions_appareil_mobile.py pour le
-detail et pour ce qui N'EST PAS encore branche a ce canal (aucun
-type_action reel emis par l'agent pour l'instant, voir ce module).
+detail.
+Etendu le 26/08/2026 : branchement reel du canal a l'agent (outil MCP
+executer_action_mobile, voir core/serveur_mcp_generation.py), types
+"dossier_*" (miroir des dossiers designes, voir
+core/dossiers_designes_mobile.py) et "accessibilite_*" (flavor Android
+externe uniquement).
 
 Canal dedie entre l'app mobile Clovis (Android/iOS, depot
 clovis-mobile) et ce backend. Reutilise l'auth Supabase standard deja
@@ -18,10 +22,10 @@ en place (voir api/auth.py) : l'app mobile se connecte directement a
 Supabase avec le SDK natif, puis envoie son access_token en Bearer sur
 ces routes, exactement comme le fait clovis-frontend.
 
-Capacites couvertes ici : usage (Lot 1), token push natif (Lot 3),
-connecteurs tiers -- Notion en premier (Lot 5). Les autres capacites
-(fichiers -- Lot 2, controles de session -- Lot 4) viendront sur ce
-meme routeur ou des routeurs freres, a construire lot par lot.
+Capacites couvertes ici : usage (Lot 1), miroir des dossiers designes
+(Lot 2, 26/08), token push natif (Lot 3), connecteurs tiers -- Notion en
+premier (Lot 5), canal de decision generique (Lot 1A). Reste a faire :
+controles de session (Lot 4).
 """
 
 import logging
@@ -36,6 +40,7 @@ from core.erreurs import erreur_api
 from core.usage_appareil_mobile import enregistrer_usage, lire_usage
 from core.notifications_push import enregistrer_token_natif, supprimer_token_natif
 from core.actions_appareil_mobile import lire_action, lire_actions_en_attente, marquer_resultat
+from core.dossiers_designes_mobile import synchroniser_dossiers_designes
 from connexions.notion import (
     demarrer_connexion_notion,
     finaliser_connexion_notion,
@@ -101,6 +106,32 @@ def obtenir_usage(jours: int = 7, utilisateur=Depends(utilisateur_courant)):
         raise erreur_api(500, "ECHEC_LECTURE_USAGE")
 
     return {"usage": lignes}
+
+
+# --- Lot 2 (suite, 26/08/2026) : dossiers designes, miroir pour l'agent ---
+#
+# CONTRAT APP MOBILE : appeler apres CHAQUE changement (ajout/retrait d'un
+# dossier designe via Dossiers.choisirDossier/retirerDossierDesigne) ET une
+# fois a l'ouverture de l'app, avec la liste COMPLETE des noms actuels.
+# Mode miroir, pas un ajout : chaque appel remplace l'etat cote backend
+# (voir core/dossiers_designes_mobile.py). `noms` peut etre vide.
+
+
+class SynchronisationDossiers(BaseModel):
+    plateforme: str  # "android" ou "ios"
+    noms: list[str]
+
+
+@router.post("/dossiers", status_code=204)
+def synchroniser_dossiers(payload: SynchronisationDossiers, utilisateur=Depends(utilisateur_courant)):
+    if payload.plateforme not in ("android", "ios"):
+        raise erreur_api(400, "PLATEFORME_INCONNUE")
+
+    try:
+        synchroniser_dossiers_designes(utilisateur.id, payload.plateforme, payload.noms)
+    except Exception as e:
+        logging.error(f"ERREUR synchronisation dossiers designes (utilisateur {utilisateur.id}) : {e}")
+        raise erreur_api(500, "ECHEC_SYNCHRONISATION_DOSSIERS")
 
 
 class TokenPush(BaseModel):
