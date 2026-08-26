@@ -1361,25 +1361,26 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         # AJOUT 2026-08-22 (demande Bourama : "les skills ont été
         # corrigés visuellement, mais intérieurement non, il faut que
         # le LLM soit au courant") : lister_comportements/
-        # consulter_comportement existaient déjà dans le catalogue, mais
-        # rien n'apprenait au routeur que "skill(s)" -- le SEUL terme
-        # utilisé partout dans l'interface -- désigne cette
-        # fonctionnalité ("comportement" reste un nom interne, jamais vu
-        # par l'utilisateur). Sans cette règle, une question comme
-        # "quels sont mes skills ?" ne matchait rien : le routeur ne
-        # proposait pas lister_comportements, et le grand modèle
+        # consulter_comportement (devenus gerer_comportement, actions
+        # "lister"/"consulter", consolidation du 26/08) existaient déjà
+        # dans le catalogue, mais rien n'apprenait au routeur que
+        # "skill(s)" -- le SEUL terme utilisé partout dans l'interface --
+        # désigne cette fonctionnalité ("comportement" reste un nom
+        # interne, jamais vu par l'utilisateur). Sans cette règle, une
+        # question comme "quels sont mes skills ?" ne matchait rien : le
+        # routeur ne proposait pas cet outil, et le grand modèle
         # répondait à côté (confusion avec "compétences personnelles").
-        "IMPORTANT : lister_comportements DOIT être suggéré dès que "
-        "l'utilisateur demande à voir/lister ses \"skills\" (le SEUL mot "
-        "utilisé dans toute l'interface Clovis pour cette "
-        "fonctionnalité -- \"comportement\" est un nom interne, ignore-le "
-        "pour reconnaître l'intention). Exemples qui DOIVENT suggérer cet "
-        "outil : \"quels sont mes skills ?\", \"montre-moi mes skills\", "
-        "\"liste mes skills/comportements\", \"j'ai combien de skills ?\". "
-        "Ne confonds JAMAIS ça avec une question sur les compétences, "
-        "talents ou aptitudes personnelles de l'utilisateur (\"qu'est-ce "
-        "que je sais bien faire ?\") -- aucun rapport, ne suggère rien "
-        "dans ce cas.\n\n"
+        "IMPORTANT : gerer_comportement (action \"lister\") DOIT être "
+        "suggéré dès que l'utilisateur demande à voir/lister ses "
+        "\"skills\" (le SEUL mot utilisé dans toute l'interface Clovis "
+        "pour cette fonctionnalité -- \"comportement\" est un nom interne, "
+        "ignore-le pour reconnaître l'intention). Exemples qui DOIVENT "
+        "suggérer cet outil : \"quels sont mes skills ?\", \"montre-moi "
+        "mes skills\", \"liste mes skills/comportements\", \"j'ai combien "
+        "de skills ?\". Ne confonds JAMAIS ça avec une question sur les "
+        "compétences, talents ou aptitudes personnelles de l'utilisateur "
+        "(\"qu'est-ce que je sais bien faire ?\") -- aucun rapport, ne "
+        "suggère rien dans ce cas.\n\n"
         f"Outils disponibles :\n{catalogue}\n\n"
         f"{contexte}"
         f"Question de l'utilisateur : {message_utilisateur}\n\n"
@@ -1452,7 +1453,7 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     #
     # Calculé une seule fois dans chat() (14/08), plus ici -- reçu en
     # paramètre. Ça évite un second appel LLM au petit routeur, et surtout
-    # ça permet à chat() de forcer consulter_comportement/consulter_programme
+    # ça permet à chat() de forcer gerer_comportement/consulter_programme
     # dans la liste réellement envoyée à Groq dès qu'un candidat existe,
     # AVANT de construire ce prompt (voir outils_forces_contexte plus haut
     # dans chat()) -- sinon ce bloc annonce un outil que le modèle ne peut
@@ -1468,9 +1469,9 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
             "utilisateur lui-même, ou reçues d'un autre utilisateur via un code -- la description précise "
             "\"(reçu de ...)\" dans ce second cas) :\n"
             f"{candidats}\n"
-            "Si l'une d'elles semble s'appliquer, appelle l'outil consulter_comportement avec son id "
-            "pour lire son contenu complet AVANT de répondre -- ne devine jamais son contenu à partir "
-            "de la description seule."
+            "Si l'une d'elles semble s'appliquer, appelle l'outil gerer_comportement "
+            "(action=\"consulter\") avec son id pour lire son contenu complet AVANT de répondre "
+            "-- ne devine jamais son contenu à partir de la description seule."
         )
 
     # Programmes de l'étudiant (13/08, chantier "connexion IA <-> structure
@@ -2707,7 +2708,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     # ci-dessous décide QUELS candidats annoncer au modèle, mais c'est un
     # mécanisme totalement séparé du routeur général d'outils plus bas
     # (_router_outils), qui lui décide, sans rien savoir de ces candidats,
-    # si consulter_comportement/consulter_programme sont réellement
+    # si gerer_comportement/consulter_programme sont réellement
     # branchés à l'appel Groq. Avant ce fix, le premier pouvait annoncer un
     # candidat pertinent sans que le second n'ait jamais branché l'outil
     # correspondant -- même contradiction que le bug du 12/08 (prompt qui
@@ -2769,7 +2770,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     mes_programmes = (lister_mes_programmes_legers(user_id) + lister_programmes_recus_legers(user_id)) if user_id else []
     outils_forces_contexte = []
     if comportements_etudiant:
-        outils_forces_contexte.append("consulter_comportement")
+        outils_forces_contexte.append("gerer_comportement")
     if mes_programmes:
         outils_forces_contexte.append("consulter_programme")
         outils_forces_contexte.append("consulter_matiere_programme")

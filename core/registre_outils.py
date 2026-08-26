@@ -190,7 +190,9 @@ OUTILS_SENSIBLES = {
     "supprimer_document_programme",
     "supprimer_exercice_programme",
     "supprimer_examen",
-    "supprimer_comportement",
+    # Consolidé le 26/08 en une action de gerer_comportement (voir format
+    # "nom_outil:action" expliqué plus bas pour gerer_document_bibliotheque).
+    "gerer_comportement:supprimer",
     # Portés depuis core/serveur_mcp_espace.py le 17/08 (demande Bourama :
     # "ajoute à Clovis tout ce que Claude peut faire") -- mêmes garanties
     # que côté MCP externe (destructive_hint=True là-bas), transposées
@@ -453,11 +455,7 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "supprimer_element_base": {"label": "Suppression d'un élément", "icone": "Trash2", "onglet": None},
     "lister_elements_a_reviser": {"label": "Liste des révisions dues", "icone": "Brain", "onglet": None},
     "enregistrer_reponse_revision": {"label": "Enregistrement d'une réponse de révision", "icone": "Brain", "onglet": None},
-    "ajouter_comportement": {"label": "Ajout d'un skill", "icone": "ScrollText", "onglet": None},
-    "lister_comportements": {"label": "Liste de tes skills", "icone": "ScrollText", "onglet": None},
-    "modifier_comportement": {"label": "Modification d'un skill", "icone": "ScrollText", "onglet": None},
-    "consulter_comportement": {"label": "Consultation d'un skill", "icone": "ScrollText", "onglet": None},
-    "supprimer_comportement": {"label": "Suppression d'un skill", "icone": "Trash2", "onglet": None},
+    "gerer_comportement": {"label": "Skills personnels", "icone": "ScrollText", "onglet": None},
     # Routage en deux niveaux (22/08/2026, demande Bourama) : jamais un
     # outil que le grand LLM appelle lui-même (pas de tool MCP réel), c'est
     # le petit routeur "à la skill" (core/main.py) qui déclenche ça en

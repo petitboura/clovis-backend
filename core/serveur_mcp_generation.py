@@ -1147,159 +1147,135 @@ def consulter_profil_utilisateur(ctx: Context) -> str:
 
 
 @mcp_generation.tool()
-def lister_comportements(ctx: Context) -> str:
+def gerer_comportement(
+    action: str,
+    ctx: Context,
+    comportement_id: str = "",
+    texte: str = "",
+) -> str:
     """
-    Liste les instructions personnelles que CET utilisateur a écrites
-    lui-même (section "Mes comportements" de "Mon espace") pour Clovis.
+    Gère les instructions personnelles ("skills" dans toute l'interface,
+    "comportement" seulement en interne) que CET étudiant a écrites pour
+    Clovis, section "Mes comportements" de "Mon espace" -- consolidé le
+    26/08, un seul outil, plusieurs actions.
 
-    IMPORTANT (22/08/2026, terme utilisateur) : dans TOUTE l'interface,
-    cette fonctionnalité s'appelle "skill(s)" -- l'utilisateur ne dira
-    presque jamais "comportement". Utilise cet outil dès qu'il demande
-    "mes skills", "quels sont mes skills", "montre-moi mes skills/mes
-    comportements", etc. -- pas seulement quand un skill semble déjà
-    pertinent pour le message en cours (ça, c'est géré par la liste de
-    candidats du message système, voir consulter_comportement) : ici,
-    c'est une vraie demande d'énumération, réponds-y avec cet outil.
-    Renvoie pour chacune : id, description courte, emplacement lié le
-    cas échéant -- PAS le texte complet (utilise consulter_comportement
-    avec l'id pour lire un comportement précis en entier).
+    `action` doit être l'une de :
+    - "lister" : liste tous les comportements de cet étudiant (id,
+      description courte, emplacement lié le cas échéant -- PAS le texte
+      complet, voir "consulter" pour ça). IMPORTANT (terme utilisateur) :
+      dans TOUTE l'interface, cette fonctionnalité s'appelle "skill(s)" --
+      l'utilisateur ne dira presque jamais "comportement". Utilise cette
+      action dès qu'il demande "mes skills", "quels sont mes skills",
+      "montre-moi mes skills/mes comportements", etc. -- pas seulement
+      quand un skill semble déjà pertinent pour le message en cours (ça,
+      c'est géré par la liste de candidats du message système, voir
+      "consulter") : "lister" répond à une vraie demande d'énumération.
+      Aucun paramètre.
+    - "consulter" : lit le skill COMPLET (format Claude, frontmatter +
+      instructions) d'un comportement précis, que cet utilisateur l'ait
+      écrit lui-même, ou qu'il l'ait reçu d'un autre utilisateur via un
+      code (id préfixé "recu:"). Le message système t'a déjà donné une
+      courte description de ceux qui semblent pertinents pour ce
+      message -- utilise cette action quand l'un d'eux semble
+      s'appliquer, AVANT de répondre, pour lire son contenu réel plutôt
+      que de deviner à partir de la description seule. Paramètre :
+      `comportement_id`.
+    - "ajouter" : enregistre une NOUVELLE instruction personnelle, à
+      utiliser SEULEMENT quand l'étudiant exprime CLAIREMENT et
+      EXPLICITEMENT une préférence ou une règle à retenir pour la suite
+      (ex: "explique-moi toujours avec des schémas", "ne me donne jamais
+      la réponse directe, guide-moi", "crée-moi un skill qui..."). S'ajoute
+      EN PLUS de ses autres comportements, ne les remplace pas.
+      N'UTILISE JAMAIS CETTE ACTION SUR UNE SUPPOSITION. Si la demande
+      est vague, ambiguë, ou que tu devines seulement ce que l'étudiant
+      voudrait retenir sans qu'il l'ait dit clairement, NE CRÉE RIEN --
+      demande-lui d'abord de préciser ce qu'il veut que tu retiennes
+      exactement. Ne crée jamais un comportement "au cas où", pour
+      anticiper un besoin non exprimé, ou à partir d'une remarque en
+      passant qui n'était pas une vraie demande de mémorisation. Une
+      création hâtive et mal comprise est pire qu'aucune création : elle
+      pollue durablement ses instructions et influence toutes ses
+      conversations futures avec toi. Paramètre : `texte`.
+    - "modifier" : remplace le texte COMPLET d'un comportement existant
+      (à partir de son id, vu via "consulter" ou la description courte
+      donnée dans le message système). Utilise cette action quand
+      l'étudiant veut corriger ou préciser une instruction déjà
+      enregistrée -- pas pour en ajouter une nouvelle (voir "ajouter").
+      Paramètres : `comportement_id`, `texte`.
+    - "supprimer" : supprime DÉFINITIVEMENT un comportement, à partir de
+      son id. Paramètre : `comportement_id`. SENSIBLE : demande toujours
+      confirmation à l'étudiant avant d'être exécuté, quelle que soit la
+      formulation de sa demande.
     """
     requete = ctx.request_context.request
     user_id = requete.query_params.get("user_id")
     agent_id = requete.query_params.get("agent_id")
     if not user_id or not agent_id:
         return "Erreur : impossible d'identifier l'étudiant ou l'agent."
-    try:
-        comportements = _lister_comportements(agent_id, user_id)
-    except Exception as e:
-        logging.error(f"ERREUR outil lister_comportements : {e}")
-        return "Erreur : impossible de lister les comportements, réessaie."
-    if not comportements:
-        return "Aucun comportement enregistré pour l'instant."
-    lignes = []
-    for c in comportements:
-        ligne = f"- {c['description']}"
-        if c.get("lien_type") and c.get("lien_id"):
-            libelle = _libelle_emplacement(c["lien_type"], c["lien_id"]) if c["lien_type"] in TYPES_EMPLACEMENT_BIBLIOTHEQUE else None
-            ligne += f"\n  lié à : {libelle or (c['lien_type'] + ' ' + c['lien_id'])}"
-        ligne += f"\n  [id: {c['id']}]"
-        lignes.append(ligne)
-    return "\n".join(lignes)
 
+    if action == "lister":
+        try:
+            comportements = _lister_comportements(agent_id, user_id)
+        except Exception as e:
+            logging.error(f"ERREUR gerer_comportement (lister) : {e}")
+            return "Erreur : impossible de lister les comportements, réessaie."
+        if not comportements:
+            return "Aucun comportement enregistré pour l'instant."
+        lignes = []
+        for c in comportements:
+            ligne = f"- {c['description']}"
+            if c.get("lien_type") and c.get("lien_id"):
+                libelle = _libelle_emplacement(c["lien_type"], c["lien_id"]) if c["lien_type"] in TYPES_EMPLACEMENT_BIBLIOTHEQUE else None
+                ligne += f"\n  lié à : {libelle or (c['lien_type'] + ' ' + c['lien_id'])}"
+            ligne += f"\n  [id: {c['id']}]"
+            lignes.append(ligne)
+        return "\n".join(lignes)
 
-@mcp_generation.tool()
-def consulter_comportement(comportement_id: str, ctx: Context) -> str:
-    """
-    Lit le skill COMPLET (format Claude, frontmatter + instructions) d'une
-    instruction personnelle -- appelée "skill" dans toute l'interface,
-    "comportement" seulement en interne -- que cet utilisateur l'ait
-    écrite lui-même (section "Mes comportements"), ou qu'il l'ait reçue
-    d'un autre utilisateur via un code (id préfixé "recu:", voir
-    core/codes_partage.py) -- à partir de son id. Le message système t'a
-    déjà donné une courte description de ceux qui semblent pertinents
-    pour ce message -- utilise cet outil quand l'un d'eux semble
-    s'appliquer, AVANT de répondre, pour lire son contenu réel plutôt que
-    de deviner à partir de la description seule.
-    """
-    try:
-        requete = ctx.request_context.request
-        user_id = requete.query_params.get("user_id")
-        agent_id = requete.query_params.get("agent_id")
-        if not user_id or not agent_id:
-            return "Erreur : impossible d'identifier l'étudiant ou l'agent."
-        if comportement_id.startswith("recu:"):
-            skill_md = _obtenir_comportement_skill_recu(user_id, comportement_id)
-        else:
-            skill_md = _obtenir_comportement_skill(agent_id, user_id, comportement_id)
-        if skill_md is None:
-            return "Ce comportement est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
-        return skill_md
-    except Exception as e:
-        logging.error(f"ERREUR outil consulter_comportement : {e}")
-        return "Erreur : impossible de consulter ce comportement, réessaie."
+    if action == "consulter":
+        try:
+            if comportement_id.startswith("recu:"):
+                skill_md = _obtenir_comportement_skill_recu(user_id, comportement_id)
+            else:
+                skill_md = _obtenir_comportement_skill(agent_id, user_id, comportement_id)
+            if skill_md is None:
+                return "Ce comportement est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+            return skill_md
+        except Exception as e:
+            logging.error(f"ERREUR gerer_comportement (consulter) : {e}")
+            return "Erreur : impossible de consulter ce comportement, réessaie."
 
+    if action == "ajouter":
+        try:
+            ligne = _ajouter_comportement(agent_id, user_id, texte)
+            return f"Comportement enregistré (id {ligne['id']}) : {ligne['description']}"
+        except Exception as e:
+            logging.error(f"ERREUR gerer_comportement (ajouter) : {e}")
+            return "Erreur : impossible d'enregistrer ce comportement, réessaie."
 
-@mcp_generation.tool()
-def ajouter_comportement(texte: str, ctx: Context) -> str:
-    """
-    Enregistre une nouvelle instruction personnelle pour CET étudiant
-    (section "Mes comportements", appelée "skill" dans l'interface), à
-    utiliser SEULEMENT quand il exprime CLAIREMENT et EXPLICITEMENT une
-    préférence ou une règle à retenir pour la suite (ex: "explique-moi
-    toujours avec des schémas", "ne me donne jamais la réponse directe,
-    guide-moi", "crée-moi un skill qui..."). S'ajoute EN PLUS de ses
-    autres comportements, ne les remplace pas.
+    if action == "modifier":
+        try:
+            ligne = _modifier_comportement(agent_id, user_id, comportement_id, texte)
+            if ligne is None:
+                return "Ce comportement est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+            return f"Comportement modifié : {ligne['description']}"
+        except Exception as e:
+            logging.error(f"ERREUR gerer_comportement (modifier) : {e}")
+            return "Erreur : impossible de modifier ce comportement, réessaie."
 
-    N'UTILISE JAMAIS CET OUTIL SUR UNE SUPPOSITION. Si la demande est
-    vague, ambiguë, ou que tu devines seulement ce que l'étudiant
-    voudrait retenir sans qu'il l'ait dit clairement, NE CRÉE RIEN --
-    demande-lui d'abord de préciser ce qu'il veut que tu retiennes
-    exactement. Ne crée jamais un comportement "au cas où", pour
-    anticiper un besoin non exprimé, ou à partir d'une remarque en
-    passant qui n'était pas une vraie demande de mémorisation. Une
-    création hâtive et mal comprise est pire qu'aucune création : elle
-    pollue durablement ses instructions et influence toutes ses
-    conversations futures avec toi.
-    """
-    try:
-        requete = ctx.request_context.request
-        user_id = requete.query_params.get("user_id")
-        agent_id = requete.query_params.get("agent_id")
-        if not user_id or not agent_id:
-            return "Erreur : impossible d'identifier l'étudiant ou l'agent."
-        ligne = _ajouter_comportement(agent_id, user_id, texte)
-        return f"Comportement enregistré (id {ligne['id']}) : {ligne['description']}"
-    except Exception as e:
-        logging.error(f"ERREUR outil ajouter_comportement : {e}")
-        return "Erreur : impossible d'enregistrer ce comportement, réessaie."
+    if action == "supprimer":
+        try:
+            ok = _supprimer_comportement(agent_id, user_id, comportement_id)
+            if not ok:
+                return "Ce comportement est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
+            return "Comportement supprimé."
+        except Exception as e:
+            logging.error(f"ERREUR gerer_comportement (supprimer) : {e}")
+            return "Erreur : impossible de supprimer ce comportement, réessaie."
 
-
-@mcp_generation.tool()
-def modifier_comportement(comportement_id: str, texte: str, ctx: Context) -> str:
-    """
-    Remplace le texte COMPLET d'un comportement existant de CET étudiant
-    (appelé "skill" dans l'interface) (à partir de son id, vu via
-    consulter_comportement ou la description courte donnée dans le
-    message système). Utilise cet outil quand l'étudiant veut corriger
-    ou préciser une instruction déjà enregistrée -- pas pour en ajouter
-    une nouvelle (voir ajouter_comportement).
-    """
-    try:
-        requete = ctx.request_context.request
-        user_id = requete.query_params.get("user_id")
-        agent_id = requete.query_params.get("agent_id")
-        if not user_id or not agent_id:
-            return "Erreur : impossible d'identifier l'étudiant ou l'agent."
-        ligne = _modifier_comportement(agent_id, user_id, comportement_id, texte)
-        if ligne is None:
-            return "Ce comportement est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
-        return f"Comportement modifié : {ligne['description']}"
-    except Exception as e:
-        logging.error(f"ERREUR outil modifier_comportement : {e}")
-        return "Erreur : impossible de modifier ce comportement, réessaie."
-
-
-@mcp_generation.tool()
-def supprimer_comportement(comportement_id: str, ctx: Context) -> str:
-    """
-    Supprime DÉFINITIVEMENT un comportement de CET étudiant (appelé
-    "skill" dans l'interface), à partir de son id. SENSIBLE : demande
-    toujours confirmation à l'étudiant avant d'être exécuté, quelle que
-    soit la formulation de sa demande.
-    """
-    try:
-        requete = ctx.request_context.request
-        user_id = requete.query_params.get("user_id")
-        agent_id = requete.query_params.get("agent_id")
-        if not user_id or not agent_id:
-            return "Erreur : impossible d'identifier l'étudiant ou l'agent."
-        ok = _supprimer_comportement(agent_id, user_id, comportement_id)
-        if not ok:
-            return "Ce comportement est introuvable (id invalide, ou ne correspond pas à cet étudiant)."
-        return "Comportement supprimé."
-    except Exception as e:
-        logging.error(f"ERREUR outil supprimer_comportement : {e}")
-        return "Erreur : impossible de supprimer ce comportement, réessaie."
+    return (
+        f"Erreur : action '{action}' inconnue. Actions valides : lister, "
+        "consulter, ajouter, modifier, supprimer."
+    )
 
 
 @mcp_generation.tool()
