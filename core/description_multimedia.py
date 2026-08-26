@@ -86,11 +86,20 @@ def decrire_image_bibliotheque(contenu: bytes, type_mime: str) -> str | None:
     return texte or None
 
 
-def transcrire_audio_bibliotheque(contenu: bytes, nom_fichier: str) -> str | None:
+def transcrire_audio_bibliotheque(contenu: bytes, nom_fichier: str) -> list[dict] | None:
     """
-    Transcrit un audio via Whisper (Groq), pour indexation texte. None
-    si la transcription échoue, est vide, ou correspond à une
-    hallucination Whisper connue sur audio silencieux.
+    Transcrit un audio via Whisper (Groq), pour indexation texte.
+
+    Renvoie désormais une LISTE DE SEGMENTS horodatés (26/08, citations
+    cliquables -- chaque segment porte son "start"/"end" en secondes et
+    son "text", format natif renvoyé par Whisper avec
+    response_format="verbose_json") plutôt qu'un texte brut unique :
+    voir core/bibliotheque_rag.py:indexer_transcription_bibliotheque, qui
+    indexe chaque segment comme son propre chunk avec sa position.
+
+    None si la transcription échoue ou si aucun segment exploitable n'en
+    ressort (audio silencieux, hallucination Whisper connue sur CHAQUE
+    segment).
     """
     from groq import Groq
 
@@ -100,12 +109,22 @@ def transcrire_audio_bibliotheque(contenu: bytes, nom_fichier: str) -> str | Non
             file=(nom_fichier or "audio", contenu),
             model="whisper-large-v3",
             language="fr",
+            response_format="verbose_json",
         )
     except Exception as e:
         logging.error(f"ERREUR TRANSCRIPTION AUDIO (bibliothèque) : {e}")
         return None
 
-    texte = (transcription.text or "").strip()
-    if not texte or texte.lower().rstrip(".") in PHRASES_HALLUCINEES_WHISPER:
-        return None
-    return texte
+    segments_bruts = getattr(transcription, "segments", None) or []
+    segments = []
+    for segment in segments_bruts:
+        # segment peut être un dict ou un objet selon la version du SDK Groq -- gère les deux
+        texte = (segment.get("text") if isinstance(segment, dict) else segment.text) or ""
+        texte = texte.strip()
+        if not texte or texte.lower().rstrip(".") in PHRASES_HALLUCINEES_WHISPER:
+            continue
+        debut = segment.get("start") if isinstance(segment, dict) else segment.start
+        fin = segment.get("end") if isinstance(segment, dict) else segment.end
+        segments.append({"text": texte, "start": debut, "end": fin})
+
+    return segments or None

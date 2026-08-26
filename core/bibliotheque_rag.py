@@ -45,23 +45,51 @@ def _get_secret(cle):
 supabase = create_client(_get_secret("SUPABASE_URL"), _get_secret("SUPABASE_SECRET"))
 
 
-def extraire_texte_pdf(chemin_pdf: str) -> str:
-    """Même logique que indexers/index_documents.py:extraire_texte_pdf, dupliquée volontairement pour ne pas créer de dépendance croisée entre les deux circuits RAG."""
-    texte = ""
+def extraire_pages_pdf(chemin_pdf: str) -> list[str]:
+    """
+    Comme extraire_texte_pdf, mais renvoie le texte PAGE PAR PAGE (26/08,
+    besoin de conserver le numéro de page pour les citations cliquables
+    -- voir indexer_pdf_bibliotheque). Une page vide (aucun texte extrait)
+    est renvoyée comme chaîne vide, pas omise, pour que l'index de la
+    liste reste le numéro de page réel (0 = page 1).
+    """
+    pages = []
     with open(chemin_pdf, "rb") as f:
         reader = PyPDF2.PdfReader(f)
         for page in reader.pages:
-            texte += (page.extract_text() or "") + "\n"
-    return texte.replace("\x00", "")
+            pages.append((page.extract_text() or "").replace("\x00", ""))
+    return pages
 
 
-def indexer_texte_bibliotheque(texte: str, fichier_id: str, user_id: str) -> int:
+def extraire_texte_pdf(chemin_pdf: str) -> str:
+    """Même logique que indexers/index_documents.py:extraire_texte_pdf, dupliquée volontairement pour ne pas créer de dépendance croisée entre les deux circuits RAG. Conservée telle quelle (texte concaténé) pour lire_document_bibliotheque_en_entier et tout appelant qui n'a pas besoin des pages."""
+    return "\n".join(extraire_pages_pdf(chemin_pdf))
+
+
+def indexer_texte_bibliotheque(
+    texte: str,
+    fichier_id: str,
+    user_id: str,
+    page_debut: int | None = None,
+    page_fin: int | None = None,
+    timestamp_debut: float | None = None,
+    timestamp_fin: float | None = None,
+) -> int:
     """
     Découpe + vectorise un texte DÉJÀ EXTRAIT (peu importe la source
     d'origine -- PDF, Word, Excel...) et insère ses chunks dans
     documents_bibliotheque, liés à `fichier_id` (pour le nettoyage en
     cascade à la suppression, voir la migration). Renvoie le nombre de
     chunks indexés.
+
+    `page_debut`/`page_fin` et `timestamp_debut`/`timestamp_fin` (26/08,
+    citations cliquables) : quand l'appelant sait d'où vient précisément
+    ce texte (une page de PDF, un segment audio horodaté), il les passe
+    ici -- appliqués tels quels à TOUS les chunks produits par cet appel
+    (un appel = une seule page ou un seul segment, voir
+    indexer_pdf_bibliotheque et indexer_transcription_bibliotheque, pour
+    rester précis). None sinon (note texte, image, lien -- pas de notion
+    de position).
     """
     morceaux = decouper_texte(texte)[:TAILLE_MAX_CHUNKS_PAR_DOCUMENT]
 
@@ -75,6 +103,10 @@ def indexer_texte_bibliotheque(texte: str, fichier_id: str, user_id: str) -> int
             "user_id": user_id,
             "contenu": morceau,
             "embedding": embedding,
+            "page_debut": page_debut,
+            "page_fin": page_fin,
+            "timestamp_debut": timestamp_debut,
+            "timestamp_fin": timestamp_fin,
         })
 
     if lignes:
@@ -85,8 +117,42 @@ def indexer_texte_bibliotheque(texte: str, fichier_id: str, user_id: str) -> int
 
 
 def indexer_pdf_bibliotheque(chemin_pdf: str, fichier_id: str, user_id: str) -> int:
-    """Raccourci pour un PDF reçu en bytes (voir api/bibliotheque_utilisateur.py) : extrait le texte puis délègue à indexer_texte_bibliotheque."""
-    return indexer_texte_bibliotheque(extraire_texte_pdf(chemin_pdf), fichier_id, user_id)
+    """
+    Indexe un PDF reçu en chemin de fichier (voir
+    api/bibliotheque_utilisateur.py), PAGE PAR PAGE (26/08) plutôt qu'en
+    un seul bloc -- chaque chunk produit hérite ainsi du numéro de la
+    page dont il vient (page_debut = page_fin = numéro de page, en base
+    1). Une page sans texte est simplement ignorée.
+    """
+    total = 0
+    for numero, texte_page in enumerate(extraire_pages_pdf(chemin_pdf), start=1):
+        if not texte_page.strip():
+            continue
+        total += indexer_texte_bibliotheque(
+            texte_page, fichier_id, user_id, page_debut=numero, page_fin=numero,
+        )
+    return total
+
+
+def indexer_transcription_bibliotheque(segments: list[dict], fichier_id: str, user_id: str) -> int:
+    """
+    Indexe une transcription audio SEGMENT PAR SEGMENT (26/08, voir
+    description_multimedia.transcrire_audio_bibliotheque qui renvoie
+    désormais ces segments horodatés au lieu d'un texte brut) -- chaque
+    segment devient son propre chunk, avec son timestamp_debut/fin
+    d'origine (en secondes), pour permettre de rouvrir le lecteur audio
+    directement au bon endroit.
+    """
+    total = 0
+    for segment in segments:
+        texte = (segment.get("text") or "").strip()
+        if not texte:
+            continue
+        total += indexer_texte_bibliotheque(
+            texte, fichier_id, user_id,
+            timestamp_debut=segment.get("start"), timestamp_fin=segment.get("end"),
+        )
+    return total
 
 
 def lire_document_bibliotheque_en_entier(fichier_id: str, user_id: str) -> str | None:
@@ -116,11 +182,43 @@ def lire_document_bibliotheque_en_entier(fichier_id: str, user_id: str) -> str |
     return "\n\n".join(ligne["contenu"] for ligne in res.data)
 
 
+def formater_source_bibliotheque(r: dict) -> str | None:
+    """
+    Construit la ligne "(Source : ...)" à afficher après un extrait
+    renvoyé par chercher_bibliotheque/chercher_bibliotheque_publique
+    (26/08, factorisé pour rester identique partout où c'est utilisé --
+    core/serveur_mcp_espace.py et core/serveur_mcp_generation.py).
+
+    Ajoute la page (PDF) ou le timestamp mm:ss (audio) quand ce chunk en
+    a un, pour que l'appelant (l'IA, puis le frontend) puisse distinguer
+    la SOURCE (le document entier, `url_publique`) du PARAGRAPHE exact
+    (cette page/cet instant précis) -- les deux popups cliquables
+    demandés par Bourama. None si le résultat n'a même pas de quoi
+    identifier une source (jamais censé arriver si nom_fichier/
+    url_publique sont bien remontés par la fonction SQL).
+    """
+    if not (r.get("nom_fichier") and r.get("url_publique")):
+        return None
+    reperage = ""
+    if r.get("page_debut") is not None:
+        if r.get("page_fin") and r["page_fin"] != r["page_debut"]:
+            reperage = f", page {r['page_debut']}-{r['page_fin']}"
+        else:
+            reperage = f", page {r['page_debut']}"
+    elif r.get("timestamp_debut") is not None:
+        debut = int(r["timestamp_debut"])
+        reperage = f", à {debut // 60:02d}:{debut % 60:02d}"
+    return f"(Source : {r['nom_fichier']}{reperage}, {r['url_publique']})"
+
+
 def chercher_bibliotheque(question: str, user_id: str, match_count: int = 5) -> list:
     """
     Recherche sémantique dans la bibliothèque personnelle de `user_id`.
     Renvoie une liste de {contenu, similarite, fichier_id, nom_fichier,
-    url_publique, type_mime}, triée par pertinence -- la fonction SQL
+    url_publique, type_mime, page_debut, page_fin, timestamp_debut,
+    timestamp_fin} (ces 4 derniers champs à None quand le chunk n'a pas
+    de position connue -- note texte, image, lien), triée par pertinence
+    -- la fonction SQL
     recherche_bibliotheque (17/08) joint désormais fichiers_uploades pour
     que chaque extrait porte la référence de son document d'origine :
     avant ça, un extrait pertinent trouvé ici ne permettait jamais de

@@ -145,8 +145,10 @@ from core.bibliotheque_fichiers import (
 from core.bibliotheque_rag import (
     indexer_pdf_bibliotheque as _indexer_pdf_bibliotheque,
     indexer_texte_bibliotheque as _indexer_texte_bibliotheque,
+    indexer_transcription_bibliotheque as _indexer_transcription_bibliotheque,
     chercher_bibliotheque as _chercher_bibliotheque,
     lire_document_bibliotheque_en_entier as _lire_document_bibliotheque_en_entier,
+    formater_source_bibliotheque as _formater_source_bibliotheque,
 )
 from core.description_multimedia import (
     decrire_image_bibliotheque as _decrire_image_bibliotheque,
@@ -271,8 +273,9 @@ def consulter_bibliotheque(question: str, ctx: Context) -> str:
     blocs = []
     for r in resultats:
         bloc = r["contenu"]
-        if r.get("nom_fichier") and r.get("url_publique"):
-            bloc += f"\n(Source : {r['nom_fichier']}, {r['url_publique']})"
+        source = _formater_source_bibliotheque(r)
+        if source:
+            bloc += f"\n{source}"
         blocs.append(bloc)
     return "\n\n---\n\n".join(blocs)
 
@@ -571,9 +574,9 @@ def ajouter_document_bibliotheque(
             logging.error(f"ERREUR vectorisation image ajouter_document_bibliotheque (fichier_id={ligne['id']}) : {e}")
     elif type_mime.startswith("audio/"):
         try:
-            transcription_audio = _transcrire_audio_bibliotheque(contenu, nom_original)
-            if transcription_audio:
-                _indexer_texte_bibliotheque(transcription_audio, fichier_id=ligne["id"], user_id=user_id)
+            segments_audio = _transcrire_audio_bibliotheque(contenu, nom_original)
+            if segments_audio:
+                _indexer_transcription_bibliotheque(segments_audio, fichier_id=ligne["id"], user_id=user_id)
         except Exception as e:
             logging.error(f"ERREUR vectorisation audio ajouter_document_bibliotheque (fichier_id={ligne['id']}) : {e}")
 

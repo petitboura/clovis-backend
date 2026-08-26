@@ -32,7 +32,7 @@ from core.erreurs import erreur_api
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "core"))
 from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien, lister_fichiers, supprimer_fichier  # noqa: E402
-from bibliotheque_rag import indexer_pdf_bibliotheque, indexer_texte_bibliotheque  # noqa: E402
+from bibliotheque_rag import indexer_pdf_bibliotheque, indexer_texte_bibliotheque, indexer_transcription_bibliotheque  # noqa: E402
 from description_multimedia import decrire_image_bibliotheque, transcrire_audio_bibliotheque  # noqa: E402
 from codes_partage import propager_fichier_bibliotheque, propager_lien_bibliotheque  # noqa: E402
 
@@ -83,9 +83,9 @@ def _indexer_et_propager(contenu, type_mime, nom_fichier, description, ligne, ut
             logging.error(f"ERREUR vectorisation image bibliothèque perso (fichier_id={ligne['id']}) : {e}")
     elif (type_mime or "").startswith("audio/"):
         try:
-            transcription_audio = transcrire_audio_bibliotheque(contenu, nom_fichier)
-            if transcription_audio:
-                indexer_texte_bibliotheque(transcription_audio, fichier_id=ligne["id"], user_id=utilisateur.id)
+            segments_audio = transcrire_audio_bibliotheque(contenu, nom_fichier)
+            if segments_audio:
+                indexer_transcription_bibliotheque(segments_audio, fichier_id=ligne["id"], user_id=utilisateur.id)
         except Exception as e:
             logging.error(f"ERREUR vectorisation audio bibliothèque perso (fichier_id={ligne['id']}) : {e}")
 

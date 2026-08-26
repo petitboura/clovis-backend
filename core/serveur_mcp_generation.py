@@ -144,6 +144,8 @@ from core.bibliotheque_rag import (
     lire_document_bibliotheque_en_entier as _lire_document_bibliotheque_en_entier,
     indexer_pdf_bibliotheque as _indexer_pdf_bibliotheque,
     indexer_texte_bibliotheque as _indexer_texte_bibliotheque,
+    indexer_transcription_bibliotheque as _indexer_transcription_bibliotheque,
+    formater_source_bibliotheque as _formater_source_bibliotheque,
 )
 from core.bibliotheque_programme import (
     classer_document as _classer_document,
@@ -500,8 +502,9 @@ def gerer_document_bibliotheque(
         blocs = []
         for r in resultats:
             bloc = r["contenu"]
-            if r.get("nom_fichier") and r.get("url_publique"):
-                bloc += f"\n(Source : {r['nom_fichier']}, {r['url_publique']})"
+            source = _formater_source_bibliotheque(r)
+            if source:
+                bloc += f"\n{source}"
             blocs.append(bloc)
         return "\n\n---\n\n".join(blocs)
 
@@ -524,8 +527,9 @@ def gerer_document_bibliotheque(
         blocs = []
         for r in resultats:
             bloc = r["contenu"]
-            if r.get("nom_fichier") and r.get("url_publique"):
-                bloc += f"\n(Source : {r['nom_fichier']}, {r['url_publique']})"
+            source = _formater_source_bibliotheque(r)
+            if source:
+                bloc += f"\n{source}"
             blocs.append(bloc)
         return "\n\n---\n\n".join(blocs)
 
@@ -672,9 +676,9 @@ def gerer_document_bibliotheque(
                 logging.error(f"ERREUR vectorisation image gerer_document_bibliotheque (ajouter_fichier, fichier_id={ligne['id']}) : {e}")
         elif type_mime_val.startswith("audio/"):
             try:
-                transcription_audio = _transcrire_audio_bibliotheque(contenu_fichier, nom_original)
-                if transcription_audio:
-                    _indexer_texte_bibliotheque(transcription_audio, fichier_id=ligne["id"], user_id=user_id)
+                segments_audio = _transcrire_audio_bibliotheque(contenu_fichier, nom_original)
+                if segments_audio:
+                    _indexer_transcription_bibliotheque(segments_audio, fichier_id=ligne["id"], user_id=user_id)
             except Exception as e:
                 logging.error(f"ERREUR vectorisation audio gerer_document_bibliotheque (ajouter_fichier, fichier_id={ligne['id']}) : {e}")
         try:
