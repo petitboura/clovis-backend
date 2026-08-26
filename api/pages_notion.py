@@ -222,7 +222,18 @@ def creer_page(payload: PagePayload, utilisateur=Depends(utilisateur_courant)):
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (création page {utilisateur.id}) : {e}")
         raise erreur_api(500, "ERREUR_INCONNUE")
-    return Page(**res.data[0])
+    page = res.data[0]
+    # Bloc texte vide par défaut, 26/08/2026, demande Bourama : une page
+    # ne s'empile pas bloc par bloc à partir de rien -- le texte est le
+    # support de base, toujours présent, jamais à ajouter explicitement
+    # via le menu "+ Ajouter" (qui sert aux "legos" : titre, liste, etc.).
+    try:
+        supabase.table("blocs").insert(
+            {"page_id": page["id"], "type": "texte", "contenu": {"texte": ""}, "ordre": 0}
+        ).execute()
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (bloc texte par défaut, page {page['id']}) : {e}")
+    return Page(**page)
 
 
 @router_pages.get("/{page_id}")
@@ -234,10 +245,21 @@ def lire_page(page_id: str, utilisateur=Depends(utilisateur_courant)):
             supabase.table("pages").select("*").eq("parent_id", page_id).order("ordre").execute()
         )
         blocs = supabase.table("blocs").select("*").eq("page_id", page_id).order("ordre").execute()
+        blocs_data = blocs.data or []
+        # Retrofit, 26/08/2026 : page existante créée avant l'ajout du bloc
+        # texte par défaut (voir creer_page) -- on le crée maintenant plutôt
+        # que d'afficher une page vide sans rien à cliquer.
+        if not blocs_data:
+            nouveau = (
+                supabase.table("blocs")
+                .insert({"page_id": page_id, "type": "texte", "contenu": {"texte": ""}, "ordre": 0})
+                .execute()
+            )
+            blocs_data = nouveau.data or []
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (détail page {page_id}) : {e}")
         raise erreur_api(500, "ERREUR_INCONNUE")
-    return {**page, "sous_pages": sous_pages.data or [], "blocs": blocs.data or []}
+    return {**page, "sous_pages": sous_pages.data or [], "blocs": blocs_data}
 
 
 @router_pages.get("/{page_id}/sous-pages", response_model=list[Page])
