@@ -1903,17 +1903,73 @@ def _resultat_pour_affichage(resultat_brut, max_chars=3000):
     return resultat_brut[:max_chars] + f"\n... (tronqué, {len(resultat_brut)} caractères au total)"
 
 
+_RE_SOURCE_BIBLIOTHEQUE_LIGNE = re.compile(r"^\(Source : (.+), (https?://\S+)\)$")
+_RE_PAGE_BIBLIOTHEQUE = re.compile(r"^(.*), page (\d+)(?:-\d+)?$")
+_RE_TIMESTAMP_BIBLIOTHEQUE = re.compile(r"^(.*), à (\d{2}):(\d{2})$")
+
+
+def _sources_bibliotheque_depuis_texte(resultat_brut):
+    """
+    consulter_bibliotheque (aujourd'hui exposé via gerer_document_
+    bibliotheque, actions chercher/chercher_publique) renvoie du texte
+    formaté par bloc -- "{extrait}\\n(Source : {nom}[, page N[-M]|, à
+    MM:SS], {url})", blocs séparés par "\\n\\n---\\n\\n" (voir
+    core/bibliotheque_rag.py:formater_source_bibliotheque). Pas de JSON
+    ici, donc parsing texte dédié, sur le même principe que le cas
+    GitHub ci-dessus.
+
+    Renvoie des sources enrichies de `extrait` (le paragraphe exact
+    utilisé) et `url_extrait` (URL positionnée -- fragment #page= pour
+    un PDF, #t=<secondes> pour un audio ; identique à `url` quand le
+    chunk n'a pas de position, càd image/note/lien) : les DEUX popups
+    cliquables demandées par Bourama (26/08, voir SourcesBulle.tsx) --
+    l'une ouvre le document, l'autre ouvre directement le bon passage.
+    """
+    if not isinstance(resultat_brut, str) or "(Source : " not in resultat_brut:
+        return []
+
+    sources = []
+    for bloc in resultat_brut.split("\n\n---\n\n"):
+        lignes = bloc.strip().splitlines()
+        if not lignes:
+            continue
+        m = _RE_SOURCE_BIBLIOTHEQUE_LIGNE.match(lignes[-1].strip())
+        if not m:
+            continue
+        nom_et_reperage, url = m.group(1), m.group(2)
+        extrait = "\n".join(lignes[:-1]).strip()
+
+        m_page = _RE_PAGE_BIBLIOTHEQUE.match(nom_et_reperage)
+        m_ts = _RE_TIMESTAMP_BIBLIOTHEQUE.match(nom_et_reperage)
+        if m_page:
+            nom, page = m_page.group(1), m_page.group(2)
+            url_extrait = f"{url}#page={page}"
+        elif m_ts:
+            nom, mm, ss = m_ts.group(1), int(m_ts.group(2)), int(m_ts.group(3))
+            url_extrait = f"{url}#t={mm * 60 + ss}"
+        else:
+            nom, url_extrait = nom_et_reperage, url
+
+        sources.append({"titre": nom, "url": url, "extrait": extrait, "url_extrait": url_extrait})
+
+    return sources
+
+
 def _extraire_sources(appel, resultat_brut):
     """
     Construit les sources ({"titre", "url"}) d'un appel d'outil pour
     l'evenement SSE "sources" (citations affichees sous la reponse, voir
-    ChatIA.tsx/SourcesBulle.tsx). Deux strategies, dans l'ordre :
+    ChatIA.tsx/SourcesBulle.tsx). Trois strategies, dans l'ordre :
 
     1. Generique par forme de JSON (_sources_depuis_json_generique) --
        future-proof, aucune liste d'outils a maintenir.
     2. Cas particuliers a resultat texte brut, ou la source se deduit des
        arguments de l'appel plutot que du resultat (GitHub aujourd'hui ;
        tout futur outil du meme genre s'ajoute ici au besoin).
+    3. Bibliotheque perso/publique (texte brut aussi, mais la source se
+       deduit du RESULTAT lui-meme, pas des arguments -- voir
+       _sources_bibliotheque_depuis_texte, seul cas avec extrait +
+       url_extrait a ce jour).
 
     Best-effort partout : jamais d'exception qui remonte jusqu'a la
     reponse -- les sources sont un bonus.
@@ -1924,6 +1980,9 @@ def _extraire_sources(appel, resultat_brut):
 
     if appel["name"] in ("explorer_depot_github", "lire_fichier_depot_github"):
         return _sources_github_depuis_arguments(appel)
+
+    if appel["name"] == "gerer_document_bibliotheque":
+        return _sources_bibliotheque_depuis_texte(resultat_brut)
 
     return []
 
