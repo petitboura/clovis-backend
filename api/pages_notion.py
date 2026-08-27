@@ -7,7 +7,7 @@ route vérifie que l'appelant est bien propriétaire de la ressource
 (directement pour une page, en remontant à la page pour un bloc) -- jamais
 de lecture/écriture croisée entre comptes ici.
 
-Pas d'éditeur de blocs ici (lot 5), pas de LaTeX/pages carrefour (lot 2),
+Pas d'éditeur de blocs riche complet ici,
 pas de bases de révision (lot 3), pas de répétition espacée (lot 4) --
 uniquement le schéma et le CRUD de base. Voir aussi core/serveur_mcp_generation.py
 et core/serveur_mcp_espace.py pour les outils de navigation exposés à l'IA
@@ -23,11 +23,6 @@ from pydantic import BaseModel
 from api.auth import utilisateur_courant, supabase
 from core.erreurs import erreur_api
 from core.bibliotheque_fichiers import enregistrer_fichier
-from core.pages_notion_llm import (
-    ajouter_reference_carrefour as _ajouter_reference_carrefour,
-    lister_references_carrefour as _lister_references_carrefour,
-    supprimer_reference_carrefour as _supprimer_reference_carrefour,
-)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -48,19 +43,12 @@ TYPES_BLOCS_CONNUS = {
     "citation",
     "separateur",
     "equation",
-    "base_donnees",  # bug corrigé le 21/08/2026 -- manquait ici alors que
-    # présent dans la copie de core/pages_notion_llm.py (chemin MCP/IA),
-    # ce qui rétrogradait silencieusement en "texte" tout bloc base de
-    # données créé depuis l'interface (chemin REST, api/blocs).
     "image",     # Partie 2, 22/08/2026 -- contenu = {"url": "...", "nom": "..."}
     "fichier",   # idem, fichier générique (pas forcément une image)
     "video",     # contenu = {"url": "..."} -- lien externe (YouTube etc.), pas d'upload direct
     "embed",     # contenu = {"url": "..."} -- intégration générique (site, doc externe)
     "bascule",   # toggle -- contenu = {"texte": "...", "ouvert": bool}, peut contenir des blocs enfants (parent_bloc_id)
 }
-
-TYPES_CIBLE_CARREFOUR = ("programme", "matiere", "chapitre", "document")
-
 
 class PagePayload(BaseModel):
     titre: str = ""
@@ -81,7 +69,6 @@ class Page(BaseModel):
     parent_id: str | None = None
     titre: str
     ordre: int
-    est_carrefour: bool = False
     icone: str | None = None
     created_at: str
     updated_at: str
@@ -304,45 +291,6 @@ def supprimer_page(page_id: str, utilisateur=Depends(utilisateur_courant)):
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (suppression page {page_id}) : {e}")
         raise erreur_api(500, "ERREUR_INCONNUE")
-
-
-class ReferenceCarrefourPayload(BaseModel):
-    type_cible: str
-    cible_id: str
-
-
-class ReferenceCarrefour(BaseModel):
-    id: str
-    type_cible: str
-    cible_id: str
-    label: str
-
-
-@router_pages.get("/{page_id}/carrefour", response_model=list[ReferenceCarrefour])
-def lister_carrefour(page_id: str, utilisateur=Depends(utilisateur_courant)):
-    _charger_page_ou_404(page_id, utilisateur.id)
-    return _lister_references_carrefour(page_id)
-
-
-@router_pages.post("/{page_id}/carrefour", response_model=ReferenceCarrefour, status_code=201)
-def ajouter_carrefour(page_id: str, payload: ReferenceCarrefourPayload, utilisateur=Depends(utilisateur_courant)):
-    if payload.type_cible not in TYPES_CIBLE_CARREFOUR:
-        raise erreur_api(422, "TYPE_DE_CIBLE_INVALIDE")
-    ref = _ajouter_reference_carrefour(utilisateur.id, page_id, payload.type_cible, payload.cible_id)
-    if ref is None:
-        raise erreur_api(404, "PAGE_OU_CIBLE_INTROUVABLE")
-    refs = _lister_references_carrefour(page_id)
-    correspondante = next((r for r in refs if r["id"] == ref["id"]), None)
-    if correspondante is None:
-        raise erreur_api(500, "ERREUR_INCONNUE")
-    return correspondante
-
-
-@router_pages.delete("/{page_id}/carrefour/{reference_id}", status_code=204)
-def supprimer_carrefour(page_id: str, reference_id: str, utilisateur=Depends(utilisateur_courant)):
-    ok = _supprimer_reference_carrefour(utilisateur.id, page_id, reference_id)
-    if not ok:
-        raise erreur_api(404, "PAGE_INTROUVABLE")
 
 
 # ================================ Blocs ===================================

@@ -215,8 +215,6 @@ OUTILS_SENSIBLES = {
     # les suppressions programme ci-dessus : irréversible, toujours confirmé.
     "supprimer_page",
     "supprimer_bloc",
-    # Lot 3/5 (20/08)
-    "supprimer_element_base",
     # Dossiers de la bibliothèque personnelle (22/08, demande Bourama) :
     # peut supprimer des fichiers avec le dossier (voir
     # core/dossiers_bibliotheque.py:supprimer_dossier) -- irréversible,
@@ -443,16 +441,6 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "ajouter_bloc": {"label": "Ajout d'un bloc", "icone": "FileText", "onglet": None},
     "modifier_bloc": {"label": "Modification d'un bloc", "icone": "FileText", "onglet": None},
     "supprimer_bloc": {"label": "Suppression d'un bloc", "icone": "Trash2", "onglet": None},
-    "ajouter_reference_carrefour": {"label": "Ajout d'une référence carrefour", "icone": "Link", "onglet": None},
-    "supprimer_reference_carrefour": {"label": "Retrait d'une référence carrefour", "icone": "Link", "onglet": None},
-    "ajouter_base_donnees": {"label": "Création d'une base de révision/tâches", "icone": "Table", "onglet": None},
-    "consulter_base_donnees": {"label": "Consultation d'une base", "icone": "Table", "onglet": None},
-    "ajouter_propriete_base": {"label": "Ajout d'une propriété", "icone": "Table", "onglet": None},
-    "ajouter_element_base": {"label": "Ajout d'un élément", "icone": "Table", "onglet": None},
-    "modifier_element_base": {"label": "Modification d'un élément", "icone": "Table", "onglet": None},
-    "supprimer_element_base": {"label": "Suppression d'un élément", "icone": "Trash2", "onglet": None},
-    "lister_elements_a_reviser": {"label": "Liste des révisions dues", "icone": "Brain", "onglet": None},
-    "enregistrer_reponse_revision": {"label": "Enregistrement d'une réponse de révision", "icone": "Brain", "onglet": None},
     "gerer_comportement": {"label": "Skills personnels", "icone": "ScrollText", "onglet": None},
     # Routage en deux niveaux (22/08/2026, demande Bourama) : jamais un
     # outil que le grand LLM appelle lui-même (pas de tool MCP réel), c'est
