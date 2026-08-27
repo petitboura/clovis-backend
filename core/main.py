@@ -1146,9 +1146,17 @@ L'interface affiche déjà chaque appel d'outil. Réponds directement en langage
 </appels_outils>
 
 <base_connaissances_clovis>
+<base_connaissances_clovis>
 gerer_base_connaissance regroupe un seul mécanisme en plusieurs étapes (actions "chercher", "lister_articles", "lire_article", "obtenir_fichier"), pas plusieurs outils indépendants, dès qu'il est disponible ce tour-ci, utilise ses actions ensemble : cherche (action "chercher"), identifie/liste si besoin (action "lister_articles"), lis le texte complet si utile (action "lire_article"), et donne le fichier réel (action "obtenir_fichier") quand tu juges que ça aide réellement la réponse à ce moment précis de la conversation, sans attendre que l'utilisateur le demande explicitement, puisqu'il ne sait généralement pas que ce fichier existe. Ce n'est PAS systématique à chaque question sur Clovis : juge au cas par cas, selon la question posée et le fil de la conversation (ex : une simple clarification ou une question déjà répondue juste avant n'a pas besoin du fichier ; une question où l'utilisateur cherche clairement à suivre une procédure complète ou à consulter un contenu de référence en a besoin).
 Ceci s'applique à TOUTE question sur Clovis ou sur l'application en général, même formulée normalement, sans jamais mentionner "base de connaissance" ou un format de fichier, mets-toi à la place d'un utilisateur qui ignore que ce mécanisme existe : il demande juste comment faire quelque chose, pourquoi ça bug, ou ce que fait une fonctionnalité. Exception : si tu as déjà cherché sur ce sujet précis plus tôt dans cette même conversation sans rien trouver de pertinent, ne réinsiste pas indéfiniment, réponds avec ce que tu sais déjà ou dis clairement que tu ne trouves pas l'information.
-</base_connaissances_clovis>"""
+</base_connaissances_clovis>
+
+<citations_bibliotheque>
+Quand gerer_document_bibliotheque (action "chercher"/"chercher_publique") te renvoie des extraits, chacun se termine par une ligne "(Source : nom[, page N|, à MM:SS], url)", et le résultat de l'outil t'indique explicitement quels numéros utiliser (ex : "numérote tes citations [n](citation:n) pour ces 3 sources de 4 à 6"). Deux choses OBLIGATOIRES, pas une seule :
+1. Juste après le passage de TA réponse qui utilise un extrait précis, insère le marqueur [n](citation:n) correspondant, avec le numéro exact indiqué par l'outil pour CET extrait précis (respecte l'ordre donné, ne réinvente jamais les numéros toi-même).
+2. Ne réécris jamais toi-même la ligne "(Source : ...)" ni l'URL en clair dans ta réponse -- l'interface affiche déjà la liste complète des sources séparément. Ta seule contribution est le marqueur [n](citation:n) au bon endroit dans le texte.
+Exemple : l'outil t'indique d'utiliser 4 à 6, et l'extrait numéro 5 dit "la mitochondrie produit l'ATP" -> tu écris "...la mitochondrie produit l'ATP [5](citation:5)...". N'utilise ce format QUE pour des extraits venant réellement de gerer_document_bibliotheque, jamais pour une autre source.
+</citations_bibliotheque>"""
 
 INSTRUCTIONS_ARBITRAGE_CALCUL = """
 
@@ -2052,7 +2060,7 @@ def _est_outil_sensible(appel):
     return bool(action) and f"{appel['name']}:{action}" in OUTILS_SENSIBLES
 
 
-def _traiter_appels(appels, messages_agent, table_routage):
+def _traiter_appels(appels, messages_agent, table_routage, compteur_sources=None):
     """
     Execute une liste d'appels d'outils, en ajoutant le resultat de chacun
     a messages_agent au fur et a mesure. Des qu'un outil sensible
@@ -2067,7 +2075,19 @@ def _traiter_appels(appels, messages_agent, table_routage):
     simultanees). On ne parallelise jamais un outil sensible ni ce qui le
     suit : la garantie "on s'arrete avant de l'executer" doit rester
     valable meme dans le lot.
+
+    `compteur_sources` (26/08, citations inline bibliotheque) : boite
+    mutable [n] partagee entre TOUS les appels de _traiter_appels pour un
+    meme tour (voir _agent_groq, qui la declare une seule fois et la
+    passe aux deux appels internes) -- permet de numeroter les sources de
+    CHAQUE appel a la suite des precedentes, dans le meme ordre que
+    l'evenement SSE "sources" est emis (donc le meme ordre que le
+    frontend utilise pour sa propre numerotation globale, voir
+    BulleMessage.tsx:sourcesAplaties). Fraiche (commence a 0) si non
+    fournie.
     """
+    if compteur_sources is None:
+        compteur_sources = [0]
     index_sensible = next(
         (i for i, appel in enumerate(appels) if _est_outil_sensible(appel)),
         None,
@@ -2144,12 +2164,29 @@ def _traiter_appels(appels, messages_agent, table_routage):
                         "fichiers": fichiers_generes,
                     }
                 sources = _extraire_sources(appel, resultat)
+                contenu_pour_modele = resultat
                 if sources:
+                    debut_numero = compteur_sources[0] + 1
+                    compteur_sources[0] += len(sources)
                     yield {"type": "sources", "sources": sources}
+                    # Le modele voit le RESULTAT BRUT (pas l'evenement SSE,
+                    # qui va direct au frontend) -- il a donc besoin qu'on
+                    # lui dise explicitement quels numeros utiliser pour
+                    # [n](citation:n), voir <citations_bibliotheque> du
+                    # system prompt. Uniquement pour la bibliotheque
+                    # aujourd'hui : aucune autre instruction de citation
+                    # inline n'existe pour les autres outils sourcés.
+                    if appel["name"] == "gerer_document_bibliotheque":
+                        contenu_pour_modele = (
+                            f"{resultat}\n\n[Numérote tes citations "
+                            f"[n](citation:n) pour ces {len(sources)} source(s) "
+                            f"de {debut_numero} à {compteur_sources[0]}, dans "
+                            f"cet ordre.]"
+                        )
                 messages_agent.append({
                     "role": "tool",
                     "tool_call_id": appel["id"],
-                    "content": resultat,
+                    "content": contenu_pour_modele,
                 })
 
     if index_sensible is not None:
@@ -2225,6 +2262,12 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
     est affiche a l'utilisateur plutot que de le laisser sans reponse.
     """
     kwargs_reasoning = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
+    # Compteur de sources partagé sur tout le tour (26/08, citations
+    # inline bibliotheque) -- une seule boîte, passée aux deux appels de
+    # _traiter_appels ci-dessous, pour que la numérotation ne reparte
+    # jamais à 1 entre "finir les appels en attente d'une confirmation"
+    # et "le prochain lot d'appels du modèle". Voir _traiter_appels.
+    compteur_sources = [0]
     # reasoning_format="parsed" separe le raisonnement (delta.reasoning) du
     # texte de reponse final (delta.content). IMPORTANT : la doc Groq
     # (console.groq.com/docs/reasoning) precise que ce parametre n'est PAS
@@ -2237,7 +2280,7 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
 
     if appels_en_cours_a_finir:
         try:
-            for event in _traiter_appels(appels_en_cours_a_finir, messages_agent, table_routage):
+            for event in _traiter_appels(appels_en_cours_a_finir, messages_agent, table_routage, compteur_sources):
                 yield event
         except _AttenteConfirmation as attente:
             yield _evenement_confirmation(attente, messages_agent, outils_mcp, table_routage, modele, reasoning_effort, agent_nom)
@@ -2443,7 +2486,7 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
         })
 
         try:
-            for event in _traiter_appels(appels, messages_agent, table_routage):
+            for event in _traiter_appels(appels, messages_agent, table_routage, compteur_sources):
                 yield event
         except _AttenteConfirmation as attente:
             yield _evenement_confirmation(attente, messages_agent, outils_mcp, table_routage, modele, reasoning_effort, agent_nom)
