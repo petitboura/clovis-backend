@@ -127,11 +127,13 @@ SERVEURS_MCP = [
     {
         "nom": "github",
         "url_builder": _url_github,
-        # explorer_depot_github et lire_fichier_depot_github sont sans
-        # risque (lecture seule). modifier_fichier_depot_github ÉCRIT
-        # réellement sur un dépôt -> dans OUTILS_SENSIBLES plus bas,
-        # donc TOUJOURS interrompu pour confirmation avant exécution,
-        # quel que soit le mode (direct ou branche+PR).
+        # Un seul outil consolidé le 26/08 (ex explorer_depot_github,
+        # lire_fichier_depot_github, modifier_fichier_depot_github) :
+        # gerer_depot_github. Les actions "explorer" et "lire_fichier"
+        # sont sans risque (lecture seule). "modifier_fichier" ÉCRIT
+        # réellement sur un dépôt, dans OUTILS_SENSIBLES plus bas (format
+        # "nom_outil:action"), donc TOUJOURS interrompu pour confirmation
+        # avant exécution, quel que soit le mode (direct ou branche+PR).
     },
     {
         "nom": "notion",
@@ -174,11 +176,14 @@ OUTILS_SENSIBLES = {
     "notion-update-view",
     "notion-create-attachment",
     # ÉCRIT réellement sur un dépôt GitHub (voir
-    # core/serveur_mcp_github.py, modifier_fichier_depot_github) --
+    # core/serveur_mcp_github.py, gerer_depot_github action
+    # "modifier_fichier", consolidé le 26/08, ex modifier_fichier_depot_github) :
     # TOUJOURS interrompu pour confirmation, que ce soit en mode "direct"
-    # (commit sur la branche de base) ou "branche_pr" (nouvelle branche +
-    # Pull Request). Aucun des deux modes n'est silencieux.
-    "modifier_fichier_depot_github",
+    # (commit sur la branche de base) ou "branche_pr" (nouvelle branche,
+    # Pull Request). Aucun des deux modes n'est silencieux. Format
+    # "nom_outil:action" (voir plus bas pour gerer_document_bibliotheque) :
+    # seule cette action est sensible, "explorer" et "lire_fichier" non.
+    "gerer_depot_github:modifier_fichier",
     # Suppressions programme/comportement (14/08, demande Bourama :
     # "confirmer pour sensible et irréversible") -- contrairement aux
     # ajouts/modifications de ces mêmes ressources (voir
@@ -203,7 +208,9 @@ OUTILS_SENSIBLES = {
     # action précise est sensible, pas les 11 autres du même outil (voir
     # _est_outil_sensible dans main.py, qui sait lire ce format composite).
     "gerer_document_bibliotheque:supprimer",
-    "effacer_memoire",
+    # Consolidé le 26/08 en une action de gerer_memoire_utilisateur (même
+    # format composite "nom_outil:action").
+    "gerer_memoire_utilisateur:effacer",
     # Section "Notion-like" (Partie 2, lot 1/5, 20/08) -- même logique que
     # les suppressions programme ci-dessus : irréversible, toujours confirmé.
     "supprimer_page",
@@ -286,15 +293,10 @@ REGISTRE_AFFICHAGE_OUTILS = {
     # (seule action manuellement cliquable, les autres restent onglet=None
     # en pratique côté modèle -- pas besoin de doublon d'entrée pour ça).
     "gerer_document_bibliotheque": {"label": "Bibliothèque personnelle", "icone": "Library", "onglet": "rechercher"},
-    "chercher_dans_base_connaissances": {"label": "Recherche dans la base de connaissances", "icone": "BookMarked", "onglet": "rechercher"},
-    "lire_article_connaissance": {"label": "Lecture complète d'un article de la base de connaissances", "icone": "BookMarked", "onglet": "rechercher"},
-    "liste_articles_connaissance": {"label": "Liste des articles de la base de connaissances", "icone": "BookMarked", "onglet": "rechercher"},
-    "obtenir_fichier_connaissance": {"label": "Récupération du fichier d'un article de la base de connaissances", "icone": "BookMarked", "onglet": "rechercher"},
+    "gerer_base_connaissance": {"label": "Base de connaissances de Clovis", "icone": "BookMarked", "onglet": "rechercher"},
 
     # --- Action dans l'app : GitHub ---
-    "explorer_depot_github": {"label": "Exploration d'un dépôt GitHub", "icone": "FolderTree", "onglet": "action_app", "appli": "github"},
-    "lire_fichier_depot_github": {"label": "Lecture d'un fichier GitHub", "icone": "FileCode", "onglet": "action_app", "appli": "github"},
-    "modifier_fichier_depot_github": {"label": "Modification d'un fichier GitHub", "icone": "Edit3", "onglet": "action_app", "appli": "github"},
+    "gerer_depot_github": {"label": "Dépôt GitHub", "icone": "Github", "onglet": "action_app", "appli": "github"},
 
     # --- Action dans l'app : Notion ---
     "notion-search": {"label": "Recherche dans Notion", "icone": "notion-logo", "onglet": "action_app", "appli": "notion"},
@@ -345,9 +347,7 @@ REGISTRE_AFFICHAGE_OUTILS = {
     # rappel, lui, avait déjà été retiré le 17/08 (voir plus bas dans
     # l'historique git de ce fichier).
     "envoyer_message": {"label": "Envoi d'un message", "icone": "Send", "onglet": None},
-    "consulter_memoire_utilisateur": {"label": "Consultation de ta mémoire", "icone": "Brain", "onglet": None},
-    "mettre_a_jour_memoire_utilisateur": {"label": "Mise à jour de ta mémoire", "icone": "Brain", "onglet": None},
-    "effacer_memoire": {"label": "Effacement de ta mémoire", "icone": "Trash2", "onglet": None},
+    "gerer_memoire_utilisateur": {"label": "Ta mémoire", "icone": "Brain", "onglet": None},
     "consulter_profil_utilisateur": {"label": "Consultation de ton profil", "icone": "UserCircle", "onglet": None},
     "mettre_a_jour_profil_utilisateur": {"label": "Mise à jour de ton profil", "icone": "UserCog", "onglet": None},
 

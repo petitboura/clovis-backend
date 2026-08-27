@@ -1138,7 +1138,7 @@ Pour tout outil de génération/action (document, image, code, site, audio, rapp
 </outils_generation_action>
 
 <faits_verifiables>
-Pour toute question sur un état réel (structure de dépôt, contenu de fichier, liste, nombre...), appelle l'outil correspondant et rapporte exactement son résultat, troncatures incluses, sans compléter par supposition. Pour la structure d'un dépôt GitHub, utilise toujours explorer_depot_github — un README peut être obsolète.
+Pour toute question sur un état réel (structure de dépôt, contenu de fichier, liste, nombre...), appelle l'outil correspondant et rapporte exactement son résultat, troncatures incluses, sans compléter par supposition. Pour la structure d'un dépôt GitHub, utilise toujours gerer_depot_github (action "explorer"), un README peut être obsolète.
 </faits_verifiables>
 
 <appels_outils>
@@ -1146,8 +1146,8 @@ L'interface affiche déjà chaque appel d'outil. Réponds directement en langage
 </appels_outils>
 
 <base_connaissances_clovis>
-chercher_dans_base_connaissances, lire_article_connaissance, liste_articles_connaissance et obtenir_fichier_connaissance forment UN SEUL mécanisme en plusieurs étapes, pas 4 outils indépendants -- dès qu'ils sont disponibles ce tour-ci, utilise-les ensemble : cherche (chercher_dans_base_connaissances), identifie/liste si besoin (liste_articles_connaissance), lis le texte complet si utile (lire_article_connaissance), et donne le fichier réel (obtenir_fichier_connaissance) quand tu juges que ça aide réellement la réponse à ce moment précis de la conversation -- sans attendre que l'utilisateur le demande explicitement, puisqu'il ne sait généralement pas que ce fichier existe. Ce n'est PAS systématique à chaque question sur Clovis : juge au cas par cas, selon la question posée et le fil de la conversation (ex : une simple clarification ou une question déjà répondue juste avant n'a pas besoin du fichier ; une question où l'utilisateur cherche clairement à suivre une procédure complète ou à consulter un contenu de référence en a besoin).
-Ceci s'applique à TOUTE question sur Clovis ou sur l'application en général, même formulée normalement, sans jamais mentionner "base de connaissance" ou un format de fichier -- mets-toi à la place d'un utilisateur qui ignore que ce mécanisme existe : il demande juste comment faire quelque chose, pourquoi ça bug, ou ce que fait une fonctionnalité. Exception : si tu as déjà cherché sur ce sujet précis plus tôt dans cette même conversation sans rien trouver de pertinent, ne réinsiste pas indéfiniment -- réponds avec ce que tu sais déjà ou dis clairement que tu ne trouves pas l'information.
+gerer_base_connaissance regroupe un seul mécanisme en plusieurs étapes (actions "chercher", "lister_articles", "lire_article", "obtenir_fichier"), pas plusieurs outils indépendants, dès qu'il est disponible ce tour-ci, utilise ses actions ensemble : cherche (action "chercher"), identifie/liste si besoin (action "lister_articles"), lis le texte complet si utile (action "lire_article"), et donne le fichier réel (action "obtenir_fichier") quand tu juges que ça aide réellement la réponse à ce moment précis de la conversation, sans attendre que l'utilisateur le demande explicitement, puisqu'il ne sait généralement pas que ce fichier existe. Ce n'est PAS systématique à chaque question sur Clovis : juge au cas par cas, selon la question posée et le fil de la conversation (ex : une simple clarification ou une question déjà répondue juste avant n'a pas besoin du fichier ; une question où l'utilisateur cherche clairement à suivre une procédure complète ou à consulter un contenu de référence en a besoin).
+Ceci s'applique à TOUTE question sur Clovis ou sur l'application en général, même formulée normalement, sans jamais mentionner "base de connaissance" ou un format de fichier, mets-toi à la place d'un utilisateur qui ignore que ce mécanisme existe : il demande juste comment faire quelque chose, pourquoi ça bug, ou ce que fait une fonctionnalité. Exception : si tu as déjà cherché sur ce sujet précis plus tôt dans cette même conversation sans rien trouver de pertinent, ne réinsiste pas indéfiniment, réponds avec ce que tu sais déjà ou dis clairement que tu ne trouves pas l'information.
 </base_connaissances_clovis>"""
 
 INSTRUCTIONS_ARBITRAGE_CALCUL = """
@@ -1323,20 +1323,19 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         # ce sont deux choses différentes.
         "IMPORTANT : ne confonds jamais gerer_document_bibliotheque "
         "(action \"chercher\", documents PERSONNELS que l'étudiant a "
-        "lui-même uploadés) avec le groupe "
-        "chercher_dans_base_connaissances / lire_article_connaissance / "
-        "liste_articles_connaissance / obtenir_fichier_connaissance "
+        "lui-même uploadés) avec gerer_base_connaissance "
         "(contenu de référence préparé à l'avance par l'équipe Clovis SUR "
-        "Clovis et l'application elle-même). Ces 4 outils fonctionnent "
-        "ENSEMBLE, comme un seul mécanisme à plusieurs étapes -- "
-        "suggère-les TOUJOURS EN MÊME TEMPS, jamais un seul isolément : le "
-        "grand modèle a besoin des 4 disponibles pour chercher "
-        "(chercher_dans_base_connaissances), lister si besoin "
-        "(liste_articles_connaissance), lire le texte complet "
-        "(lire_article_connaissance) et donner le fichier réel "
-        "(obtenir_fichier_connaissance) sans faire un second aller-retour. "
-        "Suggère ce groupe pour TOUTE question sur Clovis lui-même ou sur "
-        "l'application en général -- peu importe l'angle. L'utilisateur ne "
+        "Clovis et l'application elle-même). "
+        # MAJ 2026-08-26 (consolidation de chercher_dans_base_connaissances,
+        # lire_article_connaissance, liste_articles_connaissance et
+        # obtenir_fichier_connaissance en un seul outil,
+        # gerer_base_connaissance) : la règle "suggère les 4 outils
+        # ensemble, jamais un seul isolément" disparaît d'elle-même, il
+        # n'y a plus qu'un seul nom d'outil à suggérer, ses 4 actions
+        # restent accessibles au grand modèle en un seul appel possible.
+        "Suggère gerer_base_connaissance pour TOUTE question sur Clovis "
+        "lui-même ou sur l'application en général, peu importe l'angle. "
+        "L'utilisateur ne "
         "sait pas que cette base de connaissances existe, ne connaît "
         "aucun de ces noms d'outils, et ne demandera jamais explicitement "
         "\"un fichier\", \"un .md\" ou \"cherche dans la base de "
@@ -1344,8 +1343,8 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         "normale sur ce qu'il veut faire ou comprendre dans Clovis, sans "
         "savoir qu'un mécanisme de recherche existe derrière. Ne te fie "
         "donc jamais à une formulation technique ou méta pour déclencher "
-        "ce groupe, base-toi sur l'intention réelle de la question. "
-        "Exemples qui DOIVENT suggérer ce groupe : \"comment fonctionne "
+        "cet outil, base-toi sur l'intention réelle de la question. "
+        "Exemples qui DOIVENT suggérer cet outil : \"comment fonctionne "
         "le partage de code sur Clovis ?\", \"est-ce que tu peux "
         "générer un PDF ?\", \"c'est quoi la bibliothèque dans "
         "l'appli ?\", \"comment je crée un programme ?\", \"ça bug chez "
@@ -1356,8 +1355,8 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         "Règle de tri simple entre les deux mondes : \"mes documents à "
         "moi\" (mon cours, mon exercice, mon fichier) -> "
         "gerer_document_bibliotheque (action \"chercher\") ; \"Clovis / "
-        "l'application\" (même vaguement) -> le groupe base de "
-        "connaissances.\n\n"
+        "l'application\" (même vaguement) -> "
+        "gerer_base_connaissance.\n\n"
         # AJOUT 2026-08-22 (demande Bourama : "les skills ont été
         # corrigés visuellement, mais intérieurement non, il faut que
         # le LLM soit au courant") : lister_comportements/
@@ -1844,16 +1843,17 @@ def _sources_depuis_json_generique(resultat_brut):
 
 def _sources_github_depuis_arguments(appel):
     """
-    Cas particulier : nos outils GitHub locaux (core/serveur_mcp_github.py)
-    renvoient du TEXTE brut (arborescence ou contenu de fichier), jamais du
-    JSON -- la detection generique ci-dessus ne peut donc rien y trouver.
-    La source se deduit plutot des ARGUMENTS de l'appel (repo/chemin),
-    exactement comme le fait l'outil lui-meme pour construire ses requetes
-    API. Si `branche` n'a pas ete precisee par le modele, on refait le
-    meme appel `default_branch` que l'outil (voir explorer_depot_github/
-    lire_fichier_depot_github) plutot que de deviner "main" -- un mauvais
-    lien casse (ex: depot dont la branche par defaut est "master") serait
-    pire qu'une source absente.
+    Cas particulier : notre outil GitHub local (core/serveur_mcp_github.py,
+    gerer_depot_github, consolidé le 26/08) renvoie du TEXTE brut
+    (arborescence ou contenu de fichier), jamais du JSON, la detection
+    generique ci-dessus ne peut donc rien y trouver. La source se deduit
+    plutot des ARGUMENTS de l'appel (repo/chemin), exactement comme le
+    fait l'outil lui-meme pour construire ses requetes API. Si `branche`
+    n'a pas ete precisee par le modele, on refait le meme appel
+    `default_branch` que l'outil (action "explorer" ou "lire_fichier")
+    plutot que de deviner "main", un mauvais lien casse (ex: depot dont
+    la branche par defaut est "master") serait pire qu'une source
+    absente.
     """
     try:
         arguments = json.loads(appel["arguments"] or "{}")
@@ -1872,13 +1872,13 @@ def _sources_github_depuis_arguments(appel):
         except Exception:
             branche = "main"
 
-    if appel["name"] == "lire_fichier_depot_github":
+    if arguments.get("action") == "lire_fichier":
         chemin = (arguments.get("chemin") or "").strip()
         if not chemin:
             return []
         return [{"titre": chemin.split("/")[-1], "url": f"https://github.com/{repo}/blob/{branche}/{chemin}"}]
 
-    # explorer_depot_github
+    # action "explorer"
     chemin_depart = (arguments.get("chemin_depart") or "").strip()
     url = f"https://github.com/{repo}/tree/{branche}/{chemin_depart}".rstrip("/")
     return [{"titre": repo, "url": url}]
@@ -1978,8 +1978,13 @@ def _extraire_sources(appel, resultat_brut):
     if sources:
         return sources
 
-    if appel["name"] in ("explorer_depot_github", "lire_fichier_depot_github"):
-        return _sources_github_depuis_arguments(appel)
+    if appel["name"] == "gerer_depot_github":
+        try:
+            action = json.loads(appel["arguments"] or "{}").get("action")
+        except Exception:
+            action = None
+        if action in ("explorer", "lire_fichier"):
+            return _sources_github_depuis_arguments(appel)
 
     if appel["name"] == "gerer_document_bibliotheque":
         return _sources_bibliotheque_depuis_texte(resultat_brut)
@@ -2029,10 +2034,10 @@ def _est_outil_sensible(appel):
     """
     True si cet appel doit déclencher la confirmation utilisateur
     (OUTILS_SENSIBLES). Gère deux formats dans OUTILS_SENSIBLES :
-    - un nom d'outil seul ("effacer_memoire") -> sensible quel que soit
-      l'appel.
-    - un composite "nom_outil:action" ("gerer_document_bibliotheque:supprimer")
-      -> sensible seulement si l'argument `action` de CET appel vaut
+    - un nom d'outil seul ("supprimer_programme"), sensible quel que
+      soit l'appel.
+    - un composite "nom_outil:action" ("gerer_document_bibliotheque:supprimer"),
+      sensible seulement si l'argument `action` de CET appel vaut
       exactement cette valeur. Nécessaire depuis la consolidation du
       26/08 (plusieurs outils fusionnés en un seul avec un paramètre
       `action`, dont certaines actions sont sensibles et d'autres non).

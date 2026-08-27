@@ -936,102 +936,103 @@ def gerer_dossier_bibliotheque(
 
 
 @mcp_generation.tool()
-def consulter_memoire_utilisateur(ctx: Context) -> str:
+def gerer_memoire_utilisateur(
+    action: str,
+    ctx: Context,
+    champs_json: str = "",
+) -> str:
     """
-    Consulte ce que tu sais déjà de CET utilisateur d'une conversation à
-    l'autre (mémoire long-terme structurée -- préférences, matières
-    suivies, difficultés récurrentes, projets en cours, etc.).
-    À utiliser au début d'une conversation si ça peut aider à mieux
-    répondre, ou dès que tu sens qu'un élément de contexte passé serait
-    utile. Renvoie un JSON (peut être vide si rien n'a encore été noté).
+    Gère la mémoire long-terme structurée de CET utilisateur, valable
+    d'une conversation à l'autre (préférences, matières suivies,
+    difficultés récurrentes, projets en cours, etc.), consolidé le
+    26/08, un seul outil, plusieurs actions.
+
+    `action` doit être l'une de :
+    - "consulter" : renvoie ce qui est déjà su de cet utilisateur, sous
+      forme de JSON (peut être vide si rien n'a encore été noté). À
+      utiliser au début d'une conversation si ça peut aider à mieux
+      répondre, ou dès qu'un élément de contexte passé serait utile.
+      Aucun paramètre.
+    - "mettre_a_jour" : note ou met à jour un ou plusieurs éléments, à
+      utiliser dès que tu apprends quelque chose d'utile à retenir pour
+      les prochaines conversations (préférence, difficulté récurrente,
+      projet en cours, etc.). Le schéma est libre : garde les clés déjà
+      utilisées si elles collent (ex. "profil_personnel",
+      "preferences_pedagogiques", "matieres_ou_sujets",
+      "objectifs_et_projets", "points_de_continuite"), ou crée-en de
+      nouvelles si aucune ne convient. Paramètre `champs_json` : objet
+      JSON, ex. '{"preferences_pedagogiques": {"style_explication":
+      "avec des exemples concrets"}}', fusionné avec la mémoire
+      existante (les clés de premier niveau fournies remplacent leur
+      ancienne valeur, le reste est conservé tel quel). N'écris ici que
+      ce qui a une vraie valeur à long terme, pas le contenu d'un seul
+      message.
+    - "effacer" : efface DÉFINITIVEMENT le résumé long-terme ("oublie
+      tout ce que tu sais de moi"). Aucun paramètre. SENSIBLE : demande
+      toujours confirmation à l'utilisateur avant d'être exécuté, quelle
+      que soit la formulation de sa demande.
     """
-    try:
-        requete = ctx.request_context.request
-        user_id = requete.query_params.get("user_id")
-        if not user_id:
-            return "Aucune mémoire disponible : utilisateur non connecté."
-        res = (
-            _supabase_memoire.table("conversation_summaries")
-            .select("donnees")
-            .eq("user_id", user_id)
-            .maybe_single()
-            .execute()
-        )
-        donnees = (res.data or {}).get("donnees") or {}
-        if not donnees:
-            return "Rien en mémoire pour cet utilisateur pour l'instant."
-        return json.dumps(donnees, ensure_ascii=False)
-    except Exception as e:
-        logging.error(f"ERREUR outil consulter_memoire_utilisateur : {e}")
-        return "Erreur : impossible de consulter la mémoire, réessaie."
-
-
-@mcp_generation.tool()
-def mettre_a_jour_memoire_utilisateur(champs_json: str, ctx: Context) -> str:
-    """
-    Note ou met à jour un ou plusieurs éléments dans la mémoire
-    long-terme de CET utilisateur, à utiliser dès que tu apprends
-    quelque chose d'utile à retenir pour les prochaines conversations
-    (préférence, difficulté récurrente, projet en cours...). Le schéma
-    est libre : garde les clés déjà utilisées si elles collent (ex.
-    "profil_personnel", "preferences_pedagogiques",
-    "matieres_ou_sujets", "objectifs_et_projets",
-    "points_de_continuite"), ou crée-en de nouvelles si aucune ne
-    convient. `champs_json` est un objet JSON, ex.
-    '{"preferences_pedagogiques": {"style_explication": "avec des exemples concrets"}}'
-    -- fusionné avec la mémoire existante (les clés de premier niveau
-    fournies remplacent leur ancienne valeur, le reste est conservé tel
-    quel). N'écris ici que ce qui a une vraie valeur à long terme, pas
-    le contenu d'un seul message.
-    """
-    try:
-        requete = ctx.request_context.request
-        user_id = requete.query_params.get("user_id")
-        if not user_id:
-            return "Erreur : impossible d'identifier l'utilisateur pour mettre à jour la mémoire."
-        try:
-            patch = json.loads(champs_json)
-        except Exception:
-            return "Erreur : champs_json doit être un objet JSON valide."
-        if not isinstance(patch, dict):
-            return "Erreur : champs_json doit être un objet JSON (pas une liste ou une valeur simple)."
-
-        res = (
-            _supabase_memoire.table("conversation_summaries")
-            .select("donnees")
-            .eq("user_id", user_id)
-            .maybe_single()
-            .execute()
-        )
-        actuel = (res.data or {}).get("donnees") or {}
-        actuel.update(patch)
-
-        _supabase_memoire.table("conversation_summaries").upsert(
-            {"user_id": user_id, "donnees": actuel}, on_conflict="user_id"
-        ).execute()
-        return "Mémoire mise à jour."
-    except Exception as e:
-        logging.error(f"ERREUR outil mettre_a_jour_memoire_utilisateur : {e}")
-        return "Erreur : la mise à jour de la mémoire a échoué, réessaie."
-
-
-@mcp_generation.tool()
-def effacer_memoire(ctx: Context) -> str:
-    """
-    Efface DÉFINITIVEMENT le résumé long-terme que Clovis garde de CET
-    utilisateur ("oublie tout ce que tu sais de moi"). SENSIBLE :
-    demande toujours confirmation à l'utilisateur avant d'être exécuté,
-    quelle que soit la formulation de sa demande.
-    """
-    user_id = ctx.request_context.request.query_params.get("user_id")
+    requete = ctx.request_context.request
+    user_id = requete.query_params.get("user_id")
     if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        _supabase_memoire.table("conversation_summaries").delete().eq("user_id", user_id).execute()
-    except Exception as e:
-        logging.error(f"ERREUR outil effacer_memoire : {e}")
-        return "Erreur : impossible d'effacer la mémoire, réessaie."
-    return "Mémoire effacée."
+        return "Erreur : impossible d'identifier l'utilisateur."
+
+    if action == "consulter":
+        try:
+            res = (
+                _supabase_memoire.table("conversation_summaries")
+                .select("donnees")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            donnees = (res.data or {}).get("donnees") or {}
+            if not donnees:
+                return "Rien en mémoire pour cet utilisateur pour l'instant."
+            return json.dumps(donnees, ensure_ascii=False)
+        except Exception as e:
+            logging.error(f"ERREUR gerer_memoire_utilisateur (consulter) : {e}")
+            return "Erreur : impossible de consulter la mémoire, réessaie."
+
+    if action == "mettre_a_jour":
+        try:
+            try:
+                patch = json.loads(champs_json)
+            except Exception:
+                return "Erreur : champs_json doit être un objet JSON valide."
+            if not isinstance(patch, dict):
+                return "Erreur : champs_json doit être un objet JSON (pas une liste ou une valeur simple)."
+
+            res = (
+                _supabase_memoire.table("conversation_summaries")
+                .select("donnees")
+                .eq("user_id", user_id)
+                .maybe_single()
+                .execute()
+            )
+            actuel = (res.data or {}).get("donnees") or {}
+            actuel.update(patch)
+
+            _supabase_memoire.table("conversation_summaries").upsert(
+                {"user_id": user_id, "donnees": actuel}, on_conflict="user_id"
+            ).execute()
+            return "Mémoire mise à jour."
+        except Exception as e:
+            logging.error(f"ERREUR gerer_memoire_utilisateur (mettre_a_jour) : {e}")
+            return "Erreur : la mise à jour de la mémoire a échoué, réessaie."
+
+    if action == "effacer":
+        try:
+            _supabase_memoire.table("conversation_summaries").delete().eq("user_id", user_id).execute()
+        except Exception as e:
+            logging.error(f"ERREUR gerer_memoire_utilisateur (effacer) : {e}")
+            return "Erreur : impossible d'effacer la mémoire, réessaie."
+        return "Mémoire effacée."
+
+    return (
+        f"Erreur : action '{action}' inconnue. Actions valides : consulter, "
+        "mettre_a_jour, effacer."
+    )
 
 
 @mcp_generation.tool()
@@ -2199,7 +2200,8 @@ def mettre_a_jour_profil_utilisateur(champs_json: str, ctx: Context) -> str:
     """
     Met à jour le profil de CET utilisateur dès que tu apprends une
     information utile à retenir sur qui il est (pas sur ce qu'il sait
-    ou apprend -- ça, c'est la mémoire, voir mettre_a_jour_memoire_utilisateur).
+    ou apprend, ça c'est la mémoire, voir gerer_memoire_utilisateur
+    action "mettre_a_jour").
     Schéma libre, mêmes règles que pour la mémoire : `champs_json` est
     un objet JSON fusionné avec le profil existant.
     """
@@ -2237,123 +2239,123 @@ def mettre_a_jour_profil_utilisateur(champs_json: str, ctx: Context) -> str:
 
 
 @mcp_generation.tool()
-def chercher_dans_base_connaissances(question: str, ctx: Context) -> str:
+def gerer_base_connaissance(
+    action: str,
+    ctx: Context,
+    question: str = "",
+    nom: str = "",
+) -> str:
     """
-    Cherche dans la base de connaissances de l'agent (documents et
-    instructions spécifiques ajoutés par l'équipe Clovis) les passages
-    pertinents pour répondre à `question`. À utiliser quand la question
-    touche un sujet précis où un contenu de référence a pu être préparé
-    à l'avance -- pas systématique, seulement si pertinent. Renvoie les
-    extraits trouvés ou un message si rien de pertinent.
-    """
-    try:
-        requete = ctx.request_context.request
-        agent_id = requete.query_params.get("agent_id")
-        candidats = _chercher_candidats(question, agent_id=agent_id)
-        morceaux = [c["contenu"] for c in candidats.get("prompts", [])] + [
-            c["contenu"] for c in candidats.get("documents", [])
-        ]
-        if not morceaux:
-            return "Rien de pertinent trouvé dans la base de connaissances pour cette question."
-        return "\n\n---\n\n".join(morceaux)
-    except Exception as e:
-        logging.error(f"ERREUR outil chercher_dans_base_connaissances : {e}")
-        return "Erreur : la recherche a échoué, réessaie."
+    Cherche et lit dans la base de connaissances de l'agent (documents et
+    instructions de référence préparés à l'avance par l'équipe Clovis SUR
+    Clovis et l'application elle-même, PAS les documents personnels de
+    l'utilisateur, voir gerer_document_bibliotheque pour ça), consolidé
+    le 26/08, un seul outil, plusieurs actions qui fonctionnaient déjà
+    ensemble comme un mécanisme à plusieurs étapes.
 
+    `action` doit être l'une de :
+    - "chercher" : cherche les passages pertinents pour répondre à
+      `question`. À utiliser quand la question touche un sujet précis où
+      un contenu de référence a pu être préparé à l'avance, pas
+      systématique, seulement si pertinent. Renvoie les extraits trouvés
+      ou un message si rien de pertinent. Paramètre : `question`.
+    - "lister_articles" : liste les noms de tous les articles
+      disponibles. À utiliser avant "lire_article" si le nom exact de
+      l'article recherché n'est pas connu. Aucun paramètre.
+    - "lire_article" : renvoie le texte COMPLET et EXACT (pas un résumé,
+      pas une reformulation, le contenu tel qu'il est stocké, mot pour
+      mot) d'un article, identifié par son `nom` exact. À utiliser quand
+      la question porte sur l'ensemble d'un article plutôt que sur un
+      point précis (ex : "montre-moi l'article Bibliothèque", "affiche
+      le fichier tel qu'il est"), en complément de "chercher" qui ne
+      renvoie que des passages. Quand tu restitues ce résultat à
+      l'utilisateur, recopie-le intégralement et tel quel (verbatim), ne
+      le résume pas, ne le reformule pas, ne le raccourcis pas. Si `nom`
+      est inconnu, utilise d'abord "chercher" pour identifier le bon
+      nom, ou "lister_articles" pour voir les noms disponibles.
+      Paramètre : `nom`.
+    - "obtenir_fichier" : renvoie le FICHIER original (pas son texte
+      recopié) d'un article, sous forme d'un lien vers le fichier tel
+      qu'il a été déposé. À utiliser quand tu juges que le fichier
+      lui-même aide réellement la réponse (l'utilisateur ne sait
+      généralement pas qu'il existe, donc ne le demandera pas
+      explicitement), pas systématiquement à chaque question. Pas juste
+      lire son contenu (pour ça, "lire_article"). Si `nom` est inconnu,
+      utilise "lister_articles" pour voir les noms disponibles.
+      Paramètre : `nom`.
+    """
+    requete = ctx.request_context.request
+    agent_id = requete.query_params.get("agent_id")
 
-@mcp_generation.tool()
-def lire_article_connaissance(nom: str, ctx: Context) -> str:
-    """
-    Renvoie le texte COMPLET et EXACT (pas un résumé, pas une
-    reformulation -- le contenu tel qu'il est stocké dans la base de
-    connaissances, mot pour mot) d'un article, identifié par son `nom`
-    exact -- à utiliser quand la question porte sur l'ensemble d'un
-    article plutôt que sur un point précis (ex : "montre-moi l'article
-    Bibliothèque", "affiche le fichier tel qu'il est"), en complément de
-    chercher_dans_base_connaissances qui ne renvoie que des passages.
-    Quand tu restitues ce résultat à l'utilisateur, recopie-le
-    intégralement et tel quel (verbatim) -- ne le résume pas, ne le
-    reformule pas, ne le raccourcis pas.
-    Si `nom` est inconnu, utilise d'abord chercher_dans_base_connaissances
-    pour identifier le bon nom, ou liste_articles_connaissance pour voir
-    les noms disponibles.
-    """
-    try:
-        requete = ctx.request_context.request
-        agent_id = requete.query_params.get("agent_id")
-        res = (
-            _supabase_memoire.table("documents")
-            .select("contenu, position")
-            .eq("agent_id", agent_id)
-            .eq("nom", nom)
-            .order("position", desc=False, nullsfirst=False)
-            .execute()
-        )
-        morceaux = res.data or []
-        if not morceaux:
-            return f"Aucun article nommé '{nom}' trouvé dans la base de connaissances."
-        return " ".join(m["contenu"] for m in morceaux)
-    except Exception as e:
-        logging.error(f"ERREUR outil lire_article_connaissance : {e}")
-        return "Erreur : la lecture de l'article a échoué, réessaie."
+    if action == "chercher":
+        try:
+            candidats = _chercher_candidats(question, agent_id=agent_id)
+            morceaux = [c["contenu"] for c in candidats.get("prompts", [])] + [
+                c["contenu"] for c in candidats.get("documents", [])
+            ]
+            if not morceaux:
+                return "Rien de pertinent trouvé dans la base de connaissances pour cette question."
+            return "\n\n---\n\n".join(morceaux)
+        except Exception as e:
+            logging.error(f"ERREUR gerer_base_connaissance (chercher) : {e}")
+            return "Erreur : la recherche a échoué, réessaie."
 
+    if action == "lister_articles":
+        try:
+            res = (
+                _supabase_memoire.table("documents")
+                .select("nom")
+                .eq("agent_id", agent_id)
+                .execute()
+            )
+            noms = sorted({r["nom"] for r in (res.data or [])})
+            if not noms:
+                return "Aucun article dans la base de connaissances pour l'instant."
+            return "\n".join(noms)
+        except Exception as e:
+            logging.error(f"ERREUR gerer_base_connaissance (lister_articles) : {e}")
+            return "Erreur : la liste des articles a échoué, réessaie."
 
-@mcp_generation.tool()
-def liste_articles_connaissance(ctx: Context) -> str:
-    """
-    Liste les noms de tous les articles disponibles dans la base de
-    connaissances de l'agent -- à utiliser avant lire_article_connaissance
-    si le nom exact de l'article recherché n'est pas connu.
-    """
-    try:
-        requete = ctx.request_context.request
-        agent_id = requete.query_params.get("agent_id")
-        res = (
-            _supabase_memoire.table("documents")
-            .select("nom")
-            .eq("agent_id", agent_id)
-            .execute()
-        )
-        noms = sorted({r["nom"] for r in (res.data or [])})
-        if not noms:
-            return "Aucun article dans la base de connaissances pour l'instant."
-        return "\n".join(noms)
-    except Exception as e:
-        logging.error(f"ERREUR outil liste_articles_connaissance : {e}")
-        return "Erreur : la liste des articles a échoué, réessaie."
+    if action == "lire_article":
+        try:
+            res = (
+                _supabase_memoire.table("documents")
+                .select("contenu, position")
+                .eq("agent_id", agent_id)
+                .eq("nom", nom)
+                .order("position", desc=False, nullsfirst=False)
+                .execute()
+            )
+            morceaux = res.data or []
+            if not morceaux:
+                return f"Aucun article nommé '{nom}' trouvé dans la base de connaissances."
+            return " ".join(m["contenu"] for m in morceaux)
+        except Exception as e:
+            logging.error(f"ERREUR gerer_base_connaissance (lire_article) : {e}")
+            return "Erreur : la lecture de l'article a échoué, réessaie."
 
+    if action == "obtenir_fichier":
+        try:
+            res = (
+                _supabase_memoire.table("documents")
+                .select("nom")
+                .eq("agent_id", agent_id)
+                .eq("nom", nom)
+                .limit(1)
+                .execute()
+            )
+            if not res.data:
+                return f"Aucun article nommé '{nom}' trouvé dans la base de connaissances."
+            url = f"{_SUPABASE_URL}/storage/v1/object/public/documents-agents/{agent_id}/{nom}"
+            return f"Fichier : {url}"
+        except Exception as e:
+            logging.error(f"ERREUR gerer_base_connaissance (obtenir_fichier) : {e}")
+            return "Erreur : la récupération du fichier a échoué, réessaie."
 
-@mcp_generation.tool()
-def obtenir_fichier_connaissance(nom: str, ctx: Context) -> str:
-    """
-    Renvoie le FICHIER original (pas son texte recopié) d'un article de
-    la base de connaissances, sous forme d'un lien vers le fichier tel
-    qu'il a été déposé -- à utiliser quand tu juges que le fichier lui-même
-    aide réellement la réponse (l'utilisateur ne sait généralement pas
-    qu'il existe, donc ne le demandera pas explicitement), pas
-    systématiquement à chaque question. Pas juste lire son contenu (pour
-    ça, lire_article_connaissance).
-    Si `nom` est inconnu, utilise liste_articles_connaissance pour voir
-    les noms disponibles.
-    """
-    try:
-        requete = ctx.request_context.request
-        agent_id = requete.query_params.get("agent_id")
-        res = (
-            _supabase_memoire.table("documents")
-            .select("nom")
-            .eq("agent_id", agent_id)
-            .eq("nom", nom)
-            .limit(1)
-            .execute()
-        )
-        if not res.data:
-            return f"Aucun article nommé '{nom}' trouvé dans la base de connaissances."
-        url = f"{_SUPABASE_URL}/storage/v1/object/public/documents-agents/{agent_id}/{nom}"
-        return f"Fichier : {url}"
-    except Exception as e:
-        logging.error(f"ERREUR outil obtenir_fichier_connaissance : {e}")
-        return "Erreur : la récupération du fichier a échoué, réessaie."
+    return (
+        f"Erreur : action '{action}' inconnue. Actions valides : chercher, "
+        "lister_articles, lire_article, obtenir_fichier."
+    )
 
 
 @mcp_generation.tool()
