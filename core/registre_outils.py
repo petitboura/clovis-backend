@@ -269,11 +269,9 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "generer_image": {"label": "Génération d'une image", "icone": "Image", "onglet": "generer"},
     "generer_audio": {"label": "Génération audio", "icone": "AudioLines", "onglet": "generer"},
     "lancer_generation_video": {"label": "Génération d'une vidéo", "icone": "Video", "onglet": "generer"},
-    "consulter_statut_video": {"label": "Vérification du statut de la vidéo", "icone": "RefreshCw", "onglet": "generer"},
     "lancer_generation_3d": {"label": "Génération d'un modèle 3D", "icone": "Box", "onglet": "generer"},
-    "consulter_statut_3d": {"label": "Vérification du statut de génération 3D", "icone": "RefreshCw", "onglet": "generer"},
     "envoyer_pour_signature": {"label": "Envoi pour signature", "icone": "FileSignature", "onglet": "generer"},
-    "consulter_statut_signature": {"label": "Vérification du statut de signature", "icone": "RefreshCw", "onglet": "generer"},
+    "consulter_statut_generation": {"label": "Vérification du statut d'une génération", "icone": "RefreshCw", "onglet": "generer"},
     "deployer_site": {"label": "Déploiement d'un site", "icone": "Rocket", "onglet": "generer"},
     "exporter_donnees": {"label": "Export de données", "icone": "FileOutput", "onglet": "generer"},
     "calculer_symbolique": {"label": "Calcul symbolique (résoudre, dériver, intégrer)", "icone": "Divide", "onglet": "generer"},
@@ -469,7 +467,6 @@ REGISTRE_AFFICHAGE_OUTILS = {
     # onglet=None, même logique que les blocs "Programme adaptatif"/
     # "Bibliothèque" plus haut : outils que le modèle appelle lui-même en
     # autonomie pendant la conversation, jamais des boutons cliqués.
-    "lister_dossiers_designes_mobile": {"label": "Liste des dossiers désignés sur le téléphone", "icone": "FolderTree", "onglet": None},
-    "executer_action_mobile": {"label": "Action envoyée au téléphone", "icone": "Smartphone", "onglet": None},
+    "gerer_action_mobile": {"label": "Action sur ton téléphone", "icone": "Smartphone", "onglet": None},
 }
 

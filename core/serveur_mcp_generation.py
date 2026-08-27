@@ -2442,8 +2442,9 @@ if modele_3d_disponible():
         """
         Lance une génération de modèle 3D (.glb) à partir d'une
         description textuelle. NE renvoie PAS le modèle immédiatement :
-        renvoie un identifiant à donner à consulter_statut_3d un peu
-        plus tard. Préviens l'étudiant que ça prend un peu de temps.
+        renvoie un identifiant à donner à consulter_statut_generation
+        (type "3d") un peu plus tard. Préviens l'étudiant que ça prend
+        un peu de temps.
         """
         try:
             resultat = _lancer_generation_3d(prompt)
@@ -2454,22 +2455,6 @@ if modele_3d_disponible():
         except Exception as e:
             logging.error(f"ERREUR outil generation : {e}")
             return "Erreur : le lancement de la génération 3D a échoué, réessaie."
-
-    @mcp_generation.tool()
-    def consulter_statut_3d(request_id: str) -> str:
-        """
-        Consulte l'état d'une génération 3D lancée avec
-        lancer_generation_3d. Si terminée, renvoie l'URL publique du
-        fichier .glb.
-        """
-        try:
-            resultat = _statut_modele_3d(request_id)
-            if resultat["statut"] == "COMPLETED":
-                return f"Modèle 3D prêt : {resultat['url']}"
-            return f"Toujours en cours (statut : {resultat['statut']}), redemande un peu plus tard."
-        except Exception as e:
-            logging.error(f"ERREUR outil generation : {e}")
-            return "Erreur : impossible de récupérer le statut, vérifie l'identifiant."
 
 
 # Enregistré conditionnellement, gate par FAL_KEY (voir
@@ -2484,40 +2469,24 @@ if video_disponible():
         Lance une génération vidéo à partir d'une description
         textuelle. NE renvoie PAS la vidéo (elle prend 1 à 3 minutes à
         générer) : renvoie un identifiant à donner à
-        consulter_statut_video un peu plus tard. Préviens l'étudiant
-        que ça prend du temps et qu'il doit redemander le statut dans
-        quelques minutes.
+        consulter_statut_generation (type "video") un peu plus tard.
+        Préviens l'étudiant que ça prend du temps et qu'il doit
+        redemander le statut dans quelques minutes.
         """
         try:
             resultat = _lancer_generation_video(prompt, duree_secondes)
             return (
                 f"Génération lancée (id: {resultat['request_id']}). "
-                f"Ça prend 1 à 3 minutes -- redemande le statut avec cet identifiant un peu plus tard."
+                f"Ça prend 1 à 3 minutes, redemande le statut avec cet identifiant un peu plus tard."
             )
         except Exception as e:
             logging.error(f"ERREUR outil generation : {e}")
             return "Erreur : le lancement de la génération vidéo a échoué, réessaie."
 
-    @mcp_generation.tool()
-    def consulter_statut_video(request_id: str) -> str:
-        """
-        Consulte l'état d'une génération vidéo lancée avec
-        lancer_generation_video. Si terminée, renvoie l'URL publique de
-        la vidéo. Sinon, indique qu'elle est toujours en cours.
-        """
-        try:
-            resultat = _statut_video(request_id)
-            if resultat["statut"] == "COMPLETED":
-                return f"Vidéo prête : {resultat['url']}"
-            return f"Toujours en cours (statut : {resultat['statut']}), redemande dans une minute."
-        except Exception as e:
-            logging.error(f"ERREUR outil generation : {e}")
-            return "Erreur : impossible de récupérer le statut, vérifie l'identifiant."
-
 
 # Enregistré conditionnellement, gate par interrupteur dédié (voir
 # generation_audio.py : GROQ_API_KEY existe déjà pour le chat, donc ne
-# peut pas servir de gate ici -- il faut qu'AUDIO_TTS_ACTIF="true" soit
+# peut pas servir de gate ici, il faut qu'AUDIO_TTS_ACTIF="true" soit
 # mis explicitement par Bourama).
 if audio_disponible():
     @mcp_generation.tool()
@@ -2558,17 +2527,67 @@ if signature_disponible():
             logging.error(f"ERREUR outil generation : {e}")
             return "Erreur : l'envoi pour signature a échoué, réessaie."
 
+
+if modele_3d_disponible() or signature_disponible():
     @mcp_generation.tool()
-    def consulter_statut_signature(signature_request_id: str) -> str:
+    def consulter_statut_generation(type: str, request_id: str) -> str:
         """
-        Consulte l'état d'une demande de signature déjà envoyée
-        (en attente, signé, expiré...).
+        Consulte l'état d'une génération asynchrone déjà lancée
+        (modèle 3D, vidéo ou demande de signature), consolidé le 26/08,
+        un seul outil, plusieurs types au lieu de 3 outils séparés.
+        Même forme pour les trois : un identifiant en entrée, un texte
+        de statut en sortie.
+
+        `type` doit être l'un de :
+        - "3d" : état d'une génération 3D lancée avec
+          lancer_generation_3d. Si terminée, renvoie l'URL publique du
+          fichier .glb.
+        - "video" : état d'une génération vidéo lancée avec
+          lancer_generation_video. Si terminée, renvoie l'URL publique
+          de la vidéo. Sinon, indique qu'elle est toujours en cours.
+        - "signature" : état d'une demande de signature déjà envoyée
+          avec envoyer_pour_signature (en attente, signé, expiré...).
+
+        `request_id` : l'identifiant renvoyé par l'outil de lancement
+        correspondant (`request_id` pour "3d"/"video",
+        `signature_request_id` pour "signature").
         """
-        try:
-            return str(_statut_signature(signature_request_id))
-        except Exception as e:
-            logging.error(f"ERREUR outil generation : {e}")
-            return "Erreur : impossible de récupérer le statut, vérifie l'identifiant."
+        if type == "3d":
+            if not modele_3d_disponible():
+                return "Erreur : la génération 3D n'est pas disponible actuellement."
+            try:
+                resultat = _statut_modele_3d(request_id)
+                if resultat["statut"] == "COMPLETED":
+                    return f"Modèle 3D prêt : {resultat['url']}"
+                return f"Toujours en cours (statut : {resultat['statut']}), redemande un peu plus tard."
+            except Exception as e:
+                logging.error(f"ERREUR consulter_statut_generation (3d) : {e}")
+                return "Erreur : impossible de récupérer le statut, vérifie l'identifiant."
+
+        if type == "video":
+            if not video_disponible():
+                return "Erreur : la génération vidéo n'est pas disponible actuellement."
+            try:
+                resultat = _statut_video(request_id)
+                if resultat["statut"] == "COMPLETED":
+                    return f"Vidéo prête : {resultat['url']}"
+                return f"Toujours en cours (statut : {resultat['statut']}), redemande dans une minute."
+            except Exception as e:
+                logging.error(f"ERREUR consulter_statut_generation (video) : {e}")
+                return "Erreur : impossible de récupérer le statut, vérifie l'identifiant."
+
+        if type == "signature":
+            if not signature_disponible():
+                return "Erreur : la signature électronique n'est pas disponible actuellement."
+            try:
+                return str(_statut_signature(request_id))
+            except Exception as e:
+                logging.error(f"ERREUR consulter_statut_generation (signature) : {e}")
+                return "Erreur : impossible de récupérer le statut, vérifie l'identifiant."
+
+        return (
+            f"Erreur : type '{type}' inconnu. Types valides : 3d, video, signature."
+        )
 
 
 # Toujours actif : Pollinations (gratuit, sans clé) par défaut, bascule
@@ -2722,79 +2741,89 @@ TYPES_ACTION_MOBILE_VALIDES = {
 
 
 @mcp_generation.tool()
-def lister_dossiers_designes_mobile(ctx: Context) -> str:
+def gerer_action_mobile(
+    action: str,
+    ctx: Context,
+    type_action: str = "",
+    parametres: dict = None,
+) -> str:
     """
-    Liste les noms des dossiers que l'étudiant a désignés sur son
-    téléphone (accessibles à l'app Clovis mobile), avec la plateforme
-    (android/ios). Utilise TOUJOURS cet outil avant executer_action_mobile
-    pour un type "dossier_*", afin de cibler un nom qui existe vraiment,
-    ne devine jamais un nom de dossier.
-    """
-    user_id = ctx.request_context.request.query_params.get("user_id")
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        dossiers = _lire_dossiers_designes(user_id)
-    except Exception as e:
-        logging.error(f"ERREUR outil lister_dossiers_designes_mobile : {e}")
-        return "Erreur : impossible de lister les dossiers désignés, réessaie."
-    if not dossiers:
-        return "Aucun dossier désigné sur le téléphone de l'étudiant pour l'instant."
-    return "\n".join(f"- {d['nom']} ({d['plateforme']})" for d in dossiers)
+    Interagit avec l'app Clovis mobile de l'étudiant, consolidé le
+    26/08, un seul outil, deux actions.
 
+    `action` doit être l'une de :
+    - "lister_dossiers" : liste les noms des dossiers que l'étudiant a
+      désignés sur son téléphone (accessibles à l'app Clovis mobile),
+      avec la plateforme (android/ios). Utilise TOUJOURS cette action
+      avant "executer" pour un type "dossier_*", afin de cibler un nom
+      qui existe vraiment, ne devine jamais un nom de dossier. Aucun
+      paramètre.
+    - "executer" : décide une action à exécuter sur le téléphone de
+      l'étudiant. L'action est mise en attente et poussée immédiatement
+      au téléphone (ou rattrapée à sa prochaine ouverture s'il est hors
+      ligne). LIMITE CONNUE : cette action est asynchrone et son
+      résultat (succès/échec) n'est PAS relayé automatiquement dans
+      cette conversation pour l'instant, dis à l'étudiant que l'action a
+      été envoyée, sans garantir qu'elle a déjà réussi.
 
-@mcp_generation.tool()
-def executer_action_mobile(type_action: str, parametres: dict, ctx: Context) -> str:
-    """
-    Décide une action à exécuter sur le téléphone de l'étudiant (app
-    Clovis mobile). L'action est mise en attente et poussée immédiatement
-    au téléphone (ou rattrapée à sa prochaine ouverture s'il est hors
-    ligne). LIMITE CONNUE : cet outil est asynchrone et son résultat
-    (succès/échec) n'est PAS relayé automatiquement dans cette
-    conversation pour l'instant : dis à l'étudiant que l'action a été
-    envoyée, sans garantir qu'elle a déjà réussi.
+      Paramètre `type_action`, EXACTEMENT l'un de :
+      - "dossier_creer_fichier" : {"dossier_nom", "nom", "type_mime"?}
+      - "dossier_creer_sous_dossier" : {"dossier_nom", "nom"}
+      - "dossier_renommer" : {"dossier_nom", "element_nom", "nouveau_nom"}
+      - "dossier_supprimer" : {"dossier_nom", "element_nom"}
+      - "dossier_deplacer" : {"dossier_nom", "element_nom", "nouveau_dossier_nom"}
+      - "accessibilite_cliquer" : {"texte_cible"}
+      - "accessibilite_saisir" : {"texte_cible", "valeur"}
 
-    `type_action` doit être EXACTEMENT l'un de :
-    - "dossier_creer_fichier" : {"dossier_nom", "nom", "type_mime"?}
-    - "dossier_creer_sous_dossier" : {"dossier_nom", "nom"}
-    - "dossier_renommer" : {"dossier_nom", "element_nom", "nouveau_nom"}
-    - "dossier_supprimer" : {"dossier_nom", "element_nom"}
-    - "dossier_deplacer" : {"dossier_nom", "element_nom", "nouveau_dossier_nom"}
-    - "accessibilite_cliquer" : {"texte_cible"}
-    - "accessibilite_saisir" : {"texte_cible", "valeur"}
-
-    Pour un type "dossier_*", "dossier_nom" (et "nouveau_dossier_nom" le
-    cas échéant) DOIT être un nom renvoyé par
-    lister_dossiers_designes_mobile, appelle cet outil avant si tu ne
-    connais pas déjà la liste à jour. Les actions "accessibilite_*" ne
-    fonctionnent que sur la version Android hors Play Store de l'étudiant
-    (elles échouent proprement sinon, avec un message clair rapporté dans
-    la conversation).
+      Paramètre `parametres` : objet correspondant au `type_action`
+      choisi (voir ci-dessus). Pour un type "dossier_*", "dossier_nom"
+      (et "nouveau_dossier_nom" le cas échéant) DOIT être un nom renvoyé
+      par l'action "lister_dossiers", appelle-la avant si tu ne connais
+      pas déjà la liste à jour. Les actions "accessibilite_*" ne
+      fonctionnent que sur la version Android hors Play Store de
+      l'étudiant (elles échouent proprement sinon, avec un message clair
+      rapporté dans la conversation).
     """
     user_id = ctx.request_context.request.query_params.get("user_id")
     if not user_id:
-        return "Erreur : impossible d'identifier l'utilisateur pour cette action."
+        return "Erreur : impossible d'identifier l'utilisateur."
 
-    if type_action not in TYPES_ACTION_MOBILE_VALIDES:
+    if action == "lister_dossiers":
+        try:
+            dossiers = _lire_dossiers_designes(user_id)
+        except Exception as e:
+            logging.error(f"ERREUR gerer_action_mobile (lister_dossiers) : {e}")
+            return "Erreur : impossible de lister les dossiers désignés, réessaie."
+        if not dossiers:
+            return "Aucun dossier désigné sur le téléphone de l'étudiant pour l'instant."
+        return "\n".join(f"- {d['nom']} ({d['plateforme']})" for d in dossiers)
+
+    if action == "executer":
+        if type_action not in TYPES_ACTION_MOBILE_VALIDES:
+            return (
+                f"Erreur : type_action \"{type_action}\" inconnu. Types valides : "
+                + ", ".join(sorted(TYPES_ACTION_MOBILE_VALIDES))
+            )
+
+        cles_requises = TYPES_ACTION_MOBILE_VALIDES[type_action]
+        manquantes = cles_requises - set(parametres or {})
+        if manquantes:
+            return f"Erreur : paramètres manquants pour \"{type_action}\" : {', '.join(sorted(manquantes))}."
+
+        try:
+            _creer_action_mobile(user_id, type_action, parametres)
+        except Exception as e:
+            logging.error(f"ERREUR gerer_action_mobile (executer, {type_action}) : {e}")
+            return "Erreur : impossible de programmer cette action, réessaie."
+
         return (
-            f"Erreur : type_action \"{type_action}\" inconnu. Types valides : "
-            + ", ".join(sorted(TYPES_ACTION_MOBILE_VALIDES))
+            f"Action \"{type_action}\" envoyée au téléphone de l'étudiant. "
+            "Le résultat n'est pas encore relayé automatiquement ici : "
+            "informe l'étudiant que l'action a été envoyée, sans confirmer "
+            "qu'elle a déjà réussi."
         )
 
-    cles_requises = TYPES_ACTION_MOBILE_VALIDES[type_action]
-    manquantes = cles_requises - set(parametres or {})
-    if manquantes:
-        return f"Erreur : paramètres manquants pour \"{type_action}\" : {', '.join(sorted(manquantes))}."
-
-    try:
-        _creer_action_mobile(user_id, type_action, parametres)
-    except Exception as e:
-        logging.error(f"ERREUR outil executer_action_mobile ({type_action}) : {e}")
-        return "Erreur : impossible de programmer cette action, réessaie."
-
     return (
-        f"Action \"{type_action}\" envoyée au téléphone de l'étudiant. "
-        "Le résultat n'est pas encore relayé automatiquement ici : "
-        "informe l'étudiant que l'action a été envoyée, sans confirmer "
-        "qu'elle a déjà réussi."
+        f"Erreur : action '{action}' inconnue. Actions valides : lister_dossiers, "
+        "executer."
     )
