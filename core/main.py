@@ -1911,7 +1911,7 @@ def _resultat_pour_affichage(resultat_brut, max_chars=3000):
     return resultat_brut[:max_chars] + f"\n... (tronqué, {len(resultat_brut)} caractères au total)"
 
 
-_RE_SOURCE_BIBLIOTHEQUE_LIGNE = re.compile(r"^\(Source : (.+), (https?://\S+)\)$")
+_RE_SOURCE_BIBLIOTHEQUE_LIGNE = re.compile(r"^\(Source : (.+), (https?://\S+), ([^,()]*)\)$")
 _RE_PAGE_BIBLIOTHEQUE = re.compile(r"^(.*), page (\d+)(?:-\d+)?$")
 _RE_TIMESTAMP_BIBLIOTHEQUE = re.compile(r"^(.*), à (\d{2}):(\d{2})$")
 
@@ -1921,18 +1921,21 @@ def _sources_bibliotheque_depuis_texte(resultat_brut):
     consulter_bibliotheque (aujourd'hui exposé via gerer_document_
     bibliotheque, actions chercher/chercher_publique) renvoie du texte
     formaté par bloc -- "{extrait}\\n(Source : {nom}[, page N[-M]|, à
-    MM:SS], {url})", blocs séparés par "\\n\\n---\\n\\n" (voir
-    core/bibliotheque_rag.py:formater_source_bibliotheque). Pas de JSON
-    ici, donc parsing texte dédié, sur le même principe que le cas
+    MM:SS], {url}, {type_mime})", blocs séparés par "\\n\\n---\\n\\n"
+    (voir core/bibliotheque_rag.py:formater_source_bibliotheque). Pas de
+    JSON ici, donc parsing texte dédié, sur le même principe que le cas
     GitHub ci-dessus.
 
     Renvoie des sources enrichies de `extrait` (le paragraphe exact
     utilisé), `url_extrait` (URL positionnée -- fragment #page= pour un
     PDF, #t=<secondes> pour un audio ; identique à `url` quand le chunk
-    n'a pas de position, càd image/note/lien) et, pour les deux popups
-    ET la citation inline (26/08, retour Bourama : "juste des chiffres,
-    on y comprend rien" -- il faut le nom du fichier + "page X"/le
-    timestamp affichés en clair, pas un numéro nu) :
+    n'a pas de position, càd image/note/lien), `type_mime` (26/08,
+    demande Bourama : "tout reste en popup interne" -- le frontend choisit
+    le bon visionneur EN APP à partir de ça, sans deviner par extension
+    d'URL) et, pour les deux popups ET la citation inline (26/08, retour
+    Bourama : "juste des chiffres, on y comprend rien" -- il faut le nom
+    du fichier + "page X"/le timestamp affichés en clair, pas un numéro
+    nu) :
     - `reperage` : "page N[-M]" ou "à MM:SS", texte prêt à afficher, None
       sinon
     - `position_type`/`position_valeur` : ("page", N) ou ("timestamp",
@@ -1952,7 +1955,7 @@ def _sources_bibliotheque_depuis_texte(resultat_brut):
         m = _RE_SOURCE_BIBLIOTHEQUE_LIGNE.match(lignes[-1].strip())
         if not m:
             continue
-        nom_et_reperage, url = m.group(1), m.group(2)
+        nom_et_reperage, url, type_mime = m.group(1), m.group(2), m.group(3)
         extrait = "\n".join(lignes[:-1]).strip()
 
         m_page = _RE_PAGE_BIBLIOTHEQUE.match(nom_et_reperage)
@@ -1979,6 +1982,7 @@ def _sources_bibliotheque_depuis_texte(resultat_brut):
             "reperage": reperage,
             "position_type": position_type,
             "position_valeur": position_valeur,
+            "type_mime": type_mime or None,
         })
 
     return sources

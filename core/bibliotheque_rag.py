@@ -196,6 +196,14 @@ def formater_source_bibliotheque(r: dict) -> str | None:
     demandés par Bourama. None si le résultat n'a même pas de quoi
     identifier une source (jamais censé arriver si nom_fichier/
     url_publique sont bien remontés par la fonction SQL).
+
+    CORRECTIF 2026-08-27 (demande Bourama : "que tout reste en popup
+    interne, meme les sites") : ajoute aussi `type_mime` en dernier
+    champ -- deja remonte par recherche_bibliotheque/recherche_
+    bibliotheque_publique (voir migrations 2026-08-20/26), il permet au
+    frontend de choisir le bon visionneur EN APP (PDF, image, audio,
+    Office, texte...) sans avoir a deviner un type a partir de
+    l'extension de l'URL, qui peut manquer ou tromper.
     """
     if not (r.get("nom_fichier") and r.get("url_publique")):
         return None
@@ -208,7 +216,8 @@ def formater_source_bibliotheque(r: dict) -> str | None:
     elif r.get("timestamp_debut") is not None:
         debut = int(r["timestamp_debut"])
         reperage = f", à {debut // 60:02d}:{debut % 60:02d}"
-    return f"(Source : {r['nom_fichier']}{reperage}, {r['url_publique']})"
+    type_mime = r.get("type_mime") or ""
+    return f"(Source : {r['nom_fichier']}{reperage}, {r['url_publique']}, {type_mime})"
 
 
 def chercher_bibliotheque(question: str, user_id: str, match_count: int = 5) -> list:
