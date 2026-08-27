@@ -1927,11 +1927,19 @@ def _sources_bibliotheque_depuis_texte(resultat_brut):
     GitHub ci-dessus.
 
     Renvoie des sources enrichies de `extrait` (le paragraphe exact
-    utilisé) et `url_extrait` (URL positionnée -- fragment #page= pour
-    un PDF, #t=<secondes> pour un audio ; identique à `url` quand le
-    chunk n'a pas de position, càd image/note/lien) : les DEUX popups
-    cliquables demandées par Bourama (26/08, voir SourcesBulle.tsx) --
-    l'une ouvre le document, l'autre ouvre directement le bon passage.
+    utilisé), `url_extrait` (URL positionnée -- fragment #page= pour un
+    PDF, #t=<secondes> pour un audio ; identique à `url` quand le chunk
+    n'a pas de position, càd image/note/lien) et, pour les deux popups
+    ET la citation inline (26/08, retour Bourama : "juste des chiffres,
+    on y comprend rien" -- il faut le nom du fichier + "page X"/le
+    timestamp affichés en clair, pas un numéro nu) :
+    - `reperage` : "page N[-M]" ou "à MM:SS", texte prêt à afficher, None
+      sinon
+    - `position_type`/`position_valeur` : ("page", N) ou ("timestamp",
+      secondes), pour que le frontend sache quel visionneur EN APP ouvrir
+      (voir VisionneurPositionGlobal.tsx -- on ne compte plus sur le
+      fragment d'URL, ignoré par la plupart des lecteurs PDF/audio
+      externes une fois le lien ouvert hors de l'app)
     """
     if not isinstance(resultat_brut, str) or "(Source : " not in resultat_brut:
         return []
@@ -1949,16 +1957,29 @@ def _sources_bibliotheque_depuis_texte(resultat_brut):
 
         m_page = _RE_PAGE_BIBLIOTHEQUE.match(nom_et_reperage)
         m_ts = _RE_TIMESTAMP_BIBLIOTHEQUE.match(nom_et_reperage)
+        reperage = position_type = position_valeur = None
         if m_page:
             nom, page = m_page.group(1), m_page.group(2)
             url_extrait = f"{url}#page={page}"
+            reperage = f"page {page}"
+            position_type, position_valeur = "page", int(page)
         elif m_ts:
             nom, mm, ss = m_ts.group(1), int(m_ts.group(2)), int(m_ts.group(3))
             url_extrait = f"{url}#t={mm * 60 + ss}"
+            reperage = f"à {mm:02d}:{ss:02d}"
+            position_type, position_valeur = "timestamp", mm * 60 + ss
         else:
             nom, url_extrait = nom_et_reperage, url
 
-        sources.append({"titre": nom, "url": url, "extrait": extrait, "url_extrait": url_extrait})
+        sources.append({
+            "titre": nom,
+            "url": url,
+            "extrait": extrait,
+            "url_extrait": url_extrait,
+            "reperage": reperage,
+            "position_type": position_type,
+            "position_valeur": position_valeur,
+        })
 
     return sources
 
