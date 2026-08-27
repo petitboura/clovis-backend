@@ -2177,14 +2177,33 @@ def _traiter_appels(appels, messages_agent, table_routage, compteur_sources=None
                 # et le bloc "LIENS" de la page Notion Clovis (le modèle est
                 # instruit de ne plus réécrire ce lien lui-même, pour éviter
                 # le doublon).
-                fichiers_generes = _extraire_fichiers_generes(resultat)
+                #
+                # CORRECTIF 2026-08-27 (signalé par Bourama) : les sources
+                # bibliotheque sont calculees AVANT desormais, pour pouvoir
+                # exclure leurs URLs de _extraire_fichiers_generes. Sans ca,
+                # un document de bibliotheque cite en source (ex: un PDF)
+                # se faisait detecter UNE DEUXIEME FOIS par la regex
+                # generique (n'importe quelle URL en .pdf/.docx/etc, pensee
+                # pour les fichiers CREES par un outil de generation) et
+                # s'affichait en double dans "Fichier genere" : mal nomme
+                # (fin brute de l'URL de stockage au lieu du vrai nom du
+                # document, deja connu par _extraire_sources), et avec un
+                # repli qui pouvait faire quitter l'appli (voir
+                # telechargerFichier/FichierChip.tsx cote frontend) alors
+                # que la source elle-meme (SourcesBulle.tsx) est deja
+                # cliquable et correctement nommee.
+                sources = _extraire_sources(appel, resultat)
+                urls_deja_sourcees = {s["url"] for s in sources}
+                fichiers_generes = [
+                    f for f in _extraire_fichiers_generes(resultat)
+                    if f["url"] not in urls_deja_sourcees
+                ]
                 if fichiers_generes:
                     yield {
                         "type": "fichiers_generes",
                         "nom_outil": appel["name"],
                         "fichiers": fichiers_generes,
                     }
-                sources = _extraire_sources(appel, resultat)
                 contenu_pour_modele = resultat
                 if sources:
                     debut_numero = compteur_sources[0] + 1
