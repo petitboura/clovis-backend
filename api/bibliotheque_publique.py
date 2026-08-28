@@ -10,14 +10,22 @@ dans Supabase Storage, même pattern que enregistrer_fichier (voir
 core/bibliotheque_fichiers.py) -- bucket "bibliotheque", sous-dossier
 "publique/" pour rester distinct des niveaux plateforme/agent/utilisateur.
 
-Reste volontairement DISTINCT de fichiers_uploades/consulter_bibliotheque
-(pas branché sur le RAG) : catalogue consultable par les humains dans
-l'appli, pas une source injectée automatiquement dans les conversations
-de tout le monde.
+Reste DISTINCT de fichiers_uploades/consulter_bibliotheque (bibliothèque
+perso) : catalogue consultable par les humains dans l'appli, jamais
+injecté automatiquement dans une conversation.
+
+MISE À JOUR 28/08/2026 (demande Bourama : "un truc qui permet à l'IA de
+trouver un dossier ou fichier dans la bibliothèque publique par RAG") :
+chaque ajout est désormais vectorisé (voir _indexer_catalogue_public
+ci-dessous et core/catalogue_public_rag.py) pour que l'outil MCP
+trouver_catalogue_public puisse le localiser -- mais ce RAG sert
+UNIQUEMENT à identifier un document (nom/description/lien), jamais à
+injecter son contenu dans une réponse générée automatiquement.
 """
 
 import logging
 import os
+import tempfile
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
@@ -26,6 +34,12 @@ from supabase import create_client
 
 from api.auth import utilisateur_courant
 from core.erreurs import erreur_api
+from core.catalogue_public_rag import (
+    indexer_pdf_catalogue_public,
+    indexer_texte_catalogue_public,
+    indexer_transcription_catalogue_public,
+)
+from core.description_multimedia import decrire_image_bibliotheque, transcrire_audio_bibliotheque
 
 router = APIRouter(prefix="/api/bibliotheque-publique", tags=["bibliotheque_publique"])
 
@@ -117,7 +131,47 @@ async def ajouter_a_bibliotheque_publique(
         logging.error(f"ERREUR ECRITURE bibliotheque_publique ({chemin_stockage}) : {e}")
         raise erreur_api(500, "ERREUR_INCONNUE")
 
-    return ligne.data[0]
+    entree = ligne.data[0]
+    _indexer_catalogue_public(contenu, fichier.content_type, nom_original, entree["id"])
+    return entree
+
+
+def _indexer_catalogue_public(contenu: bytes, type_mime: str | None, nom_fichier: str, fichier_id: str) -> None:
+    """
+    Vectorise le document ajouté au catalogue public, selon son type
+    réel (28/08/2026, demande Bourama : "que tout ce qui est mis dans
+    la bibliothèque publique soit vectorisé", même logique que
+    _indexer_et_propager dans api/bibliotheque_utilisateur.py pour la
+    bibliothèque perso). Best-effort et non bloquant : le document est
+    déjà stocké et catalogué à ce stade, seule la recherche par IA
+    (trouver_catalogue_public) serait indisponible pour celui-ci en cas
+    d'échec -- on log fort pour pouvoir réindexer manuellement si
+    besoin, sans jamais faire échouer l'ajout.
+    """
+    try:
+        if type_mime == "application/pdf":
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                tmp.write(contenu)
+                chemin_temp = tmp.name
+            try:
+                indexer_pdf_catalogue_public(chemin_temp, fichier_id=fichier_id)
+            finally:
+                try:
+                    os.remove(chemin_temp)
+                except OSError:
+                    pass
+        elif (type_mime or "").startswith("image/"):
+            description_image = decrire_image_bibliotheque(contenu, type_mime)
+            if description_image:
+                indexer_texte_catalogue_public(description_image, fichier_id=fichier_id)
+        elif (type_mime or "").startswith("audio/"):
+            segments_audio = transcrire_audio_bibliotheque(contenu, nom_fichier)
+            if segments_audio:
+                indexer_transcription_catalogue_public(segments_audio, fichier_id=fichier_id)
+        elif type_mime == "text/plain":
+            indexer_texte_catalogue_public(contenu.decode("utf-8", errors="ignore"), fichier_id=fichier_id)
+    except Exception as e:
+        logging.error(f"ERREUR vectorisation catalogue public (fichier_id={fichier_id}, type_mime={type_mime}) : {e}")
 
 
 @router.delete("/{entree_id}", status_code=204)

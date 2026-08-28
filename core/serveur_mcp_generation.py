@@ -130,6 +130,9 @@ from core.bibliotheque_rag import (
     indexer_transcription_bibliotheque as _indexer_transcription_bibliotheque,
     formater_source_bibliotheque as _formater_source_bibliotheque,
 )
+from core.catalogue_public_rag import (
+    chercher_catalogue_public as _chercher_catalogue_public,
+)
 from core.bibliotheque_programme import (
     classer_document as _classer_document,
     declasser_document as _declasser_document,
@@ -415,6 +418,13 @@ def gerer_document_bibliotheque(
       Paramètre : `question`.
     - "chercher_publique" : cherche par contenu dans les PLUGINS PUBLICS
       (bibliothèques partagées par la communauté). Paramètre : `question`.
+    - "trouver_catalogue_public" : LOCALISE un document dans le
+      CATALOGUE PUBLIC (section "Bibliothèque publique", ouvert à tout
+      le monde -- différent des plugins publics ci-dessus). Renvoie
+      uniquement le nom, la description et le lien de chaque document
+      trouvé, JAMAIS son contenu : ne sert qu'à dire à l'utilisateur où
+      trouver un document, jamais à citer ou paraphraser ce document
+      dans ta réponse. Paramètre : `question`.
     - "lister" : liste les documents/liens/notes de la bibliothèque
       personnelle, sans recherche par contenu. Aucun paramètre.
     - "ajouter_lien" : ajoute un lien. Paramètres : `url`, `titre`.
@@ -515,6 +525,23 @@ def gerer_document_bibliotheque(
                 bloc += f"\n{source}"
             blocs.append(bloc)
         return "\n\n---\n\n".join(blocs)
+
+    if action == "trouver_catalogue_public":
+        try:
+            resultats = _chercher_catalogue_public(question)
+        except Exception:
+            return "Erreur : la recherche dans le catalogue public a échoué, réessaie."
+        if not resultats:
+            return "Rien de pertinent trouvé dans le catalogue public pour cette question."
+        lignes = []
+        for r in resultats:
+            ligne = f"- {r['nom']}"
+            if r.get("description"):
+                ligne += f" — {r['description']}"
+            if r.get("url_publique"):
+                ligne += f" ({r['url_publique']})"
+            lignes.append(ligne)
+        return "\n".join(lignes)
 
     if action == "lister":
         try:
@@ -762,8 +789,8 @@ def gerer_document_bibliotheque(
 
     return (
         f"Erreur : action '{action}' inconnue. Actions valides : chercher, chercher_publique, "
-        "lister, ajouter_lien, ajouter_texte, ajouter_fichier, supprimer, classer, declasser, "
-        "ranger_dossier, retirer_dossier, lire_entier."
+        "trouver_catalogue_public, lister, ajouter_lien, ajouter_texte, ajouter_fichier, supprimer, "
+        "classer, declasser, ranger_dossier, retirer_dossier, lire_entier."
     )
 
 
