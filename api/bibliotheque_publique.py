@@ -40,7 +40,7 @@ from core.catalogue_public_rag import (
     indexer_transcription_catalogue_public,
 )
 from core.description_multimedia import decrire_image_bibliotheque, transcrire_audio_bibliotheque
-from core.dossiers_catalogue_public import ranger_fichier as _ranger_fichier_dossier, peut_gerer_contenu as _peut_gerer_contenu_dossier, _dossier as _dossier_catalogue_public
+from core.dossiers_catalogue_public import ranger_fichier as _ranger_fichier_dossier, peut_ajouter_contenu as _peut_ajouter_contenu_dossier, _dossier as _dossier_catalogue_public
 
 router = APIRouter(prefix="/api/bibliotheque-publique", tags=["bibliotheque_publique"])
 
@@ -49,7 +49,7 @@ def _classer_si_autorise(fichier_id: str, dossier_id: str, utilisateur_id: str) 
     if not (dossier_id or "").strip():
         return
     try:
-        if _dossier_catalogue_public(dossier_id) and _peut_gerer_contenu_dossier(dossier_id, utilisateur_id):
+        if _dossier_catalogue_public(dossier_id) and _peut_ajouter_contenu_dossier(dossier_id, utilisateur_id):
             _ranger_fichier_dossier(fichier_id, dossier_id)
     except Exception as e:
         logging.error(f"ERREUR classement dossier catalogue public (fichier_id={fichier_id}, dossier_id={dossier_id}) : {e}")

@@ -14,7 +14,8 @@ from core.dossiers_catalogue_public import (
     creer_dossier,
     lister_dossiers,
     lister_fichiers_ids_dossier,
-    peut_gerer_contenu,
+    peut_ajouter_contenu,
+    peut_retirer_contenu,
     ranger_fichier,
     renommer_dossier,
     retirer_fichier,
@@ -81,7 +82,7 @@ def supprimer(dossier_id: str, utilisateur=Depends(utilisateur_courant)):
 def ranger(dossier_id: str, payload: RangerFichierPayload, utilisateur=Depends(utilisateur_courant)):
     if not _dossier(dossier_id):
         raise erreur_api(404, "DOSSIER_INTROUVABLE")
-    if not peut_gerer_contenu(dossier_id, utilisateur.id):
+    if not peut_ajouter_contenu(dossier_id, utilisateur.id):
         raise erreur_api(403, "CE_DOSSIER_EST_PRIVE_A_SON_CREATEUR")
     ranger_fichier(payload.fichier_id, dossier_id)
     return {"dossier_id": dossier_id, "fichier_id": payload.fichier_id}
@@ -91,6 +92,9 @@ def ranger(dossier_id: str, payload: RangerFichierPayload, utilisateur=Depends(u
 def retirer(dossier_id: str, fichier_id: str, utilisateur=Depends(utilisateur_courant)):
     if not _dossier(dossier_id):
         raise erreur_api(404, "DOSSIER_INTROUVABLE")
-    if not peut_gerer_contenu(dossier_id, utilisateur.id):
-        raise erreur_api(403, "CE_DOSSIER_EST_PRIVE_A_SON_CREATEUR")
+    # 28/08, correctif Bourama : retirer reste réservé au créateur du
+    # dossier, même en contribution_libre (contrairement à ranger,
+    # ci-dessus, qui lui est ouvert à tous en contribution_libre).
+    if not peut_retirer_contenu(dossier_id, utilisateur.id):
+        raise erreur_api(403, "SEUL_LE_CREATEUR_DU_DOSSIER_PEUT_EN_RETIRER_UN_FICHIER")
     retirer_fichier(fichier_id, dossier_id)

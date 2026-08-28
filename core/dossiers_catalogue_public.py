@@ -4,9 +4,13 @@ migrations/2026_08_28_dossiers_catalogue_public.sql pour le schéma.
 
 Différence clé avec core/dossiers_bibliotheque.py (perso) : un dossier
 public a un `statut` choisi par son créateur à la création --
-'contribution_libre' (tout utilisateur connecté peut y ranger/retirer
-un document) ou 'privee' (seul le créateur le peut). Renommer/
-supprimer le dossier reste réservé au créateur dans les deux cas.
+'contribution_libre' (tout utilisateur connecté peut y AJOUTER un
+document) ou 'privee' (seul le créateur le peut). CORRECTIF 28/08
+(Bourama : "tout le monde ne peut pas retirer un dossier public, ni
+lui ni ses fichiers, seulement le créateur") : contribution_libre
+donne le droit d'AJOUTER, jamais de RETIRER -- retirer un fichier d'un
+dossier, renommer le dossier ou le supprimer restent réservés au
+créateur dans TOUS les cas, y compris contribution_libre.
 
 Supprimer un dossier public NE supprime JAMAIS les documents qu'il
 contenait (contrairement au perso) : ce sont des ressources partagées
@@ -27,12 +31,20 @@ def _dossier(dossier_id: str) -> dict | None:
     return res.data if res and res.data else None
 
 
-def peut_gerer_contenu(dossier_id: str, user_id: str) -> bool:
-    """Renvoie True si `user_id` peut ranger/retirer un document dans ce dossier (créateur toujours, ou n'importe qui si statut='contribution_libre')."""
+def peut_ajouter_contenu(dossier_id: str, user_id: str) -> bool:
+    """Renvoie True si `user_id` peut RANGER un document dans ce dossier (créateur toujours, ou n'importe qui si statut='contribution_libre')."""
     dossier = _dossier(dossier_id)
     if not dossier:
         return False
     return dossier["statut"] == "contribution_libre" or dossier["cree_par"] == user_id
+
+
+def peut_retirer_contenu(dossier_id: str, user_id: str) -> bool:
+    """Renvoie True si `user_id` peut RETIRER un document de ce dossier -- réservé au créateur, MÊME si statut='contribution_libre' (28/08, correctif Bourama)."""
+    dossier = _dossier(dossier_id)
+    if not dossier:
+        return False
+    return dossier["cree_par"] == user_id
 
 
 def creer_dossier(user_id: str, nom: str, statut: str = "contribution_libre", dossier_parent_id: str = None) -> dict:
