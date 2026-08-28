@@ -122,6 +122,7 @@ from core.bibliotheque_rag import (
 )
 from core.catalogue_public_rag import (
     chercher_catalogue_public as _chercher_catalogue_public,
+    lire_document_catalogue_public as _lire_document_catalogue_public,
 )
 from core.bibliotheque_programme import (
     classer_document as _classer_document,
@@ -416,6 +417,12 @@ def gerer_document_bibliotheque(
       trouvé, JAMAIS son contenu : ne sert qu'à dire à l'utilisateur où
       trouver un document, jamais à citer ou paraphraser ce document
       dans ta réponse. Paramètre : `question`.
+    - "lire_catalogue_public" : renvoie le texte intégral d'un document
+      du catalogue public, identifié par le `fichier_id` obtenu via
+      "trouver_catalogue_public". N'appelle cette action QUE si
+      l'utilisateur demande explicitement à voir/lire ce document en
+      entier -- jamais automatiquement après un "trouver_catalogue_
+      public". Paramètre : `fichier_id`.
     - "lister" : liste les documents/liens/notes de la bibliothèque
       personnelle, sans recherche par contenu. Aucun paramètre.
     - "ajouter_lien" : ajoute un lien. Paramètres : `url`, `titre`.
@@ -533,6 +540,12 @@ def gerer_document_bibliotheque(
                 ligne += f" ({r['url_publique']})"
             lignes.append(ligne)
         return "\n".join(lignes)
+
+    if action == "lire_catalogue_public":
+        texte = _lire_document_catalogue_public(fichier_id)
+        if texte is None:
+            return "Rien à lire pour ce document : soit il n'existe pas, soit son contenu n'a pas pu être vectorisé (vidéo, ou lien externe)."
+        return texte
 
     if action == "lister":
         try:
@@ -780,8 +793,8 @@ def gerer_document_bibliotheque(
 
     return (
         f"Erreur : action '{action}' inconnue. Actions valides : chercher, chercher_publique, "
-        "trouver_catalogue_public, lister, ajouter_lien, ajouter_texte, ajouter_fichier, supprimer, "
-        "classer, declasser, ranger_dossier, retirer_dossier, lire_entier."
+        "trouver_catalogue_public, lire_catalogue_public, lister, ajouter_lien, ajouter_texte, "
+        "ajouter_fichier, supprimer, classer, declasser, ranger_dossier, retirer_dossier, lire_entier."
     )
 
 

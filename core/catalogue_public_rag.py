@@ -120,6 +120,33 @@ def indexer_transcription_catalogue_public(segments: list[dict], fichier_id: str
     return total
 
 
+def lire_document_catalogue_public(fichier_id: str) -> str | None:
+    """
+    Reconstruit le texte intégral d'un document du catalogue public
+    déjà indexé, en recollant tous ses chunks dans l'ordre d'insertion
+    (28/08, demande Bourama : "l'IA doit aussi pouvoir lire le contenu
+    intégral si l'utilisateur le demande explicitement" -- à n'appeler
+    QUE sur demande explicite, jamais automatiquement depuis
+    trouver_catalogue_public). None si aucun chunk indexé pour ce
+    fichier_id (vidéo par exemple, ou lien -- pas de contenu textuel).
+    """
+    try:
+        res = (
+            supabase.table("documents_catalogue_public")
+            .select("contenu")
+            .eq("fichier_id", fichier_id)
+            .order("id")
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture intégrale catalogue public fichier_id={fichier_id}) : {e}")
+        return None
+
+    if not res.data:
+        return None
+    return "\n\n".join(ligne["contenu"] for ligne in res.data)
+
+
 def chercher_catalogue_public(question: str, match_count: int = 5) -> list:
     """
     Recherche sémantique dans TOUT le catalogue public (pas de filtre

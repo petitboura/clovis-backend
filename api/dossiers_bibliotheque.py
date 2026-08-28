@@ -45,7 +45,7 @@ def _fichier_appartient_a(fichier_id: str, user_id: str) -> bool:
 
 
 class CreerDossierPayload(BaseModel):
-    nom: str
+    nom: str = ""
     dossier_parent_id: str | None = None
 
 
@@ -73,9 +73,9 @@ def lister(utilisateur=Depends(utilisateur_courant)):
 
 @router.post("", status_code=201)
 def creer(payload: CreerDossierPayload, request: Request, utilisateur=Depends(utilisateur_courant)):
-    nom = (payload.nom or "").strip()
-    if not nom:
-        raise erreur_api(400, "NOM_DE_DOSSIER_MANQUANT")
+    # Nom optionnel (28/08, demande Bourama : "nom optionnel même pour un
+    # dossier", retrofit depuis le catalogue public) -- repli sur "Nouveau dossier".
+    nom = (payload.nom or "").strip() or "Nouveau dossier"
 
     if payload.dossier_parent_id:
         proprietaire = _proprietaire_dossier(payload.dossier_parent_id)

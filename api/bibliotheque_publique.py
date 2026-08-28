@@ -14,13 +14,13 @@ Reste DISTINCT de fichiers_uploades/consulter_bibliotheque (bibliothèque
 perso) : catalogue consultable par les humains dans l'appli, jamais
 injecté automatiquement dans une conversation.
 
-MISE À JOUR 28/08/2026 (demande Bourama : "un truc qui permet à l'IA de
-trouver un dossier ou fichier dans la bibliothèque publique par RAG") :
-chaque ajout est désormais vectorisé (voir _indexer_catalogue_public
-ci-dessous et core/catalogue_public_rag.py) pour que l'outil MCP
-trouver_catalogue_public puisse le localiser -- mais ce RAG sert
-UNIQUEMENT à identifier un document (nom/description/lien), jamais à
-injecter son contenu dans une réponse générée automatiquement.
+MISE À JOUR 28/08/2026 bis (demande Bourama : "le bouton + doit être
+comme en privé -- texte/lien/fichier/dossier, nom et description
+optionnels même pour un dossier") : ajout de "/lien" et "/texte" en
+plus de l'upload de fichier, même principe que api/bibliotheque_
+utilisateur.py côté perso. `dossier_id` optionnel sur les 3 routes
+d'ajout pour classer directement à l'ajout (voir api/dossiers_
+catalogue_public.py).
 """
 
 import logging
@@ -40,8 +40,20 @@ from core.catalogue_public_rag import (
     indexer_transcription_catalogue_public,
 )
 from core.description_multimedia import decrire_image_bibliotheque, transcrire_audio_bibliotheque
+from core.dossiers_catalogue_public import ranger_fichier as _ranger_fichier_dossier, peut_gerer_contenu as _peut_gerer_contenu_dossier, _dossier as _dossier_catalogue_public
 
 router = APIRouter(prefix="/api/bibliotheque-publique", tags=["bibliotheque_publique"])
+
+
+def _classer_si_autorise(fichier_id: str, dossier_id: str, utilisateur_id: str) -> None:
+    if not (dossier_id or "").strip():
+        return
+    try:
+        if _dossier_catalogue_public(dossier_id) and _peut_gerer_contenu_dossier(dossier_id, utilisateur_id):
+            _ranger_fichier_dossier(fichier_id, dossier_id)
+    except Exception as e:
+        logging.error(f"ERREUR classement dossier catalogue public (fichier_id={fichier_id}, dossier_id={dossier_id}) : {e}")
+
 
 BUCKET = "bibliotheque"
 TAILLE_MAX_OCTETS = 50 * 1024 * 1024  # 50 Mo, même limite que la bibliothèque personnelle
@@ -85,12 +97,15 @@ def lister_bibliotheque_publique(q: str | None = None):
 @router.post("", response_model=EntreeBibliothequePublique, status_code=201)
 async def ajouter_a_bibliotheque_publique(
     fichier: UploadFile = File(...),
-    nom: str = Form(...),
+    nom: str = Form(""),
     description: str = Form(""),
+    dossier_id: str = Form(""),
     utilisateur=Depends(utilisateur_courant),
 ):
-    if not nom.strip():
-        raise erreur_api(400, "NOM_REQUIS")
+    # Nom optionnel (28/08, demande Bourama : "nom et description
+    # optionnels même pour dossier") -- repli sur le nom du fichier
+    # sans extension, même logique que la bibliothèque perso.
+    nom_final = (nom or "").strip() or (fichier.filename or "Document").rsplit(".", 1)[0]
 
     contenu = await fichier.read()
     if len(contenu) == 0:
@@ -117,7 +132,7 @@ async def ajouter_a_bibliotheque_publique(
             supabase.table("bibliotheque_publique")
             .insert({
                 "ajoute_par": utilisateur.id,
-                "nom": nom.strip(),
+                "nom": nom_final,
                 "description": (description or "").strip(),
                 "nom_fichier": nom_original,
                 "chemin_stockage": chemin_stockage,
@@ -132,6 +147,7 @@ async def ajouter_a_bibliotheque_publique(
         raise erreur_api(500, "ERREUR_INCONNUE")
 
     entree = ligne.data[0]
+    _classer_si_autorise(entree["id"], dossier_id, utilisateur.id)
     _indexer_catalogue_public(contenu, fichier.content_type, nom_original, entree["id"])
     return entree
 
@@ -172,6 +188,95 @@ def _indexer_catalogue_public(contenu: bytes, type_mime: str | None, nom_fichier
             indexer_texte_catalogue_public(contenu.decode("utf-8", errors="ignore"), fichier_id=fichier_id)
     except Exception as e:
         logging.error(f"ERREUR vectorisation catalogue public (fichier_id={fichier_id}, type_mime={type_mime}) : {e}")
+
+
+class AjouterLienPayload(BaseModel):
+    url: str
+    nom: str = ""
+    description: str = ""
+    dossier_id: str = ""
+
+
+@router.post("/lien", response_model=EntreeBibliothequePublique, status_code=201)
+def ajouter_lien_bibliotheque_publique(payload: AjouterLienPayload, utilisateur=Depends(utilisateur_courant)):
+    """Ajoute un lien au catalogue public (28/08, parité avec le sélecteur du privé). Pas de fichier réel : url_publique EST le lien lui-même."""
+    if not (payload.url or "").strip():
+        raise erreur_api(400, "URL_MANQUANTE")
+    nom_final = (payload.nom or "").strip() or payload.url.strip()
+
+    try:
+        ligne = (
+            supabase.table("bibliotheque_publique")
+            .insert({
+                "ajoute_par": utilisateur.id,
+                "nom": nom_final,
+                "description": (payload.description or "").strip(),
+                "nom_fichier": nom_final,
+                "url_publique": payload.url.strip(),
+                "type_mime": "text/uri-list",
+            })
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR ECRITURE bibliotheque_publique (lien) : {e}")
+        raise erreur_api(500, "ERREUR_INCONNUE")
+
+    entree = ligne.data[0]
+    _classer_si_autorise(entree["id"], payload.dossier_id, utilisateur.id)
+    return entree
+
+
+class AjouterTextePayload(BaseModel):
+    contenu: str
+    nom: str = ""
+    dossier_id: str = ""
+
+
+@router.post("/texte", response_model=EntreeBibliothequePublique, status_code=201)
+def ajouter_texte_bibliotheque_publique(payload: AjouterTextePayload, utilisateur=Depends(utilisateur_courant)):
+    """Ajoute une note de texte libre au catalogue public (28/08, parité avec le sélecteur du privé) -- stockée comme un .txt ordinaire, indexée directement."""
+    contenu_texte = (payload.contenu or "").strip()
+    if not contenu_texte:
+        raise erreur_api(400, "TEXTE_VIDE")
+    nom_final = (payload.nom or "").strip() or (contenu_texte[:80] + ("…" if len(contenu_texte) > 80 else ""))
+    contenu_octets = contenu_texte.encode("utf-8")
+    nom_fichier = f"{nom_final}.txt"
+    chemin_stockage = f"publique/{uuid.uuid4()}.txt"
+
+    try:
+        supabase.storage.from_(BUCKET).upload(chemin_stockage, contenu_octets, {"content-type": "text/plain"})
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE STORAGE (note texte bibliothèque publique {chemin_stockage}) : {e}")
+        raise erreur_api(500, "ECHEC_DU_STOCKAGE_REESSAIE")
+
+    url_publique = supabase.storage.from_(BUCKET).get_public_url(chemin_stockage)
+
+    try:
+        ligne = (
+            supabase.table("bibliotheque_publique")
+            .insert({
+                "ajoute_par": utilisateur.id,
+                "nom": nom_final,
+                "description": "",
+                "nom_fichier": nom_fichier,
+                "chemin_stockage": chemin_stockage,
+                "url_publique": url_publique,
+                "type_mime": "text/plain",
+                "taille_octets": len(contenu_octets),
+            })
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR ECRITURE bibliotheque_publique (texte) : {e}")
+        raise erreur_api(500, "ERREUR_INCONNUE")
+
+    entree = ligne.data[0]
+    _classer_si_autorise(entree["id"], payload.dossier_id, utilisateur.id)
+    try:
+        indexer_texte_catalogue_public(contenu_texte, fichier_id=entree["id"])
+    except Exception as e:
+        logging.error(f"ERREUR vectorisation note texte catalogue public (fichier_id={entree['id']}) : {e}")
+    return entree
 
 
 @router.delete("/{entree_id}", status_code=204)

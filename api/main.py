@@ -39,6 +39,7 @@ from api.emplacements_bibliotheque_programme import router as emplacements_bibli
 from api.plugins_programme import router as plugins_router, router_programmes as plugins_programmes_router
 from api.comportements_publics import router as comportements_publics_router
 from api.bibliotheque_publique import router as bibliotheque_publique_router
+from api.dossiers_catalogue_public import router as dossiers_catalogue_public_router
 from api.signalements import router as signalements_router
 from api.contenu_legal import router as contenu_legal_router
 from api.codes_partage import router_mes_codes, router_rattachements
@@ -408,6 +409,7 @@ app.include_router(plugins_router)
 app.include_router(plugins_programmes_router)
 app.include_router(comportements_publics_router)
 app.include_router(bibliotheque_publique_router)
+app.include_router(dossiers_catalogue_public_router)
 app.include_router(signalements_router)
 app.include_router(contenu_legal_router)
 app.include_router(router_mes_codes)
