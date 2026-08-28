@@ -1728,8 +1728,10 @@ def _sauvegarder_echange(user_id, agent_id, message_utilisateur, reponse_finale,
     sources, piece jointe image) disparaissait entierement a la
     reouverture d'une conversation, seul le texte brut survivant. Contenu
     attendu : meta_utilisateur = {"pieces_jointes": [...]},
-    meta_assistant = {"outils": [...], "sources": [...]} -- voir
-    _capturer_reponse pour la construction de meta_assistant.
+    meta_assistant = {"outils": [{"nomOutil", "nomLisible", "resultat",
+    "sources"}, ...]} -- voir _capturer_reponse pour la construction de
+    meta_assistant, structure alignee sur MessageAffiche.outilsResultats
+    cote frontend.
     """
     ids_historique = None  # renvoyé à l'appelant pour l'indexation du feedback
 
@@ -2703,21 +2705,27 @@ def _capturer_reponse(generateur, accumulateur, meta=None):
     sans dupliquer cette logique a chaque point de sortie de chat().
 
     `meta` (optionnel, dict mute en place) : si fourni, capture aussi les
-    outils executes (nom_outil/nom_lisible) et les sources trouvees,
+    outils executes (nom_outil/nom_lisible/resultat) et leurs sources,
     pour persistance dans historique_conversations.meta -- ces evenements
     sont sinon uniquement diffuses en direct (SSE) et perdus a la
-    reouverture d'une conversation.
+    reouverture d'une conversation. Structure identique a ce qu'attend
+    MessageAffiche.outilsResultats cote frontend (voir BulleMessage.tsx) :
+    une entree "sources" est toujours rattachee au DERNIER outil ajoute,
+    jamais a un tableau global -- le backend emet toujours outil_resultat
+    puis sources pour un meme appel, sans rien entre les deux (voir
+    _traiter_appels).
     """
     for event in generateur:
         if event["type"] == "reponse":
             accumulateur.append(event["texte"])
         elif meta is not None and event["type"] == "outil_resultat":
             meta.setdefault("outils", []).append({
-                "nom_outil": event["nom_outil"],
-                "nom_lisible": event["nom_lisible"],
+                "nomOutil": event["nom_outil"],
+                "nomLisible": event["nom_lisible"],
+                "resultat": event["resultat"],
             })
-        elif meta is not None and event["type"] == "sources":
-            meta.setdefault("sources", []).extend(event["sources"])
+        elif meta is not None and event["type"] == "sources" and meta.get("outils"):
+            meta["outils"][-1]["sources"] = event["sources"]
         yield event
 
 
@@ -3277,7 +3285,11 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         reponse_accumulee = []
         meta_utilisateur = {"pieces_jointes": []}
         if image_url:
-            meta_utilisateur["pieces_jointes"].append({"type": "image", "url": image_url})
+            meta_utilisateur["pieces_jointes"].append({
+                "nom": image_url.split("/")[-1].split("?")[0] or "image",
+                "type": "image",
+                "previewUrl": image_url,
+            })
         if images_base64:
             # Pas d'URL persistante disponible ici (frames extraites a la
             # volee, voir api/uploads.py:uploader_video_chat) -- la video
@@ -3285,7 +3297,11 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             # n'est aujourd'hui pas transmise jusqu'a chat(). Best-effort :
             # on note au moins qu'une video etait jointe, plutot que de
             # perdre totalement la trace.
-            meta_utilisateur["pieces_jointes"].append({"type": "video", "note": "aperçu non conservé"})
+            meta_utilisateur["pieces_jointes"].append({
+                "nom": "vidéo",
+                "type": "video",
+                "erreur": "aperçu non conservé après rechargement",
+            })
         try:
             client_google = genai.Client(api_key=get_secret("GOOGLE_API_KEY"))
             response = client_google.models.generate_content_stream(
