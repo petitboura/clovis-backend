@@ -211,10 +211,6 @@ OUTILS_SENSIBLES = {
     # Consolidé le 26/08 en une action de gerer_memoire_utilisateur (même
     # format composite "nom_outil:action").
     "gerer_memoire_utilisateur:effacer",
-    # Section "Notion-like" (Partie 2, lot 1/5, 20/08) -- même logique que
-    # les suppressions programme ci-dessus : irréversible, toujours confirmé.
-    "supprimer_page",
-    "supprimer_bloc",
     # Dossiers de la bibliothèque personnelle (22/08, demande Bourama) :
     # peut supprimer des fichiers avec le dossier (voir
     # core/dossiers_bibliotheque.py:supprimer_dossier) -- irréversible,
@@ -432,15 +428,6 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "consulter_examens_programme": {"label": "Consultation des examens", "icone": "ClipboardList", "onglet": None},
     "supprimer_examen": {"label": "Suppression d'un examen", "icone": "Trash2", "onglet": None},
     "annuler_derniere_modification": {"label": "Annulation de la dernière modification", "icone": "Undo2", "onglet": None},
-    # Section "Notion-like" (Partie 2, lot 1/5, 20/08)
-    "lister_mes_pages": {"label": "Liste de tes pages", "icone": "FileText", "onglet": None},
-    "consulter_page": {"label": "Consultation d'une page", "icone": "FileText", "onglet": None},
-    "ajouter_page": {"label": "Création d'une page", "icone": "FileText", "onglet": None},
-    "modifier_page": {"label": "Modification d'une page", "icone": "FileText", "onglet": None},
-    "supprimer_page": {"label": "Suppression d'une page", "icone": "Trash2", "onglet": None},
-    "ajouter_bloc": {"label": "Ajout d'un bloc", "icone": "FileText", "onglet": None},
-    "modifier_bloc": {"label": "Modification d'un bloc", "icone": "FileText", "onglet": None},
-    "supprimer_bloc": {"label": "Suppression d'un bloc", "icone": "Trash2", "onglet": None},
     "gerer_comportement": {"label": "Skills personnels", "icone": "ScrollText", "onglet": None},
     # Routage en deux niveaux (22/08/2026, demande Bourama) : jamais un
     # outil que le grand LLM appelle lui-même (pas de tool MCP réel), c'est
