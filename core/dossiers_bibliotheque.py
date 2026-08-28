@@ -27,7 +27,7 @@ interne de la bibliothèque personnelle elle-même.
 import logging
 
 from api.auth import supabase
-from core.bibliotheque_fichiers import supprimer_fichier
+from core.bibliotheque_fichiers import supprimer_fichiers
 
 logging.basicConfig(level=logging.INFO)
 
@@ -96,6 +96,32 @@ def lister_dossiers_du_fichier(fichier_id: str) -> list:
     return [ligne["dossiers_bibliotheque"] for ligne in res.data if ligne.get("dossiers_bibliotheque")]
 
 
+def dossiers_par_fichier_batch(fichier_ids: list[str]) -> dict[str, set[str]]:
+    """
+    Même chose que lister_dossiers_du_fichier, mais pour plusieurs
+    fichiers d'un coup (1 requête au lieu d'une par fichier) --
+    renvoie seulement les dossier_id (pas besoin du nom ici), groupés
+    par fichier_id.
+
+    Ajoutée le 2026-08-27 (bug remonté par Bourama : supprimer un
+    dossier importé avec plusieurs dizaines de fichiers échouait avec
+    "Failed to fetch" -- voir supprimer_dossier ci-dessous et
+    core/bibliotheque_fichiers.py:supprimer_fichiers).
+    """
+    if not fichier_ids:
+        return {}
+    res = (
+        supabase.table("fichiers_dossiers_bibliotheque")
+        .select("fichier_id, dossier_id")
+        .in_("fichier_id", fichier_ids)
+        .execute()
+    )
+    par_fichier: dict[str, set[str]] = {f_id: set() for f_id in fichier_ids}
+    for ligne in res.data:
+        par_fichier.setdefault(ligne["fichier_id"], set()).add(ligne["dossier_id"])
+    return par_fichier
+
+
 def ranger_fichier(fichier_id: str, dossier_id: str) -> None:
     """Rattache un fichier à un dossier. Idempotent (clé primaire composite fichier_id+dossier_id)."""
     supabase.table("fichiers_dossiers_bibliotheque").upsert({
@@ -137,20 +163,25 @@ def supprimer_dossier(dossier_id: str) -> None:
     for d_id in a_supprimer:
         fichiers_concernes.update(lister_fichiers_ids_dossier(d_id))
 
-    fichiers_a_supprimer = []
-    for f_id in fichiers_concernes:
-        autres_dossiers = {
-            d["id"] for d in lister_dossiers_du_fichier(f_id)
-        } - a_supprimer
-        if not autres_dossiers:
-            fichiers_a_supprimer.append(f_id)
+    # CORRECTIF 2026-08-27 (bug remonté par Bourama : "Failed to fetch"
+    # en supprimant un dossier importé avec plusieurs dizaines de
+    # fichiers) : dossiers_par_fichier_batch fait 1 seule requête pour
+    # TOUS les fichiers concernés, au lieu d'une requête par fichier
+    # (lister_dossiers_du_fichier appelée en boucle avant).
+    dossiers_par_fichier = dossiers_par_fichier_batch(list(fichiers_concernes))
+    fichiers_a_supprimer = [
+        f_id for f_id in fichiers_concernes
+        if not (dossiers_par_fichier.get(f_id, set()) - a_supprimer)
+    ]
 
     # Suppression des dossiers (cascade sur fichiers_dossiers_bibliotheque
     # automatique via la contrainte ON DELETE CASCADE de la migration).
     supabase.table("dossiers_bibliotheque").delete().eq("id", dossier_id).execute()
 
-    for f_id in fichiers_a_supprimer:
-        try:
-            supprimer_fichier(f_id)
-        except Exception as e:
-            logging.error(f"ERREUR suppression fichier {f_id} suite à suppression dossier {dossier_id} : {e}")
+    # Idem : suppression groupée (1 SELECT + 1 remove Storage + 1 DELETE)
+    # au lieu d'un supprimer_fichier() par fichier -- voir
+    # core/bibliotheque_fichiers.py:supprimer_fichiers.
+    try:
+        supprimer_fichiers(fichiers_a_supprimer)
+    except Exception as e:
+        logging.error(f"ERREUR suppression groupée des fichiers suite à suppression dossier {dossier_id} : {e}")

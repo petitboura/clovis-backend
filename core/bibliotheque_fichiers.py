@@ -247,3 +247,37 @@ def supprimer_fichier(fichier_id: str) -> None:
         logging.warning(f"Suppression Storage bibliothèque échouée ({chemin_stockage}), ligne supprimée quand même : {e}")
 
     supabase.table("fichiers_uploades").delete().eq("id", fichier_id).execute()
+
+
+def supprimer_fichiers(fichier_ids: list[str]) -> None:
+    """
+    Même chose que supprimer_fichier, mais pour plusieurs fichiers d'un
+    coup : 1 SELECT + 1 suppression Storage groupée + 1 DELETE groupé,
+    au lieu de 3 appels PAR fichier.
+
+    Ajoutée le 2026-08-27 (bug remonté par Bourama : supprimer un
+    dossier importé avec plusieurs dizaines de fichiers échouait avec
+    "Failed to fetch" -- l'ancienne boucle appelait supprimer_fichier
+    un par un, soit ~3 allers-retours réseau séquentiels par fichier,
+    largement de quoi dépasser le timeout de la requête pour un dossier
+    de taille réelle). Ne lève pas d'erreur si la suppression Storage
+    échoue pour tout ou partie des fichiers, même logique que la
+    version unitaire -- seules les lignes en base sont critiques.
+    """
+    if not fichier_ids:
+        return
+
+    lignes = (
+        supabase.table("fichiers_uploades")
+        .select("chemin_stockage")
+        .in_("id", fichier_ids)
+        .execute()
+    )
+    chemins = [l["chemin_stockage"] for l in lignes.data if l.get("chemin_stockage")]
+    if chemins:
+        try:
+            supabase.storage.from_(BUCKET).remove(chemins)
+        except Exception as e:
+            logging.warning(f"Suppression Storage bibliothèque groupée échouée ({len(chemins)} fichiers), lignes supprimées quand même : {e}")
+
+    supabase.table("fichiers_uploades").delete().in_("id", fichier_ids).execute()
