@@ -1705,7 +1705,7 @@ DELAI_MAX_PAR_APPEL = 10  # secondes : on bascule vite plutot que d'attendre
 MAX_PASSAGES_CASCADE = 2  # on ne retente toute la cascade que si TOUT a timeout
 
 
-def _sauvegarder_echange(user_id, agent_id, message_utilisateur, reponse_finale, conversation_id=None, modele=None):
+def _sauvegarder_echange(user_id, agent_id, message_utilisateur, reponse_finale, conversation_id=None, modele=None, meta_utilisateur=None, meta_assistant=None):
     """
     Persiste l'echange (question + reponse) dans `conversations`, pour la
     memoire long-terme. Ignore silencieusement si l'utilisateur n'est pas
@@ -1720,6 +1720,16 @@ def _sauvegarder_echange(user_id, agent_id, message_utilisateur, reponse_finale,
     nullable), sinon le modele_id premium (voir core/fournisseurs_llm.py).
     Permet au frontend d'afficher quel modele a repondu sous chaque
     message (voir AgentEditable.modeles_disponibles cote api/agents.py).
+
+    `meta_utilisateur`/`meta_assistant` (optionnels, dict, 28/08/2026) :
+    ecrits respectivement sur la ligne "user" et la ligne "assistant" de
+    historique_conversations (colonne meta, jsonb). But : ce qui n'existe
+    aujourd'hui que le temps du direct (evenements SSE outil_resultat/
+    sources, piece jointe image) disparaissait entierement a la
+    reouverture d'une conversation, seul le texte brut survivant. Contenu
+    attendu : meta_utilisateur = {"pieces_jointes": [...]},
+    meta_assistant = {"outils": [...], "sources": [...]} -- voir
+    _capturer_reponse pour la construction de meta_assistant.
     """
     ids_historique = None  # renvoyé à l'appelant pour l'indexation du feedback
 
@@ -1753,8 +1763,8 @@ def _sauvegarder_echange(user_id, agent_id, message_utilisateur, reponse_finale,
         res = (
             supabase.table("historique_conversations")
             .insert([
-                {"user_id": user_id, "agent_id": agent_id, "role": "user", "content": message_utilisateur, "conversation_id": conversation_id},
-                {"user_id": user_id, "agent_id": agent_id, "role": "assistant", "content": reponse_finale, "conversation_id": conversation_id, "modele": modele},
+                {"user_id": user_id, "agent_id": agent_id, "role": "user", "content": message_utilisateur, "conversation_id": conversation_id, "meta": meta_utilisateur or None},
+                {"user_id": user_id, "agent_id": agent_id, "role": "assistant", "content": reponse_finale, "conversation_id": conversation_id, "modele": modele, "meta": meta_assistant or None},
             ])
             .execute()
         )
@@ -2684,17 +2694,30 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
     logging.info(f"Réponse via GROQ (avec outil): {modele}")
 
 
-def _capturer_reponse(generateur, accumulateur):
+def _capturer_reponse(generateur, accumulateur, meta=None):
     """
     Relaie tous les evenements d'un generateur tel quel, en accumulant au
     passage le texte des evenements "reponse" dans `accumulateur` (une
     liste, mutee en place). Permet de reconstruire la reponse finale
     complete une fois le generateur epuise, pour la persister en memoire,
     sans dupliquer cette logique a chaque point de sortie de chat().
+
+    `meta` (optionnel, dict mute en place) : si fourni, capture aussi les
+    outils executes (nom_outil/nom_lisible) et les sources trouvees,
+    pour persistance dans historique_conversations.meta -- ces evenements
+    sont sinon uniquement diffuses en direct (SSE) et perdus a la
+    reouverture d'une conversation.
     """
     for event in generateur:
         if event["type"] == "reponse":
             accumulateur.append(event["texte"])
+        elif meta is not None and event["type"] == "outil_resultat":
+            meta.setdefault("outils", []).append({
+                "nom_outil": event["nom_outil"],
+                "nom_lisible": event["nom_lisible"],
+            })
+        elif meta is not None and event["type"] == "sources":
+            meta.setdefault("sources", []).extend(event["sources"])
         yield event
 
 
@@ -3252,6 +3275,17 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         })
 
         reponse_accumulee = []
+        meta_utilisateur = {"pieces_jointes": []}
+        if image_url:
+            meta_utilisateur["pieces_jointes"].append({"type": "image", "url": image_url})
+        if images_base64:
+            # Pas d'URL persistante disponible ici (frames extraites a la
+            # volee, voir api/uploads.py:uploader_video_chat) -- la video
+            # originale est bien stockee cote bibliotheque mais son URL
+            # n'est aujourd'hui pas transmise jusqu'a chat(). Best-effort :
+            # on note au moins qu'une video etait jointe, plutot que de
+            # perdre totalement la trace.
+            meta_utilisateur["pieces_jointes"].append({"type": "video", "note": "aperçu non conservé"})
         try:
             client_google = genai.Client(api_key=get_secret("GOOGLE_API_KEY"))
             response = client_google.models.generate_content_stream(
@@ -3266,7 +3300,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                     reponse_accumulee.append(chunk.text)
                     yield {"type": "reponse", "texte": chunk.text}
             logging.info("Réponse via GEMINI (image)")
-            ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=GOOGLE_MODEL)
+            ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=GOOGLE_MODEL, meta_utilisateur=meta_utilisateur)
             if ids_historique:
                 yield {"type": "meta", **ids_historique}
             _mettre_a_jour_resume_si_besoin(user_id)
@@ -3327,6 +3361,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         # jamais dans la reponse finale).
         messages_agent = list(messages_base)
         reponse_accumulee = []
+        meta_assistant = {}
 
         # 1. GPT-OSS 120B, avec cycle d'outils MCP dynamique
         try:
@@ -3334,6 +3369,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 _agent_groq(client_groq, messages_agent, outils_mcp, table_routage, agent_nom=agent_nom,
                             reasoning_effort=MODELES_AVEC_REASONING_EFFORT.get(GROQ_PRIMARY)),
                 reponse_accumulee,
+                meta_assistant,
             )
             evenement_lien_manquant = _completer_liens_manquants(reponse_accumulee, messages_agent)
             if evenement_lien_manquant:
@@ -3341,7 +3377,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             evenement_citation_manquante = _completer_citations_manquantes(reponse_accumulee, messages_agent)
             if evenement_citation_manquante:
                 yield evenement_citation_manquante
-            ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=GROQ_PRIMARY)
+            ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=GROQ_PRIMARY, meta_assistant=meta_assistant)
             if ids_historique:
                 yield {"type": "meta", **ids_historique}
             _mettre_a_jour_resume_si_besoin(user_id)
@@ -3375,6 +3411,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                         modele=model, reasoning_effort=reasoning_pour_ce_modele, agent_nom=agent_nom,
                     ),
                     reponse_accumulee,
+                    meta_assistant,
                 )
                 evenement_lien_manquant = _completer_liens_manquants(reponse_accumulee, messages_agent)
                 if evenement_lien_manquant:
@@ -3382,7 +3419,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 evenement_citation_manquante = _completer_citations_manquantes(reponse_accumulee, messages_agent)
                 if evenement_citation_manquante:
                     yield evenement_citation_manquante
-                ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=model)
+                ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=model, meta_assistant=meta_assistant)
                 # Signale au frontend quand la reponse vient d'un modele de
                 # qualite reduite (demande Bourama, 26/07) : evite que
                 # l'utilisateur juge la plateforme sur une reponse plus

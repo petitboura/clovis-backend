@@ -111,6 +111,7 @@ class MessageHistorique(BaseModel):
     role: str
     content: str
     created_at: str
+    meta: Optional[dict] = None
 
 
 @router.get("/{agent_id}", response_model=List[MessageHistorique])
@@ -129,7 +130,7 @@ def obtenir_historique_agent(agent_id: str, utilisateur=Depends(utilisateur_cour
     try:
         lignes = (
             supabase.table("historique_conversations")
-            .select("role, content, created_at")
+            .select("role, content, created_at, meta")
             .eq("user_id", utilisateur.id)
             .eq("agent_id", agent_id)
             .order("created_at")
@@ -233,7 +234,7 @@ def obtenir_fil_conversation(agent_id: str, conversation_id: str, utilisateur=De
     try:
         requete = (
             supabase.table("historique_conversations")
-            .select("role, content, created_at")
+            .select("role, content, created_at, meta")
             .eq("user_id", utilisateur.id)
             .eq("agent_id", agent_id)
         )
