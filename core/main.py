@@ -1209,6 +1209,12 @@ def _mettre_a_jour_profil_utilisateur_si_besoin(user_id, agent_id):
 # qu'aucun outil n'est réellement branché).
 INSTRUCTIONS_FORMATS_AFFICHAGE = """
 
+<organisation_texte>
+Réponds par défaut en prose fluide, comme à l'oral -- pas en style rapport. Pas de titres Markdown (#, ##) dans une réponse de conversation normale. Pas de gras systématique pour donner une impression de structure : réserve-le à un mot-clé vraiment important.
+N'utilise une liste à puces ou numérotée QUE pour une vraie énumération d'éléments courts et parallèles (options interchangeables, étapes dans un ordre précis) -- jamais pour un raisonnement qui s'enchaîne logiquement ("d'abord... parce que... donc..."), qui reste en phrases même s'il a plusieurs points. Si chaque élément d'une liste fait plusieurs lignes, c'est probablement du texte normal déguisé en liste : repasse-le en paragraphe.
+Un saut de ligne marque un vrai changement d'idée ou de sujet, jamais une aération systématique -- ne fragmente pas un raisonnement continu en plusieurs micro-paragraphes d'une phrase chacun.
+</organisation_texte>
+
 <formats_enrichis>
 Utilise ces blocs seulement quand ils apportent une vraie valeur — jamais pour décorer :
 - ```mermaid``` : diagramme flowchart/séquence/état. Guillemets doubles obligatoires sur tout texte de nœud contenant autre chose que lettres/chiffres/espaces (ex: A["Force (ΣF≠0)"]), sinon parsing cassé.
