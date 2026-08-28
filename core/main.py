@@ -1456,6 +1456,42 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         "gerer_document_bibliotheque (action \"chercher\") ; \"Clovis / "
         "l'application\" (même vaguement) -> "
         "gerer_base_connaissance.\n\n"
+        # AJOUT 2026-08-28 (diagnostic : gerer_document_bibliotheque
+        # (actions "trouver_catalogue_public" et "chercher_publique")
+        # n'avait jamais eu d'exemples dédiés dans ce prompt, contrairement
+        # à "chercher" (bibliothèque perso, règle du 15/08) et
+        # gerer_base_connaissance (Clovis lui-même, règle ci-dessus). Le
+        # mot "catalogue" n'apparaissait nulle part ailleurs dans ce
+        # prompt sauf pour désigner le catalogue d'outils lui-même -- une
+        # question du type "trouve-moi un document sur X dans la
+        # bibliothèque publique" ne correspondait littéralement ni à "mes
+        # documents" ni à "Clovis lui-même" aux yeux du petit modèle, donc
+        # rien n'était suggéré. Même leçon que les correctifs précédents :
+        # un petit modèle 8B/20B a besoin d'exemples concrets pour
+        # généraliser une intention.
+        "IMPORTANT : gerer_document_bibliotheque doit aussi être suggéré "
+        "pour deux autres mondes de documents, distincts de la "
+        "bibliothèque personnelle et de Clovis lui-même :\n"
+        "1) action \"trouver_catalogue_public\" -- LOCALISER un document "
+        "dans le CATALOGUE PUBLIC (section \"Bibliothèque publique\", "
+        "ouverte à tout le monde). Exemples qui DOIVENT suggérer cette "
+        "action : \"trouve-moi un document sur la thermodynamique dans "
+        "la bibliothèque publique\", \"y a-t-il un cours sur la "
+        "Révolution française dans le catalogue public ?\", \"cherche un "
+        "document public sur les suites numériques\".\n"
+        "2) action \"chercher_publique\" -- chercher par CONTENU dans "
+        "les PLUGINS PUBLICS (bibliothèques partagées par la "
+        "communauté d'utilisateurs, différentes du catalogue public "
+        "ci-dessus). Exemples qui DOIVENT suggérer cette action : "
+        "\"qu'est-ce que dit le plugin partagé sur la mitose ?\", "
+        "\"cherche dans les bibliothèques communautaires ce qu'on dit "
+        "sur les intégrales\".\n"
+        "Ne te fie jamais aux mots \"catalogue\", \"public\" ou "
+        "\"communautaire\" eux-mêmes pour reconnaître ces cas -- comme "
+        "pour la bibliothèque personnelle, base-toi sur l'intention "
+        "réelle (l'utilisateur cherche un document qui n'est PAS le sien "
+        "et qui ne concerne PAS Clovis/l'application). Ce ne sont que des "
+        "illustrations, pas une liste exhaustive de cas valides.\n\n"
         # AJOUT 2026-08-22 (demande Bourama : "les skills ont été
         # corrigés visuellement, mais intérieurement non, il faut que
         # le LLM soit au courant") : lister_comportements/
