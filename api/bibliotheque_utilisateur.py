@@ -142,7 +142,14 @@ async def uploader_document(
     if len(contenu) > TAILLE_MAX_OCTETS:
         raise erreur_api(400, "FICHIER_TROP_LOURD_50_MO_MAX")
 
-    nom_original = fichier.filename or "fichier"
+    # CORRECTIF 2026-08-27 (bug remonté par Bourama : un fichier issu
+    # d'un dossier importé gardait son chemin complet comme nom --
+    # "Cours/Chimie/td1.pdf" au lieu de "td1.pdf". Cause côté navigateur,
+    # déjà corrigée dans lib/api.ts:ajouterFichierBibliothequePersonnelle
+    # -- filet de sécurité ici pour tout AUTRE client (app mobile, appel
+    # API direct) qui enverrait encore un chemin par erreur : ne jamais
+    # garder autre chose que le dernier segment, / et \ compris (Windows).
+    nom_original = (fichier.filename or "fichier").replace("\\", "/").rsplit("/", 1)[-1]
     description_finale = (
         f"{titre.strip()} — {description.strip()}" if (titre or "").strip() and (description or "").strip()
         else (description or titre or "").strip() or nom_original
