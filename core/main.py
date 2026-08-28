@@ -274,6 +274,97 @@ def _completer_liens_manquants(reponse_accumulee, messages_agent):
     return {"type": "reponse", "texte": ajout}
 
 
+def _citations_bibliotheque_manquantes(reponse_texte: str, messages_agent) -> list:
+    """
+    Filet de securite (26/08, demande Bourama : "il ne donne pas toujours
+    les sources dans le texte, seulement la bulle en bas") -- meme
+    principe que _urls_generation_manquantes : le modele suit
+    l'instruction <citations_bibliotheque> la plupart du temps, mais pas
+    systematiquement (plus frequent avec un modele de secours moins
+    instruction-following, ou une reponse tres courte). Repere les
+    sources bibliotheque de CE TOUR (annotees dans le contenu du message
+    "tool" par _traiter_appels, voir "[Numerote tes citations...]") dont
+    AUCUN marqueur [n](citation:n) n'apparait dans le texte final -- pour
+    qu'on puisse les rajouter nous-memes plutot que de compter sur le
+    modele a chaque fois.
+
+    Renvoie une liste de (numero, titre, reperage) a rajouter, dans
+    l'ordre. Ne fait aucune hypothese sur LEQUEL des extraits d'une
+    meme source a ete utilise -- rajoute juste un marqueur par source
+    manquante (pas par chunk), pointant vers le meme fichier.
+    """
+    manquantes_par_message = []
+    for message in reversed(messages_agent):
+        if message.get("role") != "tool":
+            break  # les messages "tool" d'un meme tour sont toujours groupes en fin de liste
+        contenu = message.get("content")
+        if not isinstance(contenu, str) or "[Numérote tes citations" not in contenu:
+            continue
+        contenu_brut, _, note = contenu.partition("\n\n[Numérote tes citations")
+        m_plage = re.search(r"de (\d+) à (\d+)", note)
+        if not m_plage:
+            continue
+        debut, fin = int(m_plage.group(1)), int(m_plage.group(2))
+        # contenu_brut = tout ce qui precede la note (le texte brut de
+        # l'outil, identique a ce que _sources_bibliotheque_depuis_texte
+        # parse cote SSE) -- la note elle-meme est exclue du decoupage en
+        # blocs ci-dessous, sinon le DERNIER bloc de cet appel se
+        # retrouverait avec cette note comme derniere ligne au lieu de
+        # "(Source : ...)", et son match echouerait silencieusement.
+        manquantes_ce_message = []
+        for numero in range(debut, fin + 1):
+            if f"(citation:{numero})" in reponse_texte:
+                continue
+            # Ligne "(Source : nom[, reperage], url)" correspondant a CE
+            # numero, dans l'ordre d'apparition (meme logique que
+            # _sources_bibliotheque_depuis_texte cote SSE) -- ici on n'a
+            # besoin que du texte a afficher, pas de l'URL (le marqueur
+            # [n](citation:n) suffit, le frontend resout deja n -> source
+            # complete via sourcesAplaties).
+            index_dans_cet_appel = numero - debut
+            blocs = contenu_brut.split("\n\n---\n\n")
+            if index_dans_cet_appel >= len(blocs):
+                continue
+            m_source = _RE_SOURCE_BIBLIOTHEQUE_LIGNE.match(blocs[index_dans_cet_appel].strip().splitlines()[-1].strip())
+            if not m_source:
+                continue
+            manquantes_ce_message.append((numero, m_source.group(1)))
+        if manquantes_ce_message:
+            manquantes_par_message.append(manquantes_ce_message)
+
+    # `messages_agent` a ete parcouru du plus RECENT au plus ANCIEN (pour
+    # s'arreter au bon endroit, voir le commentaire plus haut) -- chaque
+    # `manquantes_ce_message` est deja dans le bon ordre CROISSANT en
+    # interne (numerote 1, 2, 3...), seul l'ordre ENTRE les messages doit
+    # etre inverse pour retrouver l'ordre chronologique (le plus ancien
+    # tool call, donc les numeros les plus bas, en premier). Un simple
+    # `manquantes.reverse()` sur la liste APLATIE aurait aussi inverse
+    # l'ordre interne de chaque message -- bug attrape par un test manuel
+    # avant push.
+    manquantes = [item for groupe in reversed(manquantes_par_message) for item in groupe]
+    return manquantes
+
+
+def _completer_citations_manquantes(reponse_accumulee, messages_agent):
+    """
+    A appeler juste apres une reponse finale reussie, comme
+    _completer_liens_manquants -- voir _citations_bibliotheque_manquantes.
+    Rajoute les marqueurs [n](citation:n) oublies par le modele, sous
+    forme d'un court recapitulatif en fin de reponse (jamais au milieu
+    d'une phrase deja ecrite -- on ne sait pas ou l'inserer avec
+    certitude, donc on se contente de garantir leur PRESENCE quelque
+    part dans le texte reel du message, pas leur position exacte).
+    """
+    texte_actuel = "".join(reponse_accumulee)
+    manquantes = _citations_bibliotheque_manquantes(texte_actuel, messages_agent)
+    if not manquantes:
+        return None
+    liste = ", ".join(f"[{nom}](citation:{numero})" for numero, nom in manquantes)
+    ajout = f"\n\nSources : {liste}"
+    reponse_accumulee.append(ajout)
+    return {"type": "reponse", "texte": ajout}
+
+
 def _ressemble_a_une_simple_url(contenu: str) -> bool:
     """
     Vrai si le resultat d'un outil n'est (essentiellement) qu'un lien nu,
@@ -3247,6 +3338,9 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             evenement_lien_manquant = _completer_liens_manquants(reponse_accumulee, messages_agent)
             if evenement_lien_manquant:
                 yield evenement_lien_manquant
+            evenement_citation_manquante = _completer_citations_manquantes(reponse_accumulee, messages_agent)
+            if evenement_citation_manquante:
+                yield evenement_citation_manquante
             ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=GROQ_PRIMARY)
             if ids_historique:
                 yield {"type": "meta", **ids_historique}
@@ -3285,6 +3379,9 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 evenement_lien_manquant = _completer_liens_manquants(reponse_accumulee, messages_agent)
                 if evenement_lien_manquant:
                     yield evenement_lien_manquant
+                evenement_citation_manquante = _completer_citations_manquantes(reponse_accumulee, messages_agent)
+                if evenement_citation_manquante:
+                    yield evenement_citation_manquante
                 ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=model)
                 # Signale au frontend quand la reponse vient d'un modele de
                 # qualite reduite (demande Bourama, 26/07) : evite que
