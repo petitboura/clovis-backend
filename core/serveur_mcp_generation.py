@@ -395,13 +395,14 @@ def gerer_document_bibliotheque(
     dossier_id: str = "",
 ) -> str:
     """
-    Gère la bibliothèque personnelle de documents/liens/notes de CET
-    utilisateur (section "Bibliothèque" de "Mon espace") -- un seul outil,
-    plusieurs actions, au lieu de 12 outils séparés (consolidé le 26/08,
-    demande Bourama : "un outil puis paramètres c'est pas mieux que
-    plusieurs outils si on peut regrouper", pattern "action + paramètres"
-    -- réduit le catalogue envoyé au routeur/modèle et limite les
-    confusions de noms d'outils proches).
+    Gère la bibliothèque personnelle de CET utilisateur, et permet aussi de
+    chercher/localiser des documents dans le catalogue public et les
+    plugins communautaires partagés. Section "Bibliothèque" de "Mon
+    espace" -- un seul outil, plusieurs actions, au lieu de 12 outils
+    séparés (consolidé le 26/08, demande Bourama : "un outil puis
+    paramètres c'est pas mieux que plusieurs outils si on peut regrouper",
+    pattern "action + paramètres" -- réduit le catalogue envoyé au
+    routeur/modèle et limite les confusions de noms d'outils proches).
 
     `action` doit être l'une de :
     - "chercher" : cherche par contenu dans la bibliothèque PERSONNELLE.
