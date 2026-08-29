@@ -291,7 +291,6 @@ REGISTRE_AFFICHAGE_OUTILS = {
     # docstring de la route /api/outils/registre) -- seul le libellé
     # affiché PENDANT/APRÈS l'exécution change, pas la liste des outils
     # sélectionnables.
-    "gerer_document_bibliotheque:chercher_publique": {"label": "Plugins publics", "icone": "Library", "onglet": None},
     "gerer_document_bibliotheque:trouver_catalogue_public": {"label": "Catalogue public", "icone": "Library", "onglet": None},
     "gerer_document_bibliotheque:lire_catalogue_public": {"label": "Catalogue public", "icone": "Library", "onglet": None},
     "gerer_document_bibliotheque:lister_catalogue_public": {"label": "Catalogue public", "icone": "Library", "onglet": None},

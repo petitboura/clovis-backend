@@ -1427,7 +1427,7 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         # entre chaque paire. Bloc réécrit en un seul morceau, structuré
         # comme UNE SEULE décision de tri à 5 branches plutôt que 4
         # règles indépendantes ajoutées au fil de l'eau.
-        "Il existe CINQ mondes de documents/information totalement "
+        "Il existe QUATRE mondes de documents/information totalement "
         "différents. Pour CHAQUE question, commence par identifier à "
         "quel monde elle appartient AVANT de choisir un outil -- ne te "
         "fie JAMAIS à un mot-clé ('bibliothèque', 'public', 'catalogue', "
@@ -1459,17 +1459,9 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         "Exemples : \"trouve-moi un document sur la thermodynamique "
         "dans la bibliothèque publique\", \"y a-t-il un cours sur la "
         "Révolution française dans le catalogue public ?\".\n\n"
-        "4) PLUGINS PUBLICS -- chercher par CONTENU dans les "
-        "bibliothèques partagées par la communauté d'utilisateurs "
-        "(différent du catalogue public : ici on cherche DANS le "
-        "contenu, pas juste localiser un document). "
-        "-> gerer_document_bibliotheque (action \"chercher_publique\"). "
-        "Exemples : \"qu'est-ce que dit le plugin partagé sur la "
-        "mitose ?\", \"cherche dans les bibliothèques communautaires ce "
-        "qu'on dit sur les intégrales\".\n\n"
-        "5) WEB -- tout ce qui n'est NI un document de l'étudiant, NI "
-        "Clovis/l'application, NI le catalogue public, NI un plugin "
-        "communautaire : actualité, information générale externe, sujet "
+        "4) WEB -- tout ce qui n'est NI un document de l'étudiant, NI "
+        "Clovis/l'application, NI le catalogue public : actualité, "
+        "information générale externe, sujet "
         "sans rapport avec Clovis ou les documents de l'étudiant. "
         "-> tavily_search. "
         "Exemples : \"quelle est la capitale du Japon ?\", \"donne-moi "
@@ -2026,7 +2018,7 @@ _RE_LIGNE_CITATION_NOTE = re.compile(r"^(\d+):\s*(.+)$")
 def _sources_bibliotheque_depuis_texte(resultat_brut):
     """
     consulter_bibliotheque (aujourd'hui exposé via gerer_document_
-    bibliotheque, actions chercher/chercher_publique) renvoie du texte
+    bibliotheque, action chercher) renvoie du texte
     formaté par bloc -- "{extrait}\\n(Source : {nom}[, page N[-M]|, à
     MM:SS], {url}, {type_mime})", blocs séparés par "\\n\\n---\\n\\n"
     (voir core/bibliotheque_rag.py:formater_source_bibliotheque). Pas de

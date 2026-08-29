@@ -387,8 +387,8 @@ def gerer_document_bibliotheque(
 ) -> str:
     """
     Gère la bibliothèque personnelle de CET utilisateur, et permet aussi de
-    chercher/localiser des documents dans le catalogue public et les
-    plugins communautaires partagés. Section "Bibliothèque" de "Mon
+    chercher/localiser des documents dans le catalogue public. Section
+    "Bibliothèque" de "Mon
     espace" -- un seul outil, plusieurs actions, au lieu de 12 outils
     séparés (consolidé le 26/08, demande Bourama : "un outil puis
     paramètres c'est pas mieux que plusieurs outils si on peut regrouper",
@@ -398,11 +398,9 @@ def gerer_document_bibliotheque(
     `action` doit être l'une de :
     - "chercher" : cherche par contenu dans la bibliothèque PERSONNELLE.
       Paramètre : `question`.
-    - "chercher_publique" : cherche par contenu dans les PLUGINS PUBLICS
-      (bibliothèques partagées par la communauté). Paramètre : `question`.
     - "trouver_catalogue_public" : LOCALISE un document dans le
       CATALOGUE PUBLIC (section "Bibliothèque publique", ouvert à tout
-      le monde -- différent des plugins publics ci-dessus). Renvoie
+      le monde). Renvoie
       uniquement le nom, la description et le lien de chaque document
       trouvé, JAMAIS son contenu : ne sert qu'à dire à l'utilisateur où
       trouver un document, jamais à citer ou paraphraser ce document
@@ -442,22 +440,11 @@ def gerer_document_bibliotheque(
       `contenu_base64` (jamais les deux vides). SI AUCUN FICHIER N'A ÉTÉ
       JOINT dans cette conversation : n'appelle PAS cette action, dis
       simplement à l'utilisateur d'uploader/joindre le fichier (bouton
-      trombone). `type_emplacement`/`emplacement_id` optionnels
-      ("programme"/"matiere"/"chapitre"/"exercice"/"examen" + son id) :
-      classe directement ce document à cet endroit du programme dès
-      l'ajout. Limite : 50 Mo.
+      trombone). Limite : 50 Mo.
     - "supprimer" : supprime DÉFINITIVEMENT un document/lien/note.
       Paramètre : `fichier_id`. SENSIBLE : demande toujours confirmation
       à l'utilisateur avant d'être exécuté, quelle que soit la
       formulation de sa demande.
-    - "classer" : classe un document existant à un emplacement du
-      programme. Paramètres : `fichier_id`, `type_emplacement` ("programme",
-      "matiere", "chapitre", "exercice" ou "examen"), `emplacement_id`. Un
-      même document peut être classé à plusieurs emplacements (appeler
-      plusieurs fois) ; reclasser au même endroit ne crée pas de doublon.
-    - "declasser" : retire un document d'un emplacement du programme (le
-      document reste dans la bibliothèque, seul ce classement précis
-      disparaît). Mêmes paramètres que "classer".
     - "ranger_dossier" : range un fichier dans un dossier. Paramètres :
       `fichier_id`, `dossier_id`. Un fichier peut être rangé dans
       plusieurs dossiers à la fois.
@@ -783,9 +770,9 @@ def gerer_document_bibliotheque(
         return texte
 
     return (
-        f"Erreur : action '{action}' inconnue. Actions valides : chercher, chercher_publique, "
+        f"Erreur : action '{action}' inconnue. Actions valides : chercher, "
         "trouver_catalogue_public, lire_catalogue_public, lister_catalogue_public, lister, "
-        "ajouter_lien, ajouter_texte, ajouter_fichier, supprimer, classer, declasser, "
+        "ajouter_lien, ajouter_texte, ajouter_fichier, supprimer, "
         "ranger_dossier, retirer_dossier, lire_entier."
     )
 
