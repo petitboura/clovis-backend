@@ -1411,107 +1411,80 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         # où" sur une question triviale. Les exemples ci-dessous couvrent
         # explicitement calcul simple, connaissance générale stable et
         # salutation/conversation normale.
-        # CORRECTIF 2026-08-15 (signalé par Bourama, test réel :
-        # gerer_document_bibliotheque (action "chercher") n'était suggéré
-        # que quand le mot "bibliothèque" apparaissait littéralement dans
-        # la question) : même leçon que le correctif du 31/07 ci-dessus --
-        # un petit modèle 8B a besoin d'un exemple concret pour
-        # généraliser une intention, sinon il retombe sur du matching
-        # littéral. La description de l'outil dit CE QU'IL cherche (PDF de
-        # la bibliothèque perso), pas QUAND le déclencher -- c'est ce que
-        # cet exemple comble.
-        "IMPORTANT : gerer_document_bibliotheque (action \"chercher\") doit "
-        "être suggéré dès que la question porte sur le contenu d'un cours, "
-        "chapitre, exercice ou document que l'étudiant a pu uploader dans "
-        "sa bibliothèque personnelle -- même si le mot \"bibliothèque\" "
-        "n'apparaît jamais dans la question. Exemples qui DOIVENT suggérer "
-        "cet outil : \"explique-moi le chapitre 3\", \"résume mon cours "
+        # UNIFICATION 2026-08-29 (signalé par Bourama : "il mélange le
+        # privé et le public avec la base de connaissance de Clovis" --
+        # même si chaque monde de documents avait déjà reçu sa propre
+        # règle au fil des bugs (15/08 bibliothèque perso, 18/08 base de
+        # connaissance, 28/08 catalogue public/plugins publics), ces
+        # règles étaient ajoutées une par une, séparément, jamais les
+        # unes à côté des autres -- le petit modèle 8B/20B n'avait donc
+        # jamais vu les 5 mondes (web compris, qui n'avait AUCUNE règle
+        # jusqu'ici) posés côte à côte avec une seule frontière claire
+        # entre chaque paire. Bloc réécrit en un seul morceau, structuré
+        # comme UNE SEULE décision de tri à 5 branches plutôt que 4
+        # règles indépendantes ajoutées au fil de l'eau.
+        "Il existe CINQ mondes de documents/information totalement "
+        "différents. Pour CHAQUE question, commence par identifier à "
+        "quel monde elle appartient AVANT de choisir un outil -- ne te "
+        "fie JAMAIS à un mot-clé ('bibliothèque', 'public', 'catalogue', "
+        "'Clovis'...), base-toi sur l'intention réelle :\n\n"
+        "1) MES DOCUMENTS À MOI -- cours, exercice, fichier que "
+        "L'ÉTUDIANT LUI-MÊME a uploadé dans SA bibliothèque personnelle. "
+        "-> gerer_document_bibliotheque (action \"chercher\"). "
+        "Exemples : \"explique-moi le chapitre 3\", \"résume mon cours "
         "sur les intégrales\", \"qu'est-ce que dit mon document sur la "
-        "photosynthèse ?\", \"aide-moi avec l'exercice 4\". Ne te fie "
-        "jamais au mot \"bibliothèque\" lui-même.\n\n"
-        # MAJ 2026-08-26 (consolidation de 12 outils bibliothèque en un
-        # seul, gerer_document_bibliotheque) : ce renvoi de nom remplace
-        # l'ancien consulter_bibliotheque -- même règle, même exemples.
-        # AJOUT 2026-08-18 (demande Bourama, test réel : confusion entre
-        # consulter_bibliotheque (devenu gerer_document_bibliotheque) et
-        # chercher_dans_base_connaissances sur la question "où trouve-tu
-        # dans ma base de connaissance ?") : le routeur n'avait aucune
-        # règle pour ces outils, seul consulter_bibliotheque en avait une
-        # -- il retombait donc par défaut sur la bibliothèque à chaque
-        # fois qu'un utilisateur disait "base de connaissance", alors que
-        # ce sont deux choses différentes.
-        "IMPORTANT : ne confonds jamais gerer_document_bibliotheque "
-        "(action \"chercher\", documents PERSONNELS que l'étudiant a "
-        "lui-même uploadés) avec gerer_base_connaissance "
-        "(contenu de référence préparé à l'avance par l'équipe Clovis SUR "
-        "Clovis et l'application elle-même). "
-        # MAJ 2026-08-26 (consolidation de chercher_dans_base_connaissances,
-        # lire_article_connaissance, liste_articles_connaissance et
-        # obtenir_fichier_connaissance en un seul outil,
-        # gerer_base_connaissance) : la règle "suggère les 4 outils
-        # ensemble, jamais un seul isolément" disparaît d'elle-même, il
-        # n'y a plus qu'un seul nom d'outil à suggérer, ses 4 actions
-        # restent accessibles au grand modèle en un seul appel possible.
-        "Suggère gerer_base_connaissance pour TOUTE question sur Clovis "
-        "lui-même ou sur l'application en général, peu importe l'angle. "
-        "L'utilisateur ne "
-        "sait pas que cette base de connaissances existe, ne connaît "
-        "aucun de ces noms d'outils, et ne demandera jamais explicitement "
-        "\"un fichier\", \"un .md\" ou \"cherche dans la base de "
-        "connaissance\" -- mets-toi à sa place : il pose une question "
-        "normale sur ce qu'il veut faire ou comprendre dans Clovis, sans "
-        "savoir qu'un mécanisme de recherche existe derrière. Ne te fie "
-        "donc jamais à une formulation technique ou méta pour déclencher "
-        "cet outil, base-toi sur l'intention réelle de la question. "
-        "Exemples qui DOIVENT suggérer cet outil : \"comment fonctionne "
-        "le partage de code sur Clovis ?\", \"est-ce que tu peux "
-        "générer un PDF ?\", \"c'est quoi la bibliothèque dans "
-        "l'appli ?\", \"comment je crée un programme ?\", \"ça bug chez "
-        "moi, tu peux m'aider ?\", \"c'est quoi Clovis ?\", \"comment on "
-        "ajoute un chapitre ?\", \"je comprends pas comment marche cette "
-        "fonctionnalité\". Ce ne sont que des illustrations, pas une "
-        "liste exhaustive de cas valides. "
-        "Règle de tri simple entre les deux mondes : \"mes documents à "
-        "moi\" (mon cours, mon exercice, mon fichier) -> "
-        "gerer_document_bibliotheque (action \"chercher\") ; \"Clovis / "
-        "l'application\" (même vaguement) -> "
-        "gerer_base_connaissance.\n\n"
-        # AJOUT 2026-08-28 (diagnostic : gerer_document_bibliotheque
-        # (actions "trouver_catalogue_public" et "chercher_publique")
-        # n'avait jamais eu d'exemples dédiés dans ce prompt, contrairement
-        # à "chercher" (bibliothèque perso, règle du 15/08) et
-        # gerer_base_connaissance (Clovis lui-même, règle ci-dessus). Le
-        # mot "catalogue" n'apparaissait nulle part ailleurs dans ce
-        # prompt sauf pour désigner le catalogue d'outils lui-même -- une
-        # question du type "trouve-moi un document sur X dans la
-        # bibliothèque publique" ne correspondait littéralement ni à "mes
-        # documents" ni à "Clovis lui-même" aux yeux du petit modèle, donc
-        # rien n'était suggéré. Même leçon que les correctifs précédents :
-        # un petit modèle 8B/20B a besoin d'exemples concrets pour
-        # généraliser une intention.
-        "IMPORTANT : gerer_document_bibliotheque doit aussi être suggéré "
-        "pour deux autres mondes de documents, distincts de la "
-        "bibliothèque personnelle et de Clovis lui-même :\n"
-        "1) action \"trouver_catalogue_public\" -- LOCALISER un document "
-        "dans le CATALOGUE PUBLIC (section \"Bibliothèque publique\", "
-        "ouverte à tout le monde). Exemples qui DOIVENT suggérer cette "
-        "action : \"trouve-moi un document sur la thermodynamique dans "
-        "la bibliothèque publique\", \"y a-t-il un cours sur la "
-        "Révolution française dans le catalogue public ?\", \"cherche un "
-        "document public sur les suites numériques\".\n"
-        "2) action \"chercher_publique\" -- chercher par CONTENU dans "
-        "les PLUGINS PUBLICS (bibliothèques partagées par la "
-        "communauté d'utilisateurs, différentes du catalogue public "
-        "ci-dessus). Exemples qui DOIVENT suggérer cette action : "
-        "\"qu'est-ce que dit le plugin partagé sur la mitose ?\", "
-        "\"cherche dans les bibliothèques communautaires ce qu'on dit "
-        "sur les intégrales\".\n"
-        "Ne te fie jamais aux mots \"catalogue\", \"public\" ou "
-        "\"communautaire\" eux-mêmes pour reconnaître ces cas -- comme "
-        "pour la bibliothèque personnelle, base-toi sur l'intention "
-        "réelle (l'utilisateur cherche un document qui n'est PAS le sien "
-        "et qui ne concerne PAS Clovis/l'application). Ce ne sont que des "
-        "illustrations, pas une liste exhaustive de cas valides.\n\n"
+        "photosynthèse ?\", \"aide-moi avec l'exercice 4\".\n\n"
+        "2) CLOVIS / L'APPLICATION ELLE-MÊME -- comment fonctionne "
+        "Clovis, ses fonctionnalités, un bug, une question sur "
+        "l'application, même vaguement. L'utilisateur ne sait pas que "
+        "cette base de connaissances existe, ne connaît aucun nom "
+        "d'outil, et ne dira jamais \"cherche dans la base de "
+        "connaissance\" -- mets-toi à sa place. "
+        "-> gerer_base_connaissance. "
+        "Exemples : \"comment fonctionne le partage de code sur "
+        "Clovis ?\", \"est-ce que tu peux générer un PDF ?\", \"c'est "
+        "quoi la bibliothèque dans l'appli ?\", \"comment je crée un "
+        "programme ?\", \"ça bug chez moi, tu peux m'aider ?\", \"c'est "
+        "quoi Clovis ?\", \"je comprends pas comment marche cette "
+        "fonctionnalité\".\n\n"
+        "3) CATALOGUE PUBLIC -- LOCALISER un document dans la section "
+        "\"Bibliothèque publique\", ouverte à tout le monde, PAS "
+        "l'étudiant qui l'a uploadé, PAS Clovis lui-même. "
+        "-> gerer_document_bibliotheque (action "
+        "\"trouver_catalogue_public\"). "
+        "Exemples : \"trouve-moi un document sur la thermodynamique "
+        "dans la bibliothèque publique\", \"y a-t-il un cours sur la "
+        "Révolution française dans le catalogue public ?\".\n\n"
+        "4) PLUGINS PUBLICS -- chercher par CONTENU dans les "
+        "bibliothèques partagées par la communauté d'utilisateurs "
+        "(différent du catalogue public : ici on cherche DANS le "
+        "contenu, pas juste localiser un document). "
+        "-> gerer_document_bibliotheque (action \"chercher_publique\"). "
+        "Exemples : \"qu'est-ce que dit le plugin partagé sur la "
+        "mitose ?\", \"cherche dans les bibliothèques communautaires ce "
+        "qu'on dit sur les intégrales\".\n\n"
+        "5) WEB -- tout ce qui n'est NI un document de l'étudiant, NI "
+        "Clovis/l'application, NI le catalogue public, NI un plugin "
+        "communautaire : actualité, information générale externe, sujet "
+        "sans rapport avec Clovis ou les documents de l'étudiant. "
+        "-> tavily_search. "
+        "Exemples : \"quelle est la capitale du Japon ?\", \"donne-moi "
+        "les dernières nouvelles sur X\", \"c'est quoi la photosynthèse "
+        "?\" (question générale, PAS \"MON cours sur la photosynthèse\" "
+        "qui est le monde 1). Ne suggère PAS tavily_search pour une "
+        "connaissance générale stable que tu connais déjà sans "
+        "recherche (ex: \"1+1\", \"capitale de la France\") -- même "
+        "règle que plus haut, une info ne devient pas une recherche web "
+        "juste parce qu'elle est \"externe\" à Clovis.\n\n"
+        "Piège fréquent à éviter : une question généraliste et une "
+        "question sur LES documents personnels de l'étudiant peuvent se "
+        "ressembler en surface (\"c'est quoi la mitose ?\" = web ou "
+        "connaissance générale, \"c'est quoi dans MON cours sur la "
+        "mitose ?\" = monde 1) -- le mot \"mon\"/\"ma\" ou une référence "
+        "implicite à un cours déjà uploadé est le signal, pas le sujet "
+        "lui-même. Ne suggère JAMAIS deux mondes de documents à la fois "
+        "sauf si la question mélange explicitement deux intentions "
+        "distinctes (rare).\n\n"
         # AJOUT 2026-08-22 (demande Bourama : "les skills ont été
         # corrigés visuellement, mais intérieurement non, il faut que
         # le LLM soit au courant") : lister_comportements/
