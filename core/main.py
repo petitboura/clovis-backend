@@ -274,24 +274,29 @@ def _completer_liens_manquants(reponse_accumulee, messages_agent):
     return {"type": "reponse", "texte": ajout}
 
 
-def _citations_bibliotheque_manquantes(reponse_texte: str, messages_agent) -> list:
+def _citations_manquantes(reponse_texte: str, messages_agent) -> list:
     """
     Filet de securite (26/08, demande Bourama : "il ne donne pas toujours
     les sources dans le texte, seulement la bulle en bas") -- meme
     principe que _urls_generation_manquantes : le modele suit
-    l'instruction <citations_bibliotheque> la plupart du temps, mais pas
+    l'instruction <citations_sources> la plupart du temps, mais pas
     systematiquement (plus frequent avec un modele de secours moins
     instruction-following, ou une reponse tres courte). Repere les
-    sources bibliotheque de CE TOUR (annotees dans le contenu du message
-    "tool" par _traiter_appels, voir "[Numerote tes citations...]") dont
-    AUCUN marqueur [n](citation:n) n'apparait dans le texte final -- pour
+    sources de CE TOUR (annotees dans le contenu du message "tool" par
+    _traiter_appels, voir "[Numerote tes citations...]") dont AUCUN
+    marqueur [n](citation:n) n'apparait dans le texte final -- pour
     qu'on puisse les rajouter nous-memes plutot que de compter sur le
     modele a chaque fois.
 
-    Renvoie une liste de (numero, titre, reperage) a rajouter, dans
-    l'ordre. Ne fait aucune hypothese sur LEQUEL des extraits d'une
-    meme source a ete utilise -- rajoute juste un marqueur par source
-    manquante (pas par chunk), pointant vers le meme fichier.
+    Generalise (28/08, demande Bourama : etendre a tout outil sourcé,
+    pas seulement la bibliotheque) -- lit directement les lignes "n:
+    titre[, reperage]" que _traiter_appels rajoute dans la note pour
+    CHAQUE outil sourcé, plutot que de reparser le contenu brut de
+    l'outil (qui differe par outil : texte pour la bibliotheque, JSON
+    pour tavily, arborescence pour GitHub...). Fonctionne donc pour
+    n'importe quel outil sourcé sans code specifique par outil.
+
+    Renvoie une liste de (numero, titre) a rajouter, dans l'ordre.
     """
     manquantes_par_message = []
     for message in reversed(messages_agent):
@@ -300,35 +305,16 @@ def _citations_bibliotheque_manquantes(reponse_texte: str, messages_agent) -> li
         contenu = message.get("content")
         if not isinstance(contenu, str) or "[Numérote tes citations" not in contenu:
             continue
-        contenu_brut, _, note = contenu.partition("\n\n[Numérote tes citations")
-        m_plage = re.search(r"de (\d+) à (\d+)", note)
-        if not m_plage:
-            continue
-        debut, fin = int(m_plage.group(1)), int(m_plage.group(2))
-        # contenu_brut = tout ce qui precede la note (le texte brut de
-        # l'outil, identique a ce que _sources_bibliotheque_depuis_texte
-        # parse cote SSE) -- la note elle-meme est exclue du decoupage en
-        # blocs ci-dessous, sinon le DERNIER bloc de cet appel se
-        # retrouverait avec cette note comme derniere ligne au lieu de
-        # "(Source : ...)", et son match echouerait silencieusement.
+        _, _, note = contenu.partition("[Numérote tes citations")
         manquantes_ce_message = []
-        for numero in range(debut, fin + 1):
+        for ligne in note.splitlines():
+            m = _RE_LIGNE_CITATION_NOTE.match(ligne.strip())
+            if not m:
+                continue
+            numero, titre = int(m.group(1)), m.group(2)
             if f"(citation:{numero})" in reponse_texte:
                 continue
-            # Ligne "(Source : nom[, reperage], url)" correspondant a CE
-            # numero, dans l'ordre d'apparition (meme logique que
-            # _sources_bibliotheque_depuis_texte cote SSE) -- ici on n'a
-            # besoin que du texte a afficher, pas de l'URL (le marqueur
-            # [n](citation:n) suffit, le frontend resout deja n -> source
-            # complete via sourcesAplaties).
-            index_dans_cet_appel = numero - debut
-            blocs = contenu_brut.split("\n\n---\n\n")
-            if index_dans_cet_appel >= len(blocs):
-                continue
-            m_source = _RE_SOURCE_BIBLIOTHEQUE_LIGNE.match(blocs[index_dans_cet_appel].strip().splitlines()[-1].strip())
-            if not m_source:
-                continue
-            manquantes_ce_message.append((numero, m_source.group(1)))
+            manquantes_ce_message.append((numero, titre))
         if manquantes_ce_message:
             manquantes_par_message.append(manquantes_ce_message)
 
@@ -348,7 +334,7 @@ def _citations_bibliotheque_manquantes(reponse_texte: str, messages_agent) -> li
 def _completer_citations_manquantes(reponse_accumulee, messages_agent):
     """
     A appeler juste apres une reponse finale reussie, comme
-    _completer_liens_manquants -- voir _citations_bibliotheque_manquantes.
+    _completer_liens_manquants -- voir _citations_manquantes.
     Rajoute les marqueurs [n](citation:n) oublies par le modele, sous
     forme d'un court recapitulatif en fin de reponse (jamais au milieu
     d'une phrase deja ecrite -- on ne sait pas ou l'inserer avec
@@ -356,7 +342,7 @@ def _completer_citations_manquantes(reponse_accumulee, messages_agent):
     part dans le texte reel du message, pas leur position exacte).
     """
     texte_actuel = "".join(reponse_accumulee)
-    manquantes = _citations_bibliotheque_manquantes(texte_actuel, messages_agent)
+    manquantes = _citations_manquantes(texte_actuel, messages_agent)
     if not manquantes:
         return None
     liste = ", ".join(f"[{nom}](citation:{numero})" for numero, nom in manquantes)
@@ -2087,6 +2073,10 @@ def _resultat_pour_affichage(resultat_brut, max_chars=3000):
 _RE_SOURCE_BIBLIOTHEQUE_LIGNE = re.compile(r"^\(Source : (.+), (https?://\S+), ([^,()]*)\)$")
 _RE_PAGE_BIBLIOTHEQUE = re.compile(r"^(.*), page (\d+)(?:-\d+)?$")
 _RE_TIMESTAMP_BIBLIOTHEQUE = re.compile(r"^(.*), à (\d{2}):(\d{2})$")
+# Parse les lignes "n: titre[, reperage]" que _traiter_appels rajoute dans
+# la note "[Numerote tes citations...]" pour CHAQUE outil sourcé -- voir
+# _citations_manquantes, generique par outil grace a ce format commun.
+_RE_LIGNE_CITATION_NOTE = re.compile(r"^(\d+):\s*(.+)$")
 
 
 def _sources_bibliotheque_depuis_texte(resultat_brut):
@@ -2396,11 +2386,24 @@ def _traiter_appels(appels, messages_agent, table_routage, compteur_sources=None
                     # tavily_*/notion-search via _sources_depuis_json_generique,
                     # gerer_depot_github via _sources_github_depuis_arguments,
                     # et tout futur outil sourcé sans changement ici).
+                    #
+                    # Le titre (+ reperage "page N"/"à MM:SS" si connu) de
+                    # chaque source est repete ici, une ligne "n: titre" par
+                    # source -- pas seulement pour le modele, mais aussi
+                    # pour que _citations_manquantes (filet de securite
+                    # plus bas) puisse retrouver ces titres SANS reparser le
+                    # contenu brut de l'outil, qui differe par outil (texte
+                    # bibliotheque, JSON tavily, arborescence GitHub...).
+                    # Rend le filet de securite generique lui aussi, plus
+                    # limite a la bibliotheque.
+                    lignes_sources = "\n".join(
+                        f"{n}: {s['titre']}" + (f", {s['reperage']}" if s.get("reperage") else "")
+                        for n, s in zip(range(debut_numero, compteur_sources[0] + 1), sources)
+                    )
                     contenu_pour_modele = (
-                        f"{resultat}\n\n[Numérote tes citations "
-                        f"[n](citation:n) pour ces {len(sources)} source(s) "
-                        f"de {debut_numero} à {compteur_sources[0]}, dans "
-                        f"cet ordre.]"
+                        f"{resultat}\n\n[Numérote tes citations [n](citation:n) "
+                        f"pour ces {len(sources)} source(s), dans cet ordre :\n"
+                        f"{lignes_sources}\n]"
                     )
                 messages_agent.append({
                     "role": "tool",
