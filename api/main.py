@@ -51,6 +51,7 @@ from api.appareils_mobiles import router as appareils_mobiles_router
 from core.serveur_mcp_generation import mcp_generation
 from core.notifications_push import traiter_rappels_echus, un_canal_push_disponible
 from core.proactivite import verifier_relances_proactives
+from core.file_attente_vectorisation import remettre_en_attente_bloques, traiter_file_attente_une_fois
 # from core.audit_programme import executer_audits_hebdomadaires  -- désactivé, voir _desactive_programme/
 from core.serveur_mcp_github import mcp_github
 from core.serveur_mcp_public import mcp_public
@@ -99,6 +100,25 @@ async def _boucle_planificateur_proactivite():
 # désactivée et isolée, voir _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md.
 
 
+async def _boucle_vectorisation():
+    """
+    File d'attente de vectorisation bibliothèque privée/publique
+    (29/08/2026, demande Bourama : l'ajout d'un fichier attendait la
+    vectorisation complète avant de répondre -- voir core/file_attente_
+    vectorisation.py). Tourne tant que le process vit ; passage
+    rapproché (2s) tant qu'il y a du travail pour vider une file chargée
+    aussi vite que possible, plus espacé (5s) sinon pour ne pas
+    solliciter Supabase pour rien.
+    """
+    while True:
+        try:
+            traites = await to_thread.run_sync(traiter_file_attente_une_fois)
+        except Exception as e:
+            logging.error(f"ERREUR boucle vectorisation : {e}")
+            traites = 0
+        await asyncio.sleep(2 if traites > 0 else 5)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     # Toutes les routes API sont en `def` sync (Supabase, Groq, Gemini :
@@ -117,6 +137,14 @@ async def _lifespan(app: FastAPI):
     # besoin de tourner pendant toute la durée de vie du process, sinon
     # streamable_http_app() renvoie une erreur "Task group is not
     # initialized" au premier appel d'outil.
+    # File d'attente de vectorisation (29/08) : tout fichier resté
+    # "en_cours" suite à un redémarrage/crash précédent repart tout seul
+    # -- voir docstring de remettre_en_attente_bloques.
+    try:
+        await to_thread.run_sync(remettre_en_attente_bloques)
+    except Exception as e:
+        logging.error(f"ERREUR remise en attente au démarrage (vectorisation) : {e}")
+
     async with (
         mcp_generation.session_manager.run(),
         mcp_github.session_manager.run(),
@@ -128,11 +156,13 @@ async def _lifespan(app: FastAPI):
         if un_canal_push_disponible():
             tache_planificateur = asyncio.create_task(_boucle_planificateur_rappels())
             tache_proactivite = asyncio.create_task(_boucle_planificateur_proactivite())
+        tache_vectorisation = asyncio.create_task(_boucle_vectorisation())
         yield
         if tache_planificateur:
             tache_planificateur.cancel()
         if tache_proactivite:
             tache_proactivite.cancel()
+        tache_vectorisation.cancel()
 
 
 app = FastAPI(title="Clovis API", version="0.1.0", lifespan=_lifespan)

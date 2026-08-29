@@ -25,7 +25,6 @@ catalogue_public.py).
 
 import logging
 import os
-import tempfile
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
@@ -34,12 +33,7 @@ from supabase import create_client
 
 from api.auth import utilisateur_courant
 from core.erreurs import erreur_api
-from core.catalogue_public_rag import (
-    indexer_pdf_catalogue_public,
-    indexer_texte_catalogue_public,
-    indexer_transcription_catalogue_public,
-)
-from core.description_multimedia import decrire_image_bibliotheque, transcrire_audio_bibliotheque
+from core.file_attente_vectorisation import necessite_vectorisation_fichier_publique, necessite_vectorisation_note
 from core.dossiers_catalogue_public import ranger_fichier as _ranger_fichier_dossier, peut_ajouter_contenu as _peut_ajouter_contenu_dossier, _dossier as _dossier_catalogue_public
 
 router = APIRouter(prefix="/api/bibliotheque-publique", tags=["bibliotheque_publique"])
@@ -75,6 +69,10 @@ class EntreeBibliothequePublique(BaseModel):
     taille_octets: int | None = None
     url_publique: str | None = None
     created_at: str
+    # 29/08/2026, file d'attente de vectorisation en arrière-plan (voir
+    # core/file_attente_vectorisation.py) : "en_attente" / "en_cours" /
+    # "pret" / "echec" -- sert au frontend pour le badge par fichier.
+    statut_vectorisation: str = "pret"
 
 
 @router.get("", response_model=list[EntreeBibliothequePublique])
@@ -85,7 +83,7 @@ def lister_bibliotheque_publique(q: str | None = None):
     # catalogue, voir api/signalements.py.
     requete = (
         supabase.table("bibliotheque_publique")
-        .select("id, nom, description, nom_fichier, type_mime, taille_octets, url_publique, created_at")
+        .select("id, nom, description, nom_fichier, type_mime, taille_octets, url_publique, created_at, statut_vectorisation")
         .eq("statut", "publie")
     )
     if (q or "").strip():
@@ -139,6 +137,13 @@ async def ajouter_a_bibliotheque_publique(
                 "url_publique": url_publique,
                 "type_mime": fichier.content_type,
                 "taille_octets": len(contenu),
+                # 29/08/2026, file d'attente de vectorisation en
+                # arrière-plan (voir core/file_attente_vectorisation.py) :
+                # avant, la vectorisation (_indexer_catalogue_public,
+                # retirée) se faisait ici, de façon synchrone et
+                # bloquante -- long sur un gros fichier ou un upload en
+                # masse.
+                "statut_vectorisation": "en_attente" if necessite_vectorisation_fichier_publique(fichier.content_type) else "pret",
             })
             .execute()
         )
@@ -148,46 +153,7 @@ async def ajouter_a_bibliotheque_publique(
 
     entree = ligne.data[0]
     _classer_si_autorise(entree["id"], dossier_id, utilisateur.id)
-    _indexer_catalogue_public(contenu, fichier.content_type, nom_original, entree["id"])
     return entree
-
-
-def _indexer_catalogue_public(contenu: bytes, type_mime: str | None, nom_fichier: str, fichier_id: str) -> None:
-    """
-    Vectorise le document ajouté au catalogue public, selon son type
-    réel (28/08/2026, demande Bourama : "que tout ce qui est mis dans
-    la bibliothèque publique soit vectorisé", même logique que
-    _indexer_et_propager dans api/bibliotheque_utilisateur.py pour la
-    bibliothèque perso). Best-effort et non bloquant : le document est
-    déjà stocké et catalogué à ce stade, seule la recherche par IA
-    (trouver_catalogue_public) serait indisponible pour celui-ci en cas
-    d'échec -- on log fort pour pouvoir réindexer manuellement si
-    besoin, sans jamais faire échouer l'ajout.
-    """
-    try:
-        if type_mime == "application/pdf":
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-                tmp.write(contenu)
-                chemin_temp = tmp.name
-            try:
-                indexer_pdf_catalogue_public(chemin_temp, fichier_id=fichier_id)
-            finally:
-                try:
-                    os.remove(chemin_temp)
-                except OSError:
-                    pass
-        elif (type_mime or "").startswith("image/"):
-            description_image = decrire_image_bibliotheque(contenu, type_mime)
-            if description_image:
-                indexer_texte_catalogue_public(description_image, fichier_id=fichier_id)
-        elif (type_mime or "").startswith("audio/"):
-            segments_audio = transcrire_audio_bibliotheque(contenu, nom_fichier)
-            if segments_audio:
-                indexer_transcription_catalogue_public(segments_audio, fichier_id=fichier_id)
-        elif type_mime == "text/plain":
-            indexer_texte_catalogue_public(contenu.decode("utf-8", errors="ignore"), fichier_id=fichier_id)
-    except Exception as e:
-        logging.error(f"ERREUR vectorisation catalogue public (fichier_id={fichier_id}, type_mime={type_mime}) : {e}")
 
 
 class AjouterLienPayload(BaseModel):
@@ -214,6 +180,7 @@ def ajouter_lien_bibliotheque_publique(payload: AjouterLienPayload, utilisateur=
                 "nom_fichier": nom_final,
                 "url_publique": payload.url.strip(),
                 "type_mime": "text/uri-list",
+                "statut_vectorisation": "pret",  # un lien n'est jamais vectorisé
             })
             .execute()
         )
@@ -263,6 +230,7 @@ def ajouter_texte_bibliotheque_publique(payload: AjouterTextePayload, utilisateu
                 "url_publique": url_publique,
                 "type_mime": "text/plain",
                 "taille_octets": len(contenu_octets),
+                "statut_vectorisation": "en_attente" if necessite_vectorisation_note() else "pret",
             })
             .execute()
         )
@@ -272,10 +240,8 @@ def ajouter_texte_bibliotheque_publique(payload: AjouterTextePayload, utilisateu
 
     entree = ligne.data[0]
     _classer_si_autorise(entree["id"], payload.dossier_id, utilisateur.id)
-    try:
-        indexer_texte_catalogue_public(contenu_texte, fichier_id=entree["id"])
-    except Exception as e:
-        logging.error(f"ERREUR vectorisation note texte catalogue public (fichier_id={entree['id']}) : {e}")
+    # Vectorisation en arrière-plan (29/08, voir core/file_attente_vectorisation.py) --
+    # avant, indexer_texte_catalogue_public était appelé directement ici.
     return entree
 
 

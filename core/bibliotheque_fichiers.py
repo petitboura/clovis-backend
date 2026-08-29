@@ -53,6 +53,10 @@ def enregistrer_lien(
     on y met l'URL aussi, pour rester traçable sans complexifier le schéma.
     type_mime="text/uri-list" sert de marqueur "ceci est un lien" pour
     categorieFichierBiblio côté frontend.
+
+    statut_vectorisation="pret" en dur (29/08, file d'attente de
+    vectorisation) : un lien n'est jamais vectorisé, il n'y a donc jamais
+    rien à attendre pour celui-ci -- voir core/file_attente_vectorisation.py.
     """
     insertion = supabase.table("fichiers_uploades").insert({
         "niveau": niveau,
@@ -65,6 +69,7 @@ def enregistrer_lien(
         "type_mime": "text/uri-list",
         "description": description,
         "taille_octets": None,
+        "statut_vectorisation": "pret",
     }).execute()
     return insertion.data[0]
 
@@ -79,6 +84,7 @@ def enregistrer_fichier(
     user_id: str = None,
     description: str = None,
     origine: str = "bibliotheque",
+    statut_vectorisation: str = "pret",
 ) -> dict:
     """
     Stocke un fichier dans Supabase Storage et l'indexe dans
@@ -93,6 +99,14 @@ def enregistrer_fichier(
     Bibliothèque", voir lister_fichiers) d'un fichier ajouté
     explicitement à une bibliothèque -- par défaut "bibliotheque", les 4
     appels depuis api/uploads.py (chat) passent "chat" explicitement.
+
+    `statut_vectorisation` (29/08/2026, file d'attente de vectorisation
+    en arrière-plan -- voir core/file_attente_vectorisation.py) :
+    "en_attente" si l'appelant sait que ce fichier doit être vectorisé
+    (le worker le prendra en charge juste après), "pret" par défaut pour
+    tout ce qui n'a de toute façon jamais été vectorisé (docx, vidéo,
+    type inconnu...) -- ne rien mettre en attente pour rien.
+
     Renvoie la ligne insérée (avec son id et son url_publique).
     """
     extension = nom_fichier.rsplit(".", 1)[-1] if "." in nom_fichier else "bin"
@@ -121,6 +135,7 @@ def enregistrer_fichier(
             "description": description,
             "taille_octets": len(contenu),
             "origine": origine,
+            "statut_vectorisation": statut_vectorisation,
         }).execute()
     except Exception as e:
         logging.error(f"ERREUR ECRITURE fichiers_uploades ({chemin_stockage}) : {e}")

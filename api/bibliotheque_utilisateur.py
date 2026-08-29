@@ -21,7 +21,6 @@ configuration par le créateur (voir core/mcp_tools.py).
 import logging
 import os
 import sys
-import tempfile
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from pydantic import BaseModel
@@ -32,8 +31,7 @@ from core.erreurs import erreur_api
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "core"))
 from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien, lister_fichiers, supprimer_fichier  # noqa: E402
-from bibliotheque_rag import indexer_pdf_bibliotheque, indexer_texte_bibliotheque, indexer_transcription_bibliotheque  # noqa: E402
-from description_multimedia import decrire_image_bibliotheque, transcrire_audio_bibliotheque  # noqa: E402
+from file_attente_vectorisation import necessite_vectorisation_fichier_privee, necessite_vectorisation_note  # noqa: E402
 from codes_partage import propager_fichier_bibliotheque, propager_lien_bibliotheque  # noqa: E402
 
 router = APIRouter(prefix="/api/bibliotheque", tags=["bibliotheque-utilisateur"])
@@ -42,53 +40,24 @@ TAILLE_MAX_OCTETS = 50 * 1024 * 1024  # 50 Mo, même limite que la bibliothèque
 BUCKET_BIBLIOTHEQUE_PUBLIQUE = "bibliotheque"  # même bucket que core/bibliotheque_fichiers.py, sous-dossier "publique/"
 
 
-def _indexer_et_propager(contenu, type_mime, nom_fichier, description, ligne, utilisateur, request):
+def _journaliser_et_propager(contenu, type_mime, nom_fichier, description, ligne, utilisateur, request):
     """
     Factorisé le 25/08 (Bourama : "rendre les fichiers de la bibliothèque
     publique copiables vers sa bibliothèque privée") entre un upload
     classique (uploader_document ci-dessous) et une copie depuis la
     bibliothèque publique (copier_depuis_bibliotheque_publique plus bas) :
-    vectorisation selon le type réel du fichier, journal, et propagation
-    aux codes de partage -- identique dans les deux cas, seule la source
-    du contenu diffère (upload direct vs téléchargement depuis le storage
-    de la bibliothèque publique).
-    """
-    if type_mime == "application/pdf":
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(contenu)
-            chemin_temp = tmp.name
-        try:
-            indexer_pdf_bibliotheque(chemin_temp, fichier_id=ligne["id"], user_id=utilisateur.id)
-        except Exception as e:
-            # Non bloquant : le fichier est déjà stocké et retrouvable par
-            # chercher_fichier, seule la recherche par CONTENU (consulter_
-            # bibliotheque) sera indisponible pour celui-ci. On log fort
-            # pour pouvoir réindexer manuellement si besoin, mais on ne
-            # fait pas échouer l'upload -- déjà réussi à ce stade.
-            logging.error(f"ERREUR vectorisation PDF bibliothèque perso (fichier_id={ligne['id']}) : {e}")
-        finally:
-            try:
-                os.remove(chemin_temp)
-            except OSError:
-                pass
-    elif (type_mime or "").startswith("image/"):
-        # 17/08, Bourama : une image (photo de feuille d'exercice, etc.)
-        # doit être retrouvable par son contenu réel, pas seulement par
-        # son nom de fichier. Best-effort comme le PDF ci-dessus.
-        try:
-            description_image = decrire_image_bibliotheque(contenu, type_mime)
-            if description_image:
-                indexer_texte_bibliotheque(description_image, fichier_id=ligne["id"], user_id=utilisateur.id)
-        except Exception as e:
-            logging.error(f"ERREUR vectorisation image bibliothèque perso (fichier_id={ligne['id']}) : {e}")
-    elif (type_mime or "").startswith("audio/"):
-        try:
-            segments_audio = transcrire_audio_bibliotheque(contenu, nom_fichier)
-            if segments_audio:
-                indexer_transcription_bibliotheque(segments_audio, fichier_id=ligne["id"], user_id=utilisateur.id)
-        except Exception as e:
-            logging.error(f"ERREUR vectorisation audio bibliothèque perso (fichier_id={ligne['id']}) : {e}")
+    journal + propagation aux codes de partage -- identique dans les
+    deux cas, seule la source du contenu diffère (upload direct vs
+    téléchargement depuis le storage de la bibliothèque publique).
 
+    RENOMMÉ le 29/08/2026 (file d'attente de vectorisation en arrière-
+    plan, demande Bourama : upload en masse ou fichier long bloquait
+    trop longtemps) : la vectorisation PDF/image/audio qui vivait ici
+    est retirée -- enregistrer_fichier (appelé par les deux fonctions
+    juste avant celle-ci) a déjà mis le fichier en statut_vectorisation=
+    "en_attente" si besoin (voir necessite_vectorisation_fichier_privee),
+    et core/file_attente_vectorisation.py s'en charge en arrière-plan.
+    """
     journaliser(
         action="bibliotheque_perso.ajoute",
         user_id=utilisateur.id,
@@ -119,10 +88,12 @@ async def uploader_document(
 ):
     """
     Ajoute un fichier à la bibliothèque personnelle de l'utilisateur
-    connecté. Comme au niveau agent : un PDF est en plus vectorisé
-    (indexer_pdf_bibliotheque) pour que consulter_bibliotheque puisse
-    répondre à partir de son contenu -- les autres types restent
-    retrouvables par nom/description via chercher_fichier uniquement.
+    connecté. Le fichier est stocké et renvoyé immédiatement ; un
+    pdf/image/audio est en plus vectorisé en ARRIÈRE-PLAN (29/08, voir
+    core/file_attente_vectorisation.py) pour que consulter_bibliotheque
+    puisse répondre à partir de son contenu dès que c'est prêt -- les
+    autres types restent retrouvables par nom/description via
+    chercher_fichier uniquement.
     """
     # CORRECTION du 01/08 (Bourama : "plusieurs upload à la fois") :
     # description/titre ne sont plus obligatoires -- repli sur le nom du
@@ -164,11 +135,12 @@ async def uploader_document(
             uploade_par=utilisateur.id,
             user_id=utilisateur.id,
             description=description_finale,
+            statut_vectorisation="en_attente" if necessite_vectorisation_fichier_privee(fichier.content_type) else "pret",
         )
     except Exception:
         raise erreur_api(500, "ECHEC_DU_STOCKAGE_REESSAIE")
 
-    return _indexer_et_propager(contenu, fichier.content_type, nom_original, description_finale, ligne, utilisateur, request)
+    return _journaliser_et_propager(contenu, fichier.content_type, nom_original, description_finale, ligne, utilisateur, request)
 
 
 @router.post("/copier-depuis-publique/{entree_id}", status_code=201)
@@ -224,11 +196,12 @@ async def copier_depuis_bibliotheque_publique(
             uploade_par=utilisateur.id,
             user_id=utilisateur.id,
             description=description_finale,
+            statut_vectorisation="en_attente" if necessite_vectorisation_fichier_privee(entree["type_mime"]) else "pret",
         )
     except Exception:
         raise erreur_api(500, "ECHEC_DU_STOCKAGE_REESSAIE")
 
-    return _indexer_et_propager(
+    return _journaliser_et_propager(
         contenu, entree["type_mime"], nom_original, description_finale, ligne, utilisateur, request
     )
 
@@ -305,9 +278,10 @@ def ajouter_texte(
     "ajoute le cas des liens et du texte", "pas de filtre au moment de
     l'upload") -- stockée comme un fichier .txt ordinaire (même mécanisme
     que uploader_document, type_mime="text/plain" sert de marqueur côté
-    frontend pour le sous-onglet "Texte"), mais indexée DIRECTEMENT
-    (pas besoin d'extraction, contrairement à un PDF) : immédiatement
-    consultable par consulter_bibliotheque.
+    frontend pour le sous-onglet "Texte"), puis vectorisée en
+    ARRIÈRE-PLAN (29/08, voir core/file_attente_vectorisation.py) --
+    pas besoin d'extraction contrairement à un PDF donc quasi instantané,
+    mais quand même via la file d'attente pour rester cohérent.
     """
     contenu = (payload.contenu or "").strip()
     if not contenu:
@@ -325,14 +299,13 @@ def ajouter_texte(
             uploade_par=utilisateur.id,
             user_id=utilisateur.id,
             description=titre or (contenu[:80] + ("…" if len(contenu) > 80 else "")),
+            statut_vectorisation="en_attente" if necessite_vectorisation_note() else "pret",
         )
     except Exception:
         raise erreur_api(500, "ECHEC_DE_L_ENREGISTREMENT_DE_LA_NOTE")
 
-    try:
-        indexer_texte_bibliotheque(contenu, fichier_id=ligne["id"], user_id=utilisateur.id)
-    except Exception as e:
-        logging.error(f"ERREUR vectorisation note texte bibliothèque perso (fichier_id={ligne['id']}) : {e}")
+    # Vectorisation en arrière-plan (29/08, voir core/file_attente_vectorisation.py) --
+    # avant, indexer_texte_bibliotheque était appelé directement ici.
 
     journaliser(
         action="bibliotheque_perso.ajoute",
