@@ -184,17 +184,11 @@ OUTILS_SENSIBLES = {
     # "nom_outil:action" (voir plus bas pour gerer_document_bibliotheque) :
     # seule cette action est sensible, "explorer" et "lire_fichier" non.
     "gerer_depot_github:modifier_fichier",
-    # Suppressions programme/comportement (14/08, demande Bourama :
-    # "confirmer pour sensible et irréversible") -- contrairement aux
-    # ajouts/modifications de ces mêmes ressources (voir
-    # core/programme_ecriture.py, annuler_derniere_modification), une
-    # suppression n'a pas de filet de rattrapage, donc TOUJOURS confirmée.
-    "supprimer_programme",
-    "supprimer_matiere",
-    "supprimer_chapitre",
-    "supprimer_document_programme",
-    "supprimer_exercice_programme",
-    "supprimer_examen",
+    # Entrées "supprimer_programme"/"supprimer_matiere"/"supprimer_chapitre"/
+    # "supprimer_document_programme"/"supprimer_exercice_programme"/
+    # "supprimer_examen" retirées le 29/08/2026 -- ces outils n'existent
+    # plus (fonctionnalité "Programme" désactivée et isolée, voir
+    # _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md).
     # Consolidé le 26/08 en une action de gerer_comportement (voir format
     # "nom_outil:action" expliqué plus bas pour gerer_document_bibliotheque).
     "gerer_comportement:supprimer",
@@ -407,42 +401,12 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "lire_conversation_historique": {"label": "Lecture d'une conversation passée", "icone": "History", "onglet": None},
 
     # --- Programme adaptatif (interne) ---
-    # onglet=None (17/08, bug signalé par Bourama) : ces 22 outils étaient
-    # étiquetés "utilitaires" comme les 6 vrais utilitaires juste
-    # au-dessus, ce qui les faisait apparaître comme boutons cliquables
-    # dans le bouton Utilitaires (jusqu'à 28 entrées au total). Ce sont
-    # des outils que le modèle appelle lui-même en autonomie pendant la
-    # conversation (édition de programme), jamais censés être des boutons
-    # que l'étudiant clique. onglet=None les garde dans ce registre (donc
-    # toujours une icône propre dans la bulle "résultat d'outil", voir
-    # OutilResultatBulle.tsx) sans les faire apparaître dans AUCUN menu
-    # (ni Outils, ni Utilitaires) -- voir api/outils_registre.py (.get()
-    # au lieu d'un accès direct) et lib/outils.ts (onglet optionnel) côté
-    # frontend pour la partie qui rend ça possible sans planter.
-    "lister_mes_programmes": {"label": "Liste de tes programmes", "icone": "GraduationCap", "onglet": None},
+    # Bloc entier retiré le 29/08/2026 (demande Bourama) : ces outils
+    # n'existent plus (fonctionnalité "Programme" désactivée et isolée,
+    # voir _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md). NE
+    # JAMAIS réintroduire ces entrées sans reconstruire la fonctionnalité
+    # à neuf.
     "consulter_matiere_active": {"label": "Consultation de la matière active", "icone": "BookOpen", "onglet": None},
-    "consulter_matiere_programme": {"label": "Consultation des chapitres d'une matière", "icone": "BookOpen", "onglet": None},
-    "ajouter_programme": {"label": "Création d'un programme", "icone": "GraduationCap", "onglet": None},
-    "modifier_programme": {"label": "Modification d'un programme", "icone": "GraduationCap", "onglet": None},
-    "consulter_programme": {"label": "Consultation d'un programme", "icone": "GraduationCap", "onglet": None},
-    "supprimer_programme": {"label": "Suppression d'un programme", "icone": "Trash2", "onglet": None},
-    "ajouter_matiere": {"label": "Ajout d'une matière", "icone": "BookOpen", "onglet": None},
-    "modifier_matiere": {"label": "Modification d'une matière", "icone": "BookOpen", "onglet": None},
-    "supprimer_matiere": {"label": "Suppression d'une matière", "icone": "Trash2", "onglet": None},
-    "ajouter_chapitre": {"label": "Ajout d'un chapitre", "icone": "Layers", "onglet": None},
-    "modifier_chapitre": {"label": "Modification d'un chapitre", "icone": "Layers", "onglet": None},
-    "consulter_chapitre_programme": {"label": "Consultation d'un chapitre", "icone": "Layers", "onglet": None},
-    "supprimer_chapitre": {"label": "Suppression d'un chapitre", "icone": "Trash2", "onglet": None},
-    "ajouter_document_programme": {"label": "Ajout d'un document au programme", "icone": "FileText", "onglet": None},
-    "modifier_document_programme": {"label": "Modification d'un document du programme", "icone": "FileText", "onglet": None},
-    "supprimer_document_programme": {"label": "Suppression d'un document du programme", "icone": "Trash2", "onglet": None},
-    "ajouter_exercice_programme": {"label": "Ajout d'un exercice", "icone": "ListChecks", "onglet": None},
-    "modifier_exercice_programme": {"label": "Modification d'un exercice", "icone": "ListChecks", "onglet": None},
-    "supprimer_exercice_programme": {"label": "Suppression d'un exercice", "icone": "Trash2", "onglet": None},
-    "ajouter_examen": {"label": "Ajout d'un examen", "icone": "ClipboardList", "onglet": None},
-    "modifier_examen": {"label": "Modification d'un examen", "icone": "ClipboardList", "onglet": None},
-    "consulter_examens_programme": {"label": "Consultation des examens", "icone": "ClipboardList", "onglet": None},
-    "supprimer_examen": {"label": "Suppression d'un examen", "icone": "Trash2", "onglet": None},
     "annuler_derniere_modification": {"label": "Annulation de la dernière modification", "icone": "Undo2", "onglet": None},
     "gerer_comportement": {"label": "Skills personnels", "icone": "ScrollText", "onglet": None},
     # Routage en deux niveaux (22/08/2026, demande Bourama) : jamais un

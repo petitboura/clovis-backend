@@ -27,7 +27,24 @@ from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel
 
 from api.auth import utilisateur_courant
-from core.bibliotheque_programme import TYPES_LIEN_COMPORTEMENT, libelle_emplacement, proprietaire_lien_comportement
+
+# Fonctionnalité "Programme" désactivée et isolée le 29/08/2026 (demande
+# Bourama, voir _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md).
+# Le rattachement d'un comportement à un emplacement du programme
+# (lien_type/lien_id) dépendait de core/bibliotheque_programme.py, retiré
+# du code actif. Stub volontaire ci-dessous : plus aucun type de lien
+# n'est autorisé (TYPES_LIEN_COMPORTEMENT vide), et les libellés/anciens
+# liens déjà en base sont résolus à None au lieu de planter -- le reste
+# de "Mes comportements" continue de fonctionner normalement.
+TYPES_LIEN_COMPORTEMENT: tuple[str, ...] = ()
+
+
+def libelle_emplacement(lien_type: str | None, lien_id: str | None) -> str | None:
+    return None
+
+
+def proprietaire_lien_comportement(lien_type: str | None, lien_id: str | None) -> str | None:
+    return None
 from core.comportements_etudiants import (
     lister_comportements,
     lister_comportements_par_lien,

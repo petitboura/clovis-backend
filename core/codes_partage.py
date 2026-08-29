@@ -333,15 +333,12 @@ def lister_mes_rattachements(receveur_id: str) -> list[dict]:
         except Exception as e:
             logging.error(f"ERREUR SUPABASE (lecture noms propriétaires codes) : {e}")
 
-    programmes_ids = list({l["codes_partage"]["programme_id"] for l in lignes if l.get("codes_partage") and l["codes_partage"].get("programme_id")})
+    # Résolution du nom de programme désactivée le 29/08/2026 (demande
+    # Bourama, fonctionnalité "Programme" isolée) -- voir
+    # _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md. programme_id
+    # reste affiché tel quel (référence brute), programme_nom n'est plus
+    # résolu.
     noms_programmes: dict[str, str] = {}
-    if programmes_ids:
-        try:
-            progs = supabase.table("programmes").select("id, niveau, nom").in_("id", programmes_ids).execute()
-            for p in (progs.data or []):
-                noms_programmes[p["id"]] = p.get("nom") or p.get("niveau") or "programme"
-        except Exception as e:
-            logging.error(f"ERREUR SUPABASE (lecture noms programmes reçus) : {e}")
 
     resultat = []
     for l in lignes:

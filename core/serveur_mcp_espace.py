@@ -81,34 +81,16 @@ from core.mcp_auth_public import (
     construire_auth_settings,
     user_id_depuis_contexte as _user_id_verifie,
 )
-from core.programme_llm import (
-    lister_mes_programmes_legers as _lister_mes_programmes_legers,
-    obtenir_structure_programme as _obtenir_structure_programme,
-    obtenir_chapitres_matiere as _obtenir_chapitres_matiere,
-    obtenir_contenu_chapitre as _obtenir_contenu_chapitre,
-    obtenir_examens_programme as _obtenir_examens_programme,
-)
-from core.programme_ecriture import (
-    ajouter_programme as _ajouter_programme,
-    modifier_programme as _modifier_programme,
-    supprimer_programme as _supprimer_programme,
-    ajouter_matiere as _ajouter_matiere,
-    modifier_matiere as _modifier_matiere,
-    supprimer_matiere as _supprimer_matiere,
-    ajouter_chapitre as _ajouter_chapitre,
-    modifier_chapitre as _modifier_chapitre,
-    supprimer_chapitre as _supprimer_chapitre,
-    ajouter_document as _ajouter_document_programme,
-    modifier_document as _modifier_document_programme,
-    supprimer_document as _supprimer_document_programme,
-    ajouter_exercice as _ajouter_exercice_programme,
-    modifier_exercice as _modifier_exercice_programme,
-    supprimer_exercice as _supprimer_exercice_programme,
-    ajouter_examen as _ajouter_examen,
-    modifier_examen as _modifier_examen,
-    supprimer_examen as _supprimer_examen,
-    annuler_derniere_modification as _annuler_derniere_modification,
-)
+# Fonctionnalité "Programme" désactivée et isolée le 29/08/2026 (demande
+# Bourama) -- voir _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md.
+# Anciens imports (ne jamais réactiver) :
+#   from core.programme_llm import lister_mes_programmes_legers, obtenir_structure_programme,
+#       obtenir_chapitres_matiere, obtenir_contenu_chapitre, obtenir_examens_programme
+#   from core.programme_ecriture import ajouter_programme, modifier_programme, supprimer_programme,
+#       ajouter_matiere, modifier_matiere, supprimer_matiere, ajouter_chapitre, modifier_chapitre,
+#       supprimer_chapitre, ajouter_document, modifier_document, supprimer_document,
+#       ajouter_exercice, modifier_exercice, supprimer_exercice, ajouter_examen, modifier_examen,
+#       supprimer_examen, annuler_derniere_modification
 from core.bibliotheque_fichiers import (
     enregistrer_fichier as _enregistrer_fichier,
     enregistrer_lien as _enregistrer_lien,
@@ -141,15 +123,23 @@ from core.comportements_etudiants import (
     supprimer_comportement as _supprimer_comportement,
     obtenir_comportement_skill as _obtenir_comportement_skill,
 )
-from core.bibliotheque_programme import (
-    classer_document as _classer_document,
-    declasser_document as _declasser_document,
-    lister_emplacements_document as _lister_emplacements_document,
-    proprietaire_lien_comportement as _proprietaire_lien_comportement,
-    libelle_emplacement as _libelle_emplacement,
-    TYPES_EMPLACEMENT_BIBLIOTHEQUE,
-    TYPES_LIEN_COMPORTEMENT,
-)
+# Le rattachement d'un comportement/document à un emplacement du programme
+# dépendait de core/bibliotheque_programme.py, retiré du code actif.
+# Stub volontaire : plus aucun type de lien/emplacement n'est autorisé,
+# et les libellés déjà en base sont résolus à None au lieu de planter.
+TYPES_LIEN_COMPORTEMENT: tuple[str, ...] = ()
+
+
+def _libelle_emplacement(lien_type, lien_id):
+    return None
+
+
+def _proprietaire_lien_comportement(lien_type, lien_id):
+    return None
+
+
+def _lister_emplacements_document(fichier_id):
+    return []
 from core.dossiers_bibliotheque import (
     _proprietaire_dossier,
     creer_dossier as _creer_dossier,
@@ -559,16 +549,12 @@ def ajouter_document_bibliotheque(
         logging.error(f"ERREUR propagation ajouter_document_bibliotheque : {e}")
 
     message = f"Fichier ajouté (id {ligne['id']})."
+    # Classement dans le programme désactivé le 29/08/2026 (demande Bourama,
+    # voir _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md) --
+    # type_emplacement/emplacement_id restent acceptés en paramètres pour ne
+    # pas casser la signature de l'outil, mais ne font plus rien.
     if type_emplacement and emplacement_id:
-        if type_emplacement not in TYPES_EMPLACEMENT_BIBLIOTHEQUE:
-            message += f" Attention : type d'emplacement invalide ({type_emplacement}), pas classé dans le programme."
-        else:
-            resultat = _classer_document(user_id, ligne["id"], type_emplacement, emplacement_id)
-            if resultat["ok"]:
-                libelle = _libelle_emplacement(type_emplacement, emplacement_id) or emplacement_id
-                message += f" Classé dans : {libelle}."
-            else:
-                message += f" Attention : pas classé dans le programme ({resultat['erreur']})"
+        message += " Attention : le classement dans le programme n'est plus disponible."
     return message
 
 
@@ -610,58 +596,11 @@ def supprimer_document_bibliotheque(fichier_id: str, ctx: Context) -> str:
     return "Document supprimé."
 
 
-# --- Classement des documents dans le programme (16/08, demande
-# Bourama) : un document de la bibliothèque peut être classé à un ou
-# plusieurs emplacements du programme (programme entier / matière /
-# chapitre) -- c'est ce classement qui fait qu'un document "ajouté dans
-# le programme" apparaît dans la bibliothèque avec un libellé, et
-# inversement qu'un document de la bibliothèque peut être rangé dans le
-# programme.
-
-@mcp_espace.tool(
-    name="clovis_classer_document_dans_programme",
-    title="Classer un document dans le programme",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
-)
-def classer_document_dans_programme(fichier_id: str, type_emplacement: str, emplacement_id: str, ctx: Context) -> str:
-    """
-    Classe un document de la bibliothèque personnelle à un emplacement
-    du programme de cet utilisateur. `type_emplacement` : "programme",
-    "matiere", "chapitre", "exercice" ou "examen". `emplacement_id` : id
-    de cet élément précis du programme. Un même document peut être classé à plusieurs
-    emplacements (appeler cet outil plusieurs fois) ; reclasser au même
-    endroit ne crée pas de doublon.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    if type_emplacement not in TYPES_EMPLACEMENT_BIBLIOTHEQUE:
-        return f"Erreur : type d'emplacement invalide, utilise l'un de {TYPES_EMPLACEMENT_BIBLIOTHEQUE}."
-    resultat = _classer_document(user_id, fichier_id, type_emplacement, emplacement_id)
-    if not resultat["ok"]:
-        return f"Erreur : {resultat['erreur']}"
-    libelle = _libelle_emplacement(type_emplacement, emplacement_id) or emplacement_id
-    return f"Document classé dans : {libelle}."
-
-
-@mcp_espace.tool(
-    name="clovis_retirer_document_du_programme",
-    title="Retirer un document du programme",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
-)
-def retirer_document_du_programme(fichier_id: str, type_emplacement: str, emplacement_id: str, ctx: Context) -> str:
-    """
-    Retire un document de la bibliothèque d'un emplacement du programme
-    (le document reste dans la bibliothèque, seul ce classement précis
-    disparaît). Mêmes paramètres que classer_document_dans_programme.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    resultat = _declasser_document(user_id, fichier_id, type_emplacement, emplacement_id)
-    if not resultat["ok"]:
-        return f"Erreur : {resultat['erreur']}"
-    return "Document retiré de cet emplacement du programme."
+# Outils "clovis_classer_document_dans_programme" et
+# "clovis_retirer_document_du_programme" retirés le 29/08/2026 (demande
+# Bourama) : dépendaient de core/bibliotheque_programme.py, désormais
+# isolé et désactivé -- voir
+# _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md.
 
 
 # --- Dossiers de la bibliothèque personnelle (22/08, demande Bourama) --
@@ -1472,643 +1411,15 @@ def consulter_matiere_active(message_utilisateur: str, ctx: Context) -> str:
         return "Erreur : impossible de consulter le contenu de la matière, réessaie."
 
 
-# --- Programme académique ----------------------------------------------
-# Ajouté le 16/08/2026 (demande Bourama) : Claude doit pouvoir naviguer
-# dans l'app comme s'il était notre IA -- pas seulement "Mon espace"
-# (bibliothèque/mémoire/comportements/historique), mais aussi la gestion
-# du programme scolaire (programmes/matières/chapitres/documents/
-# exercices/examens). Aucune logique dupliquée : ce sont les mêmes
-# fonctions core.programme_ecriture / core.programme_llm que
-# core/serveur_mcp_generation.py (serveur interne) utilise déjà pour ce
-# même besoin côté agent Clovis -- seule l'enveloppe MCP change ici
-# (auth OAuth réelle via _user_id_authentifie au lieu du query param
-# interne user_id, décorateur @mcp_espace.tool()). Docstrings et
-# comportement des outils repris à l'identique de mcp_generation.
-
-@mcp_espace.tool(
-    name="clovis_lister_mes_programmes",
-    title="Lister les programmes",
-    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
-)
-def lister_mes_programmes(ctx: Context) -> str:
-    """
-    Liste légère (id, niveau, nom) de TOUS les programmes de cet
-    utilisateur -- point de départ obligatoire avant tout autre outil
-    "programme" : ils ont tous besoin d'un programme_id/matiere_id/
-    chapitre_id en entrée, jamais à deviner. Appelle cet outil en premier
-    dès que l'utilisateur parle de son programme/ses matières/ses
-    chapitres sans te donner d'id, pour savoir quels programmes existent
-    et récupérer leurs ids. Ne contient PAS les matières/chapitres à
-    l'intérieur (voir consulter_programme une fois l'id du programme
-    choisi).
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        programmes = _lister_mes_programmes_legers(user_id)
-    except Exception as e:
-        logging.error(f"ERREUR outil lister_mes_programmes : {e}")
-        return "Erreur : impossible de lister les programmes, réessaie."
-    if not programmes:
-        return "Aucun programme enregistré pour l'instant."
-    return "\n".join(
-        f"- {p['niveau']}" + (f" — {p['nom']}" if p.get("nom") else "") + f" (id: {p['id']})"
-        for p in programmes
-    )
-
-
-@mcp_espace.tool(
-    name="clovis_consulter_programme",
-    title="Consulter un programme",
-    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
-)
-def consulter_programme(programme_id: str, ctx: Context) -> str:
-    """
-    Lit les matières (avec leurs limites de cadre officiel si
-    renseignées) d'un programme que cet étudiant a créé lui-même
-    (section "Programme" de son espace), à partir de son id. Ne contient
-    PAS les chapitres de ces matières, ni les examens/devoirs : une fois
-    que tu as choisi une matière précise dans cette liste, utilise
-    consulter_matiere_programme pour voir ses chapitres ; pour les
-    examens/devoirs de ce programme (qui peuvent couvrir plusieurs
-    matières/chapitres à la fois), utilise consulter_examens_programme.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        structure = _obtenir_structure_programme(user_id, programme_id)
-        if structure is None:
-            return "Ce programme est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return structure
-    except Exception as e:
-        logging.error(f"ERREUR outil consulter_programme : {e}")
-        return "Erreur : impossible de consulter ce programme, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_ajouter_programme",
-    title="Ajouter un programme",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
-)
-def ajouter_programme(niveau: str, ctx: Context, nom: str = "") -> str:
-    """
-    Crée un nouveau programme (ex: "Terminale S", "3ème") pour CET
-    utilisateur, dans sa section "Programme". `niveau` est le texte
-    libre du niveau scolaire, `nom` un label optionnel s'il en donne un.
-    Utilise cet outil quand l'utilisateur veut structurer une nouvelle
-    année/classe, pas pour ajouter une matière à un programme déjà
-    existant (voir ajouter_matiere). N'utilise JAMAIS cet outil sur une
-    supposition -- si tu n'es pas sûr que l'utilisateur veut vraiment
-    créer un nouveau programme, demande-lui de préciser avant d'agir.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        ligne = _ajouter_programme(user_id, niveau, nom or None)
-        return f"Programme créé (id {ligne['id']}) : {ligne['niveau']}" + (f" — {ligne['nom']}" if ligne.get("nom") else "")
-    except Exception as e:
-        logging.error(f"ERREUR outil ajouter_programme : {e}")
-        return "Erreur : impossible de créer ce programme, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_modifier_programme",
-    title="Modifier un programme",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
-)
-def modifier_programme(programme_id: str, ctx: Context, niveau: str = "", nom: str = "") -> str:
-    """
-    Modifie le niveau et/ou le nom d'un programme existant de CET
-    utilisateur. Laisse un champ vide ("") pour ne pas le changer -- ne
-    touche QUE les champs fournis. Ne modifie pas les matières/chapitres
-    à l'intérieur (voir modifier_matiere, modifier_chapitre).
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        ligne = _modifier_programme(user_id, programme_id, niveau or None, nom if nom else None)
-        if ligne is None:
-            return "Ce programme est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return f"Programme modifié : {ligne.get('niveau')}" + (f" — {ligne['nom']}" if ligne.get("nom") else "")
-    except Exception as e:
-        logging.error(f"ERREUR outil modifier_programme : {e}")
-        return "Erreur : impossible de modifier ce programme, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_supprimer_programme",
-    title="Supprimer un programme",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
-)
-def supprimer_programme(programme_id: str, ctx: Context) -> str:
-    """
-    Supprime DÉFINITIVEMENT un programme de CET utilisateur, ainsi que
-    TOUT son contenu (matières, chapitres, documents, exercices).
-    SENSIBLE : demande toujours confirmation avant exécution, quelle que
-    soit la formulation de la demande.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        ok = _supprimer_programme(user_id, programme_id)
-        if not ok:
-            return "Ce programme est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return "Programme supprimé, avec tout son contenu."
-    except Exception as e:
-        logging.error(f"ERREUR outil supprimer_programme : {e}")
-        return "Erreur : impossible de supprimer ce programme, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_ajouter_matiere",
-    title="Ajouter une matière",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
-)
-def ajouter_matiere(programme_id: str, nom: str, ctx: Context, limites: str = "") -> str:
-    """
-    Ajoute une matière à un programme existant de CET utilisateur (ex:
-    "Mathématiques" dans son programme "Terminale S"). `limites` est une
-    description optionnelle du cadre officiel (pour savoir ce qui est
-    "hors programme"). N'utilise JAMAIS cet outil sur une supposition --
-    si l'utilisateur n'a pas clairement demandé d'ajouter CETTE matière
-    à CE programme, demande-lui de confirmer avant d'agir.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        ligne = _ajouter_matiere(user_id, programme_id, nom, limites or None)
-        if ligne is None:
-            return "Ce programme est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return f"Matière ajoutée (id {ligne['id']}) : {ligne['nom']}"
-    except Exception as e:
-        logging.error(f"ERREUR outil ajouter_matiere : {e}")
-        return "Erreur : impossible d'ajouter cette matière, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_modifier_matiere",
-    title="Modifier une matière",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
-)
-def modifier_matiere(matiere_id: str, ctx: Context, nom: str = "", limites: str = "") -> str:
-    """
-    Modifie le nom et/ou les limites de cadre officiel d'une matière
-    existante de CET utilisateur. Laisse un champ vide ("") pour ne pas
-    le changer.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        ligne = _modifier_matiere(user_id, matiere_id, nom or None, limites if limites else None)
-        if ligne is None:
-            return "Cette matière est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return f"Matière modifiée : {ligne.get('nom')}"
-    except Exception as e:
-        logging.error(f"ERREUR outil modifier_matiere : {e}")
-        return "Erreur : impossible de modifier cette matière, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_supprimer_matiere",
-    title="Supprimer une matière",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
-)
-def supprimer_matiere(matiere_id: str, ctx: Context) -> str:
-    """
-    Supprime DÉFINITIVEMENT une matière de CET utilisateur, avec tous
-    ses chapitres/documents/exercices. SENSIBLE : demande toujours
-    confirmation avant exécution.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        ok = _supprimer_matiere(user_id, matiere_id)
-        if not ok:
-            return "Cette matière est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return "Matière supprimée, avec tout son contenu."
-    except Exception as e:
-        logging.error(f"ERREUR outil supprimer_matiere : {e}")
-        return "Erreur : impossible de supprimer cette matière, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_ajouter_chapitre",
-    title="Ajouter un chapitre",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
-)
-def ajouter_chapitre(matiere_id: str, nom: str, ctx: Context, ordre: int = 0, limites: str = "") -> str:
-    """
-    Ajoute un chapitre à une matière existante de CET utilisateur.
-    `ordre` contrôle sa position d'affichage (0 = premier). `limites`
-    est une description optionnelle du cadre officiel pour ce chapitre.
-    N'utilise JAMAIS cet outil sur une supposition -- si l'utilisateur
-    n'a pas clairement demandé d'ajouter CE chapitre à CETTE matière,
-    demande-lui de confirmer avant d'agir.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        ligne = _ajouter_chapitre(user_id, matiere_id, nom, ordre, limites or None)
-        if ligne is None:
-            return "Cette matière est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return f"Chapitre ajouté (id {ligne['id']}) : {ligne['nom']}"
-    except Exception as e:
-        logging.error(f"ERREUR outil ajouter_chapitre : {e}")
-        return "Erreur : impossible d'ajouter ce chapitre, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_modifier_chapitre",
-    title="Modifier un chapitre",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
-)
-def modifier_chapitre(chapitre_id: str, ctx: Context, nom: str = "", ordre: int = -1, limites: str = "") -> str:
-    """
-    Modifie le nom, l'ordre d'affichage et/ou les limites d'un chapitre
-    existant de CET utilisateur. Laisse `nom`/`limites` vides ("") et
-    `ordre` à -1 pour ne pas changer le champ correspondant.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        ligne = _modifier_chapitre(user_id, chapitre_id, nom or None, ordre if ordre >= 0 else None, limites if limites else None)
-        if ligne is None:
-            return "Ce chapitre est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return f"Chapitre modifié : {ligne.get('nom')}"
-    except Exception as e:
-        logging.error(f"ERREUR outil modifier_chapitre : {e}")
-        return "Erreur : impossible de modifier ce chapitre, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_supprimer_chapitre",
-    title="Supprimer un chapitre",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
-)
-def supprimer_chapitre(chapitre_id: str, ctx: Context) -> str:
-    """
-    Supprime DÉFINITIVEMENT un chapitre de CET utilisateur, avec ses
-    documents/exercices. SENSIBLE : demande toujours confirmation avant
-    exécution.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        ok = _supprimer_chapitre(user_id, chapitre_id)
-        if not ok:
-            return "Ce chapitre est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return "Chapitre supprimé, avec son contenu."
-    except Exception as e:
-        logging.error(f"ERREUR outil supprimer_chapitre : {e}")
-        return "Erreur : impossible de supprimer ce chapitre, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_ajouter_document_programme",
-    title="Ajouter un document au programme",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
-)
-def ajouter_document_programme(chapitre_id: str, titre: str, url_ou_contenu: str, ctx: Context) -> str:
-    """
-    Ajoute un document à un chapitre du programme de CET utilisateur :
-    `url_ou_contenu` est SOIT un lien (ex: une URL de cours en ligne),
-    SOIT un texte direct (ex: un résumé de cours écrit dans le
-    message). Pour un fichier déjà présent dans sa bibliothèque, utilise
-    plutôt classer_document_dans_programme.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        ligne = _ajouter_document_programme(user_id, chapitre_id, titre, url_ou_contenu)
-        if ligne is None:
-            return "Ce chapitre est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return f"Document ajouté (id {ligne['id']}) : {ligne['titre']}"
-    except Exception as e:
-        logging.error(f"ERREUR outil ajouter_document_programme : {e}")
-        return "Erreur : impossible d'ajouter ce document, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_modifier_document_programme",
-    title="Modifier un document du programme",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
-)
-def modifier_document_programme(document_id: str, ctx: Context, titre: str = "", url_ou_contenu: str = "") -> str:
-    """
-    Modifie le titre et/ou le contenu (texte ou lien) d'un document
-    existant du programme de CET utilisateur. Laisse un champ vide ("")
-    pour ne pas le changer.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        ligne = _modifier_document_programme(user_id, document_id, titre or None, url_ou_contenu or None)
-        if ligne is None:
-            return "Ce document est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return f"Document modifié : {ligne.get('titre')}"
-    except Exception as e:
-        logging.error(f"ERREUR outil modifier_document_programme : {e}")
-        return "Erreur : impossible de modifier ce document, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_supprimer_document_programme",
-    title="Supprimer un document du programme",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
-)
-def supprimer_document_programme(document_id: str, ctx: Context) -> str:
-    """
-    Supprime DÉFINITIVEMENT un document du programme de CET utilisateur.
-    SENSIBLE : demande toujours confirmation avant exécution.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        ok = _supprimer_document_programme(user_id, document_id)
-        if not ok:
-            return "Ce document est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return "Document supprimé."
-    except Exception as e:
-        logging.error(f"ERREUR outil supprimer_document_programme : {e}")
-        return "Erreur : impossible de supprimer ce document, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_ajouter_exercice_programme",
-    title="Ajouter un exercice",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
-)
-def ajouter_exercice_programme(chapitre_id: str, enonce: str, ctx: Context) -> str:
-    """
-    Ajoute un exercice (rattaché à UN SEUL chapitre) au programme de CET
-    utilisateur. Pour un exercice/devoir couvrant PLUSIEURS chapitres,
-    utilise ajouter_examen à la place.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        ligne = _ajouter_exercice_programme(user_id, chapitre_id, enonce)
-        if ligne is None:
-            return "Ce chapitre est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return f"Exercice ajouté (id {ligne['id']})."
-    except Exception as e:
-        logging.error(f"ERREUR outil ajouter_exercice_programme : {e}")
-        return "Erreur : impossible d'ajouter cet exercice, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_modifier_exercice_programme",
-    title="Modifier un exercice",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
-)
-def modifier_exercice_programme(exercice_id: str, enonce: str, ctx: Context) -> str:
-    """
-    Remplace l'énoncé COMPLET d'un exercice existant du programme de CET
-    utilisateur.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        ligne = _modifier_exercice_programme(user_id, exercice_id, enonce)
-        if ligne is None:
-            return "Cet exercice est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return "Exercice modifié."
-    except Exception as e:
-        logging.error(f"ERREUR outil modifier_exercice_programme : {e}")
-        return "Erreur : impossible de modifier cet exercice, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_supprimer_exercice_programme",
-    title="Supprimer un exercice",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
-)
-def supprimer_exercice_programme(exercice_id: str, ctx: Context) -> str:
-    """
-    Supprime DÉFINITIVEMENT un exercice du programme de CET utilisateur.
-    SENSIBLE : demande toujours confirmation avant exécution.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        ok = _supprimer_exercice_programme(user_id, exercice_id)
-        if not ok:
-            return "Cet exercice est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return "Exercice supprimé."
-    except Exception as e:
-        logging.error(f"ERREUR outil supprimer_exercice_programme : {e}")
-        return "Erreur : impossible de supprimer cet exercice, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_ajouter_examen",
-    title="Ajouter un examen",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
-)
-def ajouter_examen(titre: str, type: str, chapitre_ids: list[str], ctx: Context) -> str:
-    """
-    Crée un examen/devoir/problème composite pour CET utilisateur,
-    couvrant UN OU PLUSIEURS chapitres (potentiellement de matières
-    différentes, dans le même programme). `type` doit valoir "examen",
-    "devoir" ou "probleme_composite". `chapitre_ids` est la liste des
-    ids de chapitres concernés -- tous doivent appartenir à cet
-    utilisateur.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    if type not in ("examen", "devoir", "probleme_composite"):
-        return 'Erreur : `type` doit valoir "examen", "devoir" ou "probleme_composite".'
-    try:
-        ligne = _ajouter_examen(user_id, titre, type, chapitre_ids)
-        if ligne is None:
-            return "Un ou plusieurs chapitres sont introuvables, ou ne correspondent pas à cet utilisateur."
-        return f"Examen créé (id {ligne['id']}) : {ligne['titre']} ({len(chapitre_ids)} chapitre(s))."
-    except Exception as e:
-        logging.error(f"ERREUR outil ajouter_examen : {e}")
-        return "Erreur : impossible de créer cet examen, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_modifier_examen",
-    title="Modifier un examen",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
-)
-def modifier_examen(examen_id: str, ctx: Context, titre: str = "", type: str = "", chapitre_ids: list[str] | None = None) -> str:
-    """
-    Modifie le titre, le type et/ou la liste des chapitres couverts
-    d'un examen existant de CET utilisateur. Laisse `titre`/`type`
-    vides ("") et `chapitre_ids` non fourni pour ne pas changer le champ
-    correspondant -- fournir `chapitre_ids` REMPLACE la liste entière,
-    pas un ajout.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    if type and type not in ("examen", "devoir", "probleme_composite"):
-        return 'Erreur : `type` doit valoir "examen", "devoir" ou "probleme_composite".'
-    try:
-        ligne = _modifier_examen(user_id, examen_id, titre or None, type or None, chapitre_ids)
-        if ligne is None:
-            return "Cet examen est introuvable, ou un chapitre fourni ne correspond pas à cet utilisateur."
-        return f"Examen modifié : {ligne.get('titre')}"
-    except Exception as e:
-        logging.error(f"ERREUR outil modifier_examen : {e}")
-        return "Erreur : impossible de modifier cet examen, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_supprimer_examen",
-    title="Supprimer un examen",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
-)
-def supprimer_examen(examen_id: str, ctx: Context) -> str:
-    """
-    Supprime DÉFINITIVEMENT un examen/devoir/problème composite de CET
-    utilisateur (ne supprime PAS les chapitres qu'il couvrait, juste
-    l'examen lui-même). SENSIBLE : demande toujours confirmation avant
-    exécution.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        ok = _supprimer_examen(user_id, examen_id)
-        if not ok:
-            return "Cet examen est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return "Examen supprimé."
-    except Exception as e:
-        logging.error(f"ERREUR outil supprimer_examen : {e}")
-        return "Erreur : impossible de supprimer cet examen, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_annuler_derniere_modification",
-    title="Annuler la dernière modification",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
-)
-def annuler_derniere_modification(ctx: Context) -> str:
-    """
-    Annule le DERNIER ajout ou la dernière modification de programme
-    faite par toi (via ajouter_programme, modifier_matiere,
-    ajouter_chapitre, etc.) pour CET utilisateur -- ne concerne PAS les
-    suppressions, qui demandent déjà une confirmation avant d'être
-    exécutées. À utiliser quand l'utilisateur dit explicitement vouloir
-    annuler/revenir en arrière sur ta dernière écriture.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        resultat = _annuler_derniere_modification(user_id)
-        if resultat is None:
-            return "Rien à annuler : aucune modification récente trouvée."
-        return f"Dernière modification annulée ({resultat['type_cible']}, action initiale : {resultat['action']})."
-    except Exception as e:
-        logging.error(f"ERREUR outil annuler_derniere_modification : {e}")
-        return "Erreur : impossible d'annuler, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_consulter_matiere_programme",
-    title="Consulter les chapitres d'une matière",
-    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
-)
-def consulter_matiere_programme(matiere_id: str, ctx: Context) -> str:
-    """
-    Lit les chapitres (avec leurs limites de cadre officiel si
-    renseignées) d'UNE matière précise d'un programme de cet
-    utilisateur, à partir de son id. Ne contient PAS le contenu des
-    chapitres (documents/exercices) : une fois que tu as choisi un
-    chapitre précis dans cette liste, utilise
-    consulter_chapitre_programme. Utilise cet outil seulement après
-    avoir consulté consulter_programme et choisi la matière qui
-    t'intéresse -- jamais à l'aveugle sans connaître l'id de la matière
-    au préalable.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        chapitres = _obtenir_chapitres_matiere(user_id, matiere_id)
-        if chapitres is None:
-            return "Cette matière est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return chapitres
-    except Exception as e:
-        logging.error(f"ERREUR outil consulter_matiere_programme : {e}")
-        return "Erreur : impossible de consulter cette matière, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_consulter_chapitre_programme",
-    title="Consulter un chapitre",
-    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
-)
-def consulter_chapitre_programme(chapitre_id: str, ctx: Context) -> str:
-    """
-    Lit le contenu réel (documents + exercices) d'UN chapitre précis
-    d'un programme de cet utilisateur, à partir de son id. Utilise cet
-    outil seulement après avoir consulté consulter_matiere_programme et
-    choisi le chapitre qui t'intéresse dans sa liste -- jamais à
-    l'aveugle sans connaître l'id du chapitre au préalable.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        contenu = _obtenir_contenu_chapitre(user_id, chapitre_id)
-        if contenu is None:
-            return "Ce chapitre est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return contenu
-    except Exception as e:
-        logging.error(f"ERREUR outil consulter_chapitre_programme : {e}")
-        return "Erreur : impossible de consulter ce chapitre, réessaie."
-
-
-@mcp_espace.tool(
-    name="clovis_consulter_examens_programme",
-    title="Consulter les examens",
-    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
-)
-def consulter_examens_programme(programme_id: str, ctx: Context) -> str:
-    """
-    Lit les examens/devoirs (titre, type, chapitres couverts) d'un
-    programme de cet utilisateur, à partir de son id. Un examen peut
-    couvrir plusieurs chapitres à la fois, c'est pourquoi il se
-    consulte au niveau du programme entier et non via
-    consulter_chapitre_programme. Aucun contenu/énoncé détaillé n'existe
-    pour un examen -- seulement son titre, son type et les chapitres
-    qu'il couvre.
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    try:
-        texte = _obtenir_examens_programme(user_id, programme_id)
-        if texte is None:
-            return "Ce programme est introuvable (id invalide, ou ne correspond pas à cet utilisateur)."
-        return texte
-    except Exception as e:
-        logging.error(f"ERREUR outil consulter_examens_programme : {e}")
-        return "Erreur : impossible de consulter les examens de ce programme, réessaie."
-
+# --- Programme académique --------------------------------------------
+# Section ENTIÈRE retirée le 29/08/2026 (demande Bourama) : les outils MCP
+# lister_mes_programmes / consulter_programme / ajouter_programme /
+# modifier_programme / supprimer_programme / ajouter_matiere / ... /
+# consulter_matiere_programme / consulter_chapitre_programme /
+# consulter_examens_programme dépendaient de core/programme_llm.py et
+# core/programme_ecriture.py, désormais isolés et désactivés -- voir
+# _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md. NE JAMAIS
+# réintroduire ces outils sans redemander la spécification à Bourama.
 
 # --- Discuter avec Clovis ------------------------------------------------
 # Ajouté le 17/08/2026 (demande Bourama) : jusqu'ici ce fichier ne gérait

@@ -23,11 +23,17 @@ from api.auth import utilisateur_courant, utilisateur_optionnel, supabase
 from api.journal import journaliser
 from api.permissions_hierarchie import _est_admin
 from core.erreurs import erreur_api
-from core.bibliotheque_programme import declasser_document_admin
+# Fonctionnalité "Programme" désactivée et isolée le 29/08/2026 (demande
+# Bourama) -- voir _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md.
+# from core.bibliotheque_programme import declasser_document_admin
 
 router = APIRouter(prefix="/api/signalements", tags=["signalements"])
 
-TYPES_SIGNALEMENT = ("bibliotheque_publique", "document_programme")
+# "document_programme" retiré des types valides le 29/08/2026 (fonctionnalité
+# "Programme" désactivée) -- plus aucun nouveau signalement de ce type ne
+# peut être créé. D'éventuels signalements déjà en base restent visibles à
+# l'admin mais ne peuvent plus être "retirés" via cet endpoint (voir plus bas).
+TYPES_SIGNALEMENT = ("bibliotheque_publique",)
 
 
 def _exige_admin(utilisateur):
@@ -168,11 +174,10 @@ def traiter_signalement(
                 logging.error(f"ERREUR SUPABASE (retrait bibliotheque_publique {signalement['bibliotheque_publique_id']}) : {e}")
                 raise erreur_api(500, "ERREUR_INCONNUE")
         else:
-            resultat = declasser_document_admin(
-                signalement["fichier_id"], signalement["type_emplacement"], signalement["emplacement_id"]
-            )
-            if not resultat["ok"]:
-                raise erreur_api(500, "ERREUR_INCONNUE", message=resultat["erreur"])
+            # "document_programme" désactivé le 29/08/2026 -- ne peut plus
+            # être retiré via cet endpoint (voir
+            # _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md).
+            raise erreur_api(409, "TYPE_SIGNALEMENT_DESACTIVE", message="Ce type de signalement n'est plus traitable.")
 
     try:
         maj = supabase.table("signalements_bibliotheque").update({

@@ -18,8 +18,12 @@ from comportements_etudiants import (
     separer_comportements_par_niveau,
     lister_comportements_chapitres_pour_matiere,
 )
-from programme_llm import lister_mes_programmes_legers
-from codes_partage import lister_comportements_recus, lister_programmes_recus_legers
+# Fonctionnalité "Programme" désactivée et isolée le 29/08/2026 (demande
+# Bourama) -- voir _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md.
+# Anciens imports (ne jamais réactiver) :
+#   from programme_llm import lister_mes_programmes_legers
+#   from codes_partage import lister_programmes_recus_legers
+from codes_partage import lister_comportements_recus
 from mcp_tools import lister_tous_les_outils, lister_outils_autorises_pour_agent, appeler_outil
 from registre_outils import OUTILS_SENSIBLES, REGISTRE_AFFICHAGE_OUTILS
 from fournisseurs_llm import generer_reponse_premium
@@ -1601,45 +1605,12 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
             "-- ne devine jamais son contenu à partir de la description seule."
         )
 
-    # Programmes de l'étudiant (13/08, chantier "connexion IA <-> structure
-    # programme", demande Bourama). Contrairement aux comportements
-    # ci-dessus, pas besoin d'un routeur : la liste est déjà minuscule
-    # (juste id/niveau/nom, jamais la structure matières/chapitres), donc
-    # injectée telle quelle plutôt que filtrée. Coût quasi nul, aucun appel
-    # LLM supplémentaire (voir core/programme_llm.py).
-    #
-    # Navigation en plusieurs niveaux (14-15/08, décision Bourama : le
-    # modèle doit se naviguer dans le programme comme l'étudiant, jamais
-    # tout obtenir d'un coup) -- 1) cette liste légère, 2)
-    # consulter_programme pour les matières d'UN programme choisi (SANS
-    # leurs chapitres), 3) consulter_matiere_programme pour les chapitres
-    # d'UNE matière choisie (SANS leur contenu), 4)
-    # consulter_chapitre_programme pour le contenu (documents/exercices)
-    # d'UN chapitre choisi, 5) consulter_examens_programme pour les
-    # examens/devoirs de ce programme (niveau programme, pas
-    # matière/chapitre : un examen peut couvrir plusieurs matières à la
-    # fois). Jamais de saut direct entre deux étapes non consécutives :
-    # chaque id nécessaire vient de l'étape juste avant.
-    if mes_programmes:
-        liste_programmes = "\n".join(
-            f"- id={p['id']} — {p['niveau']}" + (f" ({p['nom']})" if p.get("nom") else "")
-            for p in mes_programmes
-        )
-        system_final += (
-            "\n\nPROGRAMMES DE CET ÉTUDIANT (structure classe/matière/chapitre qu'il a créée dans la "
-            "section Programme de son espace) :\n"
-            f"{liste_programmes}\n"
-            "Tu peux t'appuyer dessus pour personnaliser ta réponse (proposer d'y accéder, situer une "
-            "question par rapport à sa matière/son niveau). Pour aller plus loin, navigue étape par "
-            "étape, jamais tout d'un coup : 1) appelle consulter_programme avec l'id ci-dessus pour voir "
-            "ses matières (jamais leurs chapitres à ce stade) ; 2) une fois que tu as identifié la "
-            "matière pertinente, appelle consulter_matiere_programme avec l'id de CETTE matière pour voir "
-            "ses chapitres (jamais leur contenu à ce stade) ; 3) une fois que tu as identifié le chapitre "
-            "pertinent, appelle consulter_chapitre_programme avec l'id de CE chapitre pour voir ses "
-            "documents et exercices ; 4) pour les examens/devoirs de ce programme, appelle "
-            "consulter_examens_programme avec l'id du programme (pas d'une matière ou d'un chapitre : un "
-            "examen peut en couvrir plusieurs). Ne devine jamais ce contenu, et ne saute jamais une étape."
-        )
+    # Injection de la structure "Programme" (classe/matière/chapitre) dans
+    # le system prompt retirée le 29/08/2026 (demande Bourama) -- la
+    # fonctionnalité "Programme" est désactivée et isolée, voir
+    # _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md. `mes_programmes`
+    # reste un paramètre accepté (toujours vide désormais, voir chat()) pour
+    # ne pas devoir modifier tous les appels à cette fonction.
 
     # Bloc outils actifs / aucun outil actif (restauré 14/08) : outil_force
     # ici est déjà la liste VÉRIFIÉE des noms d'outils réellement envoyés au
@@ -3088,15 +3059,14 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 ),
             }
             comportements_etudiant += retenus_niveau2
-    mes_programmes = (lister_mes_programmes_legers(user_id) + lister_programmes_recus_legers(user_id)) if user_id else []
+    # mes_programmes toujours vide désormais -- fonctionnalité "Programme"
+    # désactivée le 29/08/2026, voir
+    # _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md (anciennement :
+    # lister_mes_programmes_legers(user_id) + lister_programmes_recus_legers(user_id)).
+    mes_programmes = []
     outils_forces_contexte = []
     if comportements_etudiant:
         outils_forces_contexte.append("gerer_comportement")
-    if mes_programmes:
-        outils_forces_contexte.append("consulter_programme")
-        outils_forces_contexte.append("consulter_matiere_programme")
-        outils_forces_contexte.append("consulter_chapitre_programme")
-        outils_forces_contexte.append("consulter_examens_programme")
 
     def _fusionner_outils(liste_base, extra):
         """Union ordonnée sans doublons, jamais liste vide (None si rien)."""

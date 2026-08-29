@@ -32,11 +32,14 @@ from api.contenu_dynamique_matiere import router_enseignant as contenu_matiere_e
 from api.contenu_dynamique_matiere import router_etudiant as contenu_matiere_etudiant_router
 from api.contenu_dynamique_matiere import router_liste_agents as contenu_matiere_liste_agents_router
 from api.comportements_etudiants import router as comportements_etudiants_router
-from api.programmes import router_programmes, router_matieres, router_chapitres
-from api.audits_programme import router_audits_programme
-from api.contenu_programme import router as contenu_programme_router
-from api.emplacements_bibliotheque_programme import router as emplacements_bibliotheque_programme_router
-from api.plugins_programme import router as plugins_router, router_programmes as plugins_programmes_router
+# Fonctionnalité "Programme" désactivée et isolée le 29/08/2026 (demande
+# Bourama) -- voir _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md.
+# Anciens imports (ne jamais réactiver) :
+#   from api.programmes import router_programmes, router_matieres, router_chapitres
+#   from api.audits_programme import router_audits_programme
+#   from api.contenu_programme import router as contenu_programme_router
+#   from api.emplacements_bibliotheque_programme import router as emplacements_bibliotheque_programme_router
+#   from api.plugins_programme import router as plugins_router, router_programmes as plugins_programmes_router
 from api.comportements_publics import router as comportements_publics_router
 from api.bibliotheque_publique import router as bibliotheque_publique_router
 from api.dossiers_catalogue_public import router as dossiers_catalogue_public_router
@@ -48,7 +51,7 @@ from api.appareils_mobiles import router as appareils_mobiles_router
 from core.serveur_mcp_generation import mcp_generation
 from core.notifications_push import traiter_rappels_echus, un_canal_push_disponible
 from core.proactivite import verifier_relances_proactives
-from core.audit_programme import executer_audits_hebdomadaires
+# from core.audit_programme import executer_audits_hebdomadaires  -- désactivé, voir _desactive_programme/
 from core.serveur_mcp_github import mcp_github
 from core.serveur_mcp_public import mcp_public
 from core.serveur_mcp_espace import mcp_espace
@@ -91,29 +94,9 @@ async def _boucle_planificateur_proactivite():
         await asyncio.sleep(6 * 60 * 60)
 
 
-async def _boucle_planificateur_audits():
-    # Chantier "Audits" (26/08/2026) -- cascade chapitre -> matière ->
-    # programme pour TOUS les programmes, chaque lundi (voir
-    # core/audit_programme.py::executer_audits_hebdomadaires, incrémental).
-    # Pas de dépendance externe (APScheduler, cron Railway) : même
-    # tolérance que les boucles rappels/proactivité ci-dessus -- vérifie
-    # toutes les heures si on est lundi et si ça n'a pas déjà tourné
-    # aujourd'hui (variable en mémoire, remise à zéro à chaque redémarrage
-    # du process ; au pire un lundi sans redéploiement est traité une
-    # seule fois, un redémarrage pendant la fenêtre peut le refaire
-    # tourner deux fois -- l'incrémental rend ça inoffensif : la deuxième
-    # passe ne retraite que ce qui aurait changé entre-temps).
-    derniere_date_executee = None
-    while True:
-        try:
-            maintenant = datetime.now(timezone.utc)
-            if maintenant.weekday() == 0 and derniere_date_executee != maintenant.date():
-                nb = executer_audits_hebdomadaires()
-                derniere_date_executee = maintenant.date()
-                logging.info(f"Planificateur audits : cascade exécutée pour {nb} programme(s).")
-        except Exception as e:
-            logging.error(f"ERREUR boucle planificateur audits : {e}")
-        await asyncio.sleep(60 * 60)
+# _boucle_planificateur_audits() supprimée du code actif le 29/08/2026 --
+# dépendait de core/audit_programme.py, fonctionnalité "Programme"
+# désactivée et isolée, voir _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md.
 
 
 @asynccontextmanager
@@ -145,13 +128,11 @@ async def _lifespan(app: FastAPI):
         if un_canal_push_disponible():
             tache_planificateur = asyncio.create_task(_boucle_planificateur_rappels())
             tache_proactivite = asyncio.create_task(_boucle_planificateur_proactivite())
-        tache_audits = asyncio.create_task(_boucle_planificateur_audits())
         yield
         if tache_planificateur:
             tache_planificateur.cancel()
         if tache_proactivite:
             tache_proactivite.cancel()
-        tache_audits.cancel()
 
 
 app = FastAPI(title="Clovis API", version="0.1.0", lifespan=_lifespan)
@@ -399,14 +380,12 @@ app.include_router(contenu_matiere_enseignant_router)
 app.include_router(contenu_matiere_etudiant_router)
 app.include_router(contenu_matiere_liste_agents_router)
 app.include_router(comportements_etudiants_router)
-app.include_router(router_programmes)
-app.include_router(router_matieres)
-app.include_router(router_chapitres)
-app.include_router(router_audits_programme)
-app.include_router(contenu_programme_router)
-app.include_router(emplacements_bibliotheque_programme_router)
-app.include_router(plugins_router)
-app.include_router(plugins_programmes_router)
+# Routers "Programme" désactivés le 29/08/2026 (demande Bourama) -- voir
+# _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md :
+#   router_programmes, router_matieres, router_chapitres,
+#   router_audits_programme, contenu_programme_router,
+#   emplacements_bibliotheque_programme_router, plugins_router,
+#   plugins_programmes_router
 app.include_router(comportements_publics_router)
 app.include_router(bibliotheque_publique_router)
 app.include_router(dossiers_catalogue_public_router)
