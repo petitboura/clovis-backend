@@ -133,8 +133,10 @@ def _libelle_emplacement(lien_type, lien_id):
     return None
 
 
-def _proprietaire_lien_comportement(lien_type, lien_id):
-    return None
+# _proprietaire_lien_comportement retirée le 29/08/2026 (demande Bourama) :
+# plus aucun appelant depuis le retrait de clovis_attacher_comportement_espace
+# et le nettoyage de clovis_ajouter_comportement_espace (les deux seuls
+# endroits qui vérifiaient la propriété d'un emplacement du programme).
 
 
 def _lister_emplacements_document(fichier_id):
@@ -1013,41 +1015,30 @@ def lister_comportements(ctx: Context, limit: int = 20, offset: int = 0) -> str:
     title="Ajouter un skill",
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
 )
-def ajouter_comportement_espace(texte: str, ctx: Context, type_lien: str = "", lien_id: str = "") -> str:
+def ajouter_comportement_espace(texte: str, ctx: Context) -> str:
     """
     Enregistre une nouvelle instruction personnelle pour cet utilisateur
     (section "Mes comportements", appelée "skill" dans l'interface).
     S'ajoute EN PLUS des comportements déjà existants, ne les remplace
-    pas. `type_lien`/`lien_id` : optionnels -- si fournis, rattache ce
-    comportement à un endroit précis du programme ("programme"/"matiere"/
-    "chapitre"/"document"/"exercice"/"examen" + son id), comme si
-    l'utilisateur avait rempli une section dédiée à cet endroit du
-    programme. Sans ces deux paramètres, comportement générique comme
-    avant (s'applique partout).
+    pas. S'applique partout (générique), comme tous les comportements
+    de cette section.
     """
+    # Paramètres type_lien/lien_id retirés le 29/08/2026 (demande
+    # Bourama) : rattachement à un emplacement du programme, mort depuis
+    # la désactivation de "Programme" le même jour (voir
+    # clovis_attacher_comportement_espace, retiré au même moment).
     user_id = _user_id_authentifie(ctx)
     if not user_id:
         return "Erreur : utilisateur non authentifié."
     texte = (texte or "").strip()
     if not texte:
         return "Erreur : texte requis."
-    type_lien_final, lien_id_final = None, None
-    if type_lien and lien_id:
-        if type_lien not in TYPES_LIEN_COMPORTEMENT:
-            return f"Erreur : type de lien invalide, utilise l'un de {TYPES_LIEN_COMPORTEMENT}."
-        if _proprietaire_lien_comportement(type_lien, lien_id) != user_id:
-            return "Erreur : cet emplacement du programme est introuvable ou ne t'appartient pas."
-        type_lien_final, lien_id_final = type_lien, lien_id
     try:
-        ligne = _ajouter_comportement(AGENT_ID_ESPACE, user_id, texte, type_lien_final, lien_id_final)
+        ligne = _ajouter_comportement(AGENT_ID_ESPACE, user_id, texte)
     except Exception as e:
         logging.error(f"ERREUR outil ajouter_comportement_espace : {e}")
         return "Erreur : impossible d'enregistrer ce comportement, réessaie."
-    message = f"Comportement enregistré (id {ligne['id']}) : {ligne['description']}"
-    if type_lien_final:
-        libelle = _libelle_emplacement(type_lien_final, lien_id_final) if type_lien_final in TYPES_LIEN_COMPORTEMENT else None
-        message += f" (lié à : {libelle or (type_lien_final + ' ' + lien_id_final)})"
-    return message
+    return f"Comportement enregistré (id {ligne['id']}) : {ligne['description']}"
 
 
 @mcp_espace.tool(
