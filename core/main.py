@@ -1276,12 +1276,12 @@ gerer_base_connaissance regroupe un seul mécanisme en plusieurs étapes (action
 Ceci s'applique à TOUTE question sur Clovis ou sur l'application en général, même formulée normalement, sans jamais mentionner "base de connaissance" ou un format de fichier, mets-toi à la place d'un utilisateur qui ignore que ce mécanisme existe : il demande juste comment faire quelque chose, pourquoi ça bug, ou ce que fait une fonctionnalité. Exception : si tu as déjà cherché sur ce sujet précis plus tôt dans cette même conversation sans rien trouver de pertinent, ne réinsiste pas indéfiniment, réponds avec ce que tu sais déjà ou dis clairement que tu ne trouves pas l'information.
 </base_connaissances_clovis>
 
-<citations_bibliotheque>
-Quand gerer_document_bibliotheque (action "chercher"/"chercher_publique") te renvoie des extraits, chacun se termine par une ligne "(Source : nom[, page N|, à MM:SS], url)", et le résultat de l'outil t'indique explicitement quels numéros utiliser (ex : "numérote tes citations [n](citation:n) pour ces 3 sources de 4 à 6"). Deux choses OBLIGATOIRES, pas une seule :
-1. Juste après le passage de TA réponse qui utilise un extrait précis, insère le marqueur [n](citation:n) correspondant, avec le numéro exact indiqué par l'outil pour CET extrait précis (respecte l'ordre donné, ne réinvente jamais les numéros toi-même).
-2. Ne réécris jamais toi-même la ligne "(Source : ...)" ni l'URL en clair dans ta réponse -- l'interface affiche déjà la liste complète des sources séparément. Ta seule contribution est le marqueur [n](citation:n) au bon endroit dans le texte.
-Exemple : l'outil t'indique d'utiliser 4 à 6, et l'extrait numéro 5 dit "la mitochondrie produit l'ATP" -> tu écris "...la mitochondrie produit l'ATP [5](citation:5)...". N'utilise ce format QUE pour des extraits venant réellement de gerer_document_bibliotheque, jamais pour une autre source.
-</citations_bibliotheque>"""
+<citations_sources>
+Tout outil qui te renvoie des numéros à citer (ex : "numérote tes citations [n](citation:n) pour ces 3 sources de 4 à 6") -- bibliothèque, recherche web, GitHub, ou tout autre outil sourcé.
+Insère [n](citation:n) juste après chaque passage utilisant cette source. Format EXACT, obligatoire, sans exception : crochets + "(citation:n)".
+N'écris jamais le chiffre seul. N'écris jamais le chiffre entre parenthèses. Ne réécris jamais l'URL ni le nom de la source en clair.
+Exemple : "...produit l'ATP [5](citation:5)...".
+</citations_sources>"""
 
 INSTRUCTIONS_ARBITRAGE_CALCUL = """
 
@@ -2389,17 +2389,19 @@ def _traiter_appels(appels, messages_agent, table_routage, compteur_sources=None
                     # Le modele voit le RESULTAT BRUT (pas l'evenement SSE,
                     # qui va direct au frontend) -- il a donc besoin qu'on
                     # lui dise explicitement quels numeros utiliser pour
-                    # [n](citation:n), voir <citations_bibliotheque> du
-                    # system prompt. Uniquement pour la bibliotheque
-                    # aujourd'hui : aucune autre instruction de citation
-                    # inline n'existe pour les autres outils sourcés.
-                    if appel["name"] == "gerer_document_bibliotheque":
-                        contenu_pour_modele = (
-                            f"{resultat}\n\n[Numérote tes citations "
-                            f"[n](citation:n) pour ces {len(sources)} source(s) "
-                            f"de {debut_numero} à {compteur_sources[0]}, dans "
-                            f"cet ordre.]"
-                        )
+                    # [n](citation:n), voir <citations_sources> du system
+                    # prompt. Etendu (28/08, demande Bourama) a TOUT outil
+                    # sourcé -- avant, uniquement gerer_document_bibliotheque ;
+                    # desormais des que `sources` est non vide (bibliotheque,
+                    # tavily_*/notion-search via _sources_depuis_json_generique,
+                    # gerer_depot_github via _sources_github_depuis_arguments,
+                    # et tout futur outil sourcé sans changement ici).
+                    contenu_pour_modele = (
+                        f"{resultat}\n\n[Numérote tes citations "
+                        f"[n](citation:n) pour ces {len(sources)} source(s) "
+                        f"de {debut_numero} à {compteur_sources[0]}, dans "
+                        f"cet ordre.]"
+                    )
                 messages_agent.append({
                     "role": "tool",
                     "tool_call_id": appel["id"],
