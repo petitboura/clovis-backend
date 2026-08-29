@@ -119,7 +119,6 @@ from core.comportements_etudiants import (
     lister_comportements as _lister_comportements,
     ajouter_comportement as _ajouter_comportement,
     modifier_comportement as _modifier_comportement,
-    attacher_comportement as _attacher_comportement,
     supprimer_comportement as _supprimer_comportement,
     obtenir_comportement_skill as _obtenir_comportement_skill,
 )
@@ -1078,43 +1077,14 @@ def modifier_comportement_espace(comportement_id: str, texte: str, ctx: Context)
     return f"Comportement modifié : {ligne['description']}"
 
 
-@mcp_espace.tool(
-    name="clovis_attacher_comportement_espace",
-    title="Attacher/détacher un skill",
-    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
-)
-def attacher_comportement_espace(comportement_id: str, ctx: Context, type_lien: str = "", lien_id: str = "") -> str:
-    """
-    Attache un comportement (appelé "skill" dans l'interface) DÉJÀ
-    EXISTANT à un endroit du programme
-    ("programme"/"matiere"/"chapitre"/"document"/"exercice"/"examen"/
-    "section" + son id) -- séparé de ajouter_comportement_espace exprès
-    (20/08/2026, demande Bourama : "au moment de la création ou après
-    tu peux l'attacher"). Laisse type_lien/lien_id VIDES pour détacher
-    (rendre ce comportement générique à nouveau, s'applique partout).
-    """
-    user_id = _user_id_authentifie(ctx)
-    if not user_id:
-        return "Erreur : utilisateur non authentifié."
-    type_lien_final, lien_id_final = None, None
-    if type_lien and lien_id:
-        if type_lien not in TYPES_LIEN_COMPORTEMENT:
-            return f"Erreur : type de lien invalide, utilise l'un de {TYPES_LIEN_COMPORTEMENT}."
-        if _proprietaire_lien_comportement(type_lien, lien_id) != user_id:
-            return "Erreur : cet emplacement du programme est introuvable ou ne t'appartient pas."
-        type_lien_final, lien_id_final = type_lien, lien_id
-    try:
-        ligne = _attacher_comportement(AGENT_ID_ESPACE, user_id, comportement_id, type_lien_final, lien_id_final)
-    except Exception as e:
-        logging.error(f"ERREUR outil attacher_comportement_espace : {e}")
-        return "Erreur : impossible d'attacher ce comportement, réessaie."
-    if ligne is None:
-        return "Ce comportement est introuvable."
-    if type_lien_final:
-        libelle = _libelle_emplacement(type_lien_final, lien_id_final)
-        return f"Comportement attaché à : {libelle or (type_lien_final + ' ' + lien_id_final)}"
-    return "Comportement détaché (redevenu générique)."
-
+# clovis_attacher_comportement_espace RETIRÉ le 29/08/2026 (demande
+# Bourama) : sa seule vraie fonction (attacher un skill à un emplacement
+# du programme) était déjà morte depuis la désactivation de "Programme"
+# le même jour (TYPES_LIEN_COMPORTEMENT vidé, voir stub plus haut) -- ne
+# JAMAIS réintroduire cet outil sans reconstruire "Programme" à neuf. La
+# fonction _attacher_comportement (core/comportements_etudiants.py)
+# n'est plus appelée nulle part dans ce fichier, mais reste utilisée
+# ailleurs (à vérifier avant toute suppression côté core).
 
 @mcp_espace.tool(
     name="clovis_supprimer_comportement_espace",
