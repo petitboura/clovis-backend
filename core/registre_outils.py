@@ -285,6 +285,22 @@ REGISTRE_AFFICHAGE_OUTILS = {
     # (seule action manuellement cliquable, les autres restent onglet=None
     # en pratique côté modèle -- pas besoin de doublon d'entrée pour ça).
     "gerer_document_bibliotheque": {"label": "Bibliothèque personnelle", "icone": "Library", "onglet": "rechercher"},
+    # Composites "nom_outil:action" (28/08, bug remonté par Bourama :
+    # l'entrée générique ci-dessus s'affichait pour TOUTES les actions
+    # de cet outil, y compris chercher_publique/trouver_catalogue_public/
+    # lire_catalogue_public/lister_catalogue_public -- qui ne concernent
+    # PAS la bibliothèque personnelle mais le catalogue public ou les
+    # plugins publics. Même format composite que OUTILS_SENSIBLES
+    # ci-dessus, lu ici par _nom_lisible (core/main.py) au lieu de
+    # _est_outil_sensible. `onglet: None` volontaire : ne doivent jamais
+    # apparaître comme bouton cliquable séparé dans le menu Outils (voir
+    # docstring de la route /api/outils/registre) -- seul le libellé
+    # affiché PENDANT/APRÈS l'exécution change, pas la liste des outils
+    # sélectionnables.
+    "gerer_document_bibliotheque:chercher_publique": {"label": "Plugins publics", "icone": "Library", "onglet": None},
+    "gerer_document_bibliotheque:trouver_catalogue_public": {"label": "Catalogue public", "icone": "Library", "onglet": None},
+    "gerer_document_bibliotheque:lire_catalogue_public": {"label": "Catalogue public", "icone": "Library", "onglet": None},
+    "gerer_document_bibliotheque:lister_catalogue_public": {"label": "Catalogue public", "icone": "Library", "onglet": None},
     "gerer_base_connaissance": {"label": "Base de connaissances de Clovis", "icone": "BookMarked", "onglet": "rechercher"},
 
     # --- Action dans l'app : GitHub ---

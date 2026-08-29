@@ -1012,8 +1012,36 @@ def _nom_agent(agent_id):
         return None
 
 
-def _nom_lisible(nom_outil):
+def _nom_lisible(nom_outil, action=None):
+    """
+    Libellé affiché au frontend pour cet appel d'outil. Si `action` est
+    fourni et qu'une entrée composite "nom_outil:action" existe dans
+    REGISTRE_AFFICHAGE_OUTILS, elle prime sur l'entrée générique du nom
+    d'outil seul -- nécessaire pour les outils consolidés "action +
+    paramètres" dont certaines actions couvrent un domaine différent de
+    celui suggéré par le libellé générique (ex: gerer_document_
+    bibliotheque affichait "Bibliothèque personnelle" même pour une
+    recherche dans le catalogue public ou les plugins publics, bug
+    remonté par Bourama le 28/08). Même pattern composite que
+    _est_outil_sensible pour OUTILS_SENSIBLES.
+    """
+    if action and f"{nom_outil}:{action}" in NOMS_OUTILS_LISIBLES:
+        return NOMS_OUTILS_LISIBLES[f"{nom_outil}:{action}"]
     return NOMS_OUTILS_LISIBLES.get(nom_outil, nom_outil)
+
+
+def _action_appel(appel):
+    """Extrait le paramètre `action` des arguments JSON de cet appel, ou None si absent/invalide (mêmes garde-fous que _est_outil_sensible)."""
+    try:
+        arguments = json.loads(appel["arguments"] or "{}")
+    except Exception:
+        return None
+    return arguments.get("action")
+
+
+def _nom_lisible_appel(appel):
+    """Raccourci : libellé lisible pour un appel complet (dict avec 'name' et 'arguments'), en tenant compte de son action le cas échéant."""
+    return _nom_lisible(appel["name"], _action_appel(appel))
 
 
 def _charger_resume_memoire(user_id):
@@ -2266,7 +2294,7 @@ def _traiter_appels(appels, messages_agent, table_routage, compteur_sources=None
 
     if appels_surs:
         for appel in appels_surs:
-            yield {"type": "statut", "texte": f"{_nom_lisible(appel['name'])}..."}
+            yield {"type": "statut", "texte": f"{_nom_lisible_appel(appel)}..."}
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(appels_surs)) as executor:
             futures = {
@@ -2297,12 +2325,12 @@ def _traiter_appels(appels, messages_agent, table_routage, compteur_sources=None
                     # propre reponse ("la generation a echoue, veux-tu reessayer ?")
                     # au lieu de changer de personnalite en silence.
                     logging.error(f"ERREUR OUTIL ({appel['name']}) : {e}")
-                    resultat = f"Erreur : {_nom_lisible(appel['name'])} a échoué ({e})."
-                    yield {"type": "statut_termine", "texte": f"{_nom_lisible(appel['name'])} a échoué"}
+                    resultat = f"Erreur : {_nom_lisible_appel(appel)} a échoué ({e})."
+                    yield {"type": "statut_termine", "texte": f"{_nom_lisible_appel(appel)} a échoué"}
                     yield {
                         "type": "outil_resultat",
                         "nom_outil": appel["name"],
-                        "nom_lisible": _nom_lisible(appel["name"]),
+                        "nom_lisible": _nom_lisible_appel(appel),
                         "resultat": resultat,
                     }
                     messages_agent.append({
@@ -2311,14 +2339,14 @@ def _traiter_appels(appels, messages_agent, table_routage, compteur_sources=None
                         "content": resultat,
                     })
                     continue
-                yield {"type": "statut_termine", "texte": f"{_nom_lisible(appel['name'])} effectuée"}
+                yield {"type": "statut_termine", "texte": f"{_nom_lisible_appel(appel)} effectuée"}
                 # Généralisé (26/07, demande Bourama) : pour N'IMPORTE QUEL
                 # outil, présent ou futur -- pas de liste à maintenir, voir
                 # docstring de _resultat_pour_affichage.
                 yield {
                     "type": "outil_resultat",
                     "nom_outil": appel["name"],
-                    "nom_lisible": _nom_lisible(appel["name"]),
+                    "nom_lisible": _nom_lisible_appel(appel),
                     "resultat": _resultat_pour_affichage(resultat),
                 }
                 # Garanti indépendamment de ce que le modèle écrira ensuite
@@ -2391,13 +2419,13 @@ def _evenement_confirmation(attente, messages_agent, outils_mcp, table_routage, 
     return {
         "type": "confirmation_requise",
         "nom_outil": appel["name"],
-        "nom_lisible": _nom_lisible(appel["name"]),
+        "nom_lisible": _nom_lisible_appel(appel),
         # Message centré sur l'AGENT (2026-07-23) : "Nucleos va faire X",
         # pas une description technique de l'outil -- valable pour
         # n'importe quelle action sensible, pas seulement GitHub. Le
         # frontend peut afficher ce message directement, ou continuer à
         # composer le sien à partir de nom_lisible s'il préfère.
-        "message": f"{agent_nom or 'Cet agent'} veut faire ceci : {_nom_lisible(appel['name'])}.",
+        "message": f"{agent_nom or 'Cet agent'} veut faire ceci : {_nom_lisible_appel(appel)}.",
         "agent_nom": agent_nom,
         "arguments": arguments_dict,
         "etat_reprise": {
@@ -2918,7 +2946,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         client_groq = Groq(api_key=get_secret("GROQ_API_KEY"), max_retries=0)
 
         if approuve:
-            yield {"type": "statut", "texte": f"{_nom_lisible(appel['name'])}..."}
+            yield {"type": "statut", "texte": f"{_nom_lisible_appel(appel)}..."}
             try:
                 arguments = json.loads(appel["arguments"] or "{}")
             except Exception:
@@ -2934,12 +2962,12 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 resultat = appeler_outil(appel["name"], arguments, table_routage)
             except Exception as e:
                 logging.error(f"ERREUR OUTIL APPROUVÉ ({appel['name']}) : {e}")
-                resultat = f"Erreur : {_nom_lisible(appel['name'])} a échoué ({e})."
-                yield {"type": "statut_termine", "texte": f"{_nom_lisible(appel['name'])} a échoué"}
+                resultat = f"Erreur : {_nom_lisible_appel(appel)} a échoué ({e})."
+                yield {"type": "statut_termine", "texte": f"{_nom_lisible_appel(appel)} a échoué"}
                 yield {
                     "type": "outil_resultat",
                     "nom_outil": appel["name"],
-                    "nom_lisible": _nom_lisible(appel["name"]),
+                    "nom_lisible": _nom_lisible_appel(appel),
                     "resultat": resultat,
                 }
                 messages_agent.append({
@@ -2949,16 +2977,16 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 })
                 deja_ajoute_a_messages_agent = True
             if not deja_ajoute_a_messages_agent:
-                yield {"type": "statut_termine", "texte": f"{_nom_lisible(appel['name'])} effectuée"}
+                yield {"type": "statut_termine", "texte": f"{_nom_lisible_appel(appel)} effectuée"}
                 yield {
                     "type": "outil_resultat",
                     "nom_outil": appel["name"],
-                    "nom_lisible": _nom_lisible(appel["name"]),
+                    "nom_lisible": _nom_lisible_appel(appel),
                     "resultat": _resultat_pour_affichage(resultat),
                 }
         else:
             resultat = "Action annulée par l'utilisateur : cet outil n'a pas été exécuté."
-            yield {"type": "statut_termine", "texte": f"{_nom_lisible(appel['name'])} annulée"}
+            yield {"type": "statut_termine", "texte": f"{_nom_lisible_appel(appel)} annulée"}
             deja_ajoute_a_messages_agent = False
 
         if not deja_ajoute_a_messages_agent:

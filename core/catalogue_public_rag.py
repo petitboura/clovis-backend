@@ -147,6 +147,48 @@ def lire_document_catalogue_public(fichier_id: str) -> str | None:
     return "\n\n".join(ligne["contenu"] for ligne in res.data)
 
 
+def lister_catalogue_public(limite: int = 15) -> dict:
+    """
+    Liste les documents les PLUS RÉCENTS du catalogue public (table
+    bibliotheque_publique, statut "publie"), sans recherche par contenu
+    -- pour une demande vague ("qu'est-ce qu'il y a dans la bibliothèque
+    publique ?") où chercher_catalogue_public (recherche sémantique) ne
+    renvoie rien faute de sujet précis à matcher (28/08, bug remonté par
+    Bourama : le modèle inventait une requête générique du style
+    "contenu bibliothèque publique", qui ne matchait jamais rien).
+
+    Contrairement à l'action "lister" de gerer_document_bibliotheque
+    (bibliothèque PERSONNELLE, forcément bornée à un seul utilisateur),
+    N'IMPORTE QUI peut ajouter un document au catalogue public : jamais
+    de liste exhaustive ici (demande explicite de Bourama : "on sait
+    jamais il peut y avoir énormément"), toujours plafonnée à `limite`
+    entrées, les plus récentes en premier. Renvoie aussi le compte total
+    réel (`total`), pour que l'appelant puisse dire "sur X au total" si
+    `total` dépasse `limite`.
+    """
+    try:
+        comptage = (
+            supabase.table("bibliotheque_publique")
+            .select("id", count="exact")
+            .eq("statut", "publie")
+            .execute()
+        )
+        total = comptage.count if comptage.count is not None else len(comptage.data or [])
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (comptage catalogue public) : {e}")
+        total = None
+
+    res = (
+        supabase.table("bibliotheque_publique")
+        .select("id, nom, description, url_publique")
+        .eq("statut", "publie")
+        .order("created_at", desc=True)
+        .limit(limite)
+        .execute()
+    )
+    return {"documents": res.data or [], "total": total}
+
+
 def chercher_catalogue_public(question: str, match_count: int = 5) -> list:
     """
     Recherche sémantique dans TOUT le catalogue public (pas de filtre

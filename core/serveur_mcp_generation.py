@@ -123,6 +123,7 @@ from core.bibliotheque_rag import (
 from core.catalogue_public_rag import (
     chercher_catalogue_public as _chercher_catalogue_public,
     lire_document_catalogue_public as _lire_document_catalogue_public,
+    lister_catalogue_public as _lister_catalogue_public,
 )
 from core.bibliotheque_programme import (
     classer_document as _classer_document,
@@ -423,6 +424,16 @@ def gerer_document_bibliotheque(
       l'utilisateur demande explicitement à voir/lire ce document en
       entier -- jamais automatiquement après un "trouver_catalogue_
       public". Paramètre : `fichier_id`.
+    - "lister_catalogue_public" : liste les documents les plus RÉCENTS
+      du catalogue public, SANS recherche par contenu -- à utiliser pour
+      une demande vague ("qu'est-ce qu'il y a dans la bibliothèque
+      publique ?", "montre-moi le catalogue public") où
+      "trouver_catalogue_public" ne renverrait rien faute de sujet
+      précis à chercher. N'IMPORTE QUI peut ajouter un document au
+      catalogue public : cette action n'est JAMAIS exhaustive, toujours
+      plafonnée aux entrées les plus récentes -- si l'utilisateur
+      cherche quelque chose de précis, utilise "trouver_catalogue_public"
+      à la place. Aucun paramètre.
     - "lister" : liste les documents/liens/notes de la bibliothèque
       personnelle, sans recherche par contenu. Aucun paramètre.
     - "ajouter_lien" : ajoute un lien. Paramètres : `url`, `titre`.
@@ -546,6 +557,29 @@ def gerer_document_bibliotheque(
         if texte is None:
             return "Rien à lire pour ce document : soit il n'existe pas, soit son contenu n'a pas pu être vectorisé (vidéo, ou lien externe)."
         return texte
+
+    if action == "lister_catalogue_public":
+        try:
+            resultat = _lister_catalogue_public()
+        except Exception as e:
+            logging.error(f"ERREUR gerer_document_bibliotheque (lister_catalogue_public) : {e}")
+            return "Erreur : impossible de lister le catalogue public, réessaie."
+        documents = resultat["documents"]
+        total = resultat["total"]
+        if not documents:
+            return "Le catalogue public est vide pour l'instant."
+        lignes = []
+        for r in documents:
+            ligne = f"- {r['nom']}"
+            if r.get("description"):
+                ligne += f" — {r['description']}"
+            if r.get("url_publique"):
+                ligne += f" ({r['url_publique']})"
+            lignes.append(ligne)
+        entete = f"{len(documents)} document(s) les plus récents du catalogue public"
+        if total is not None and total > len(documents):
+            entete += f" (sur {total} au total -- précise ta recherche pour affiner)"
+        return entete + " :\n" + "\n".join(lignes)
 
     if action == "lister":
         try:
@@ -793,8 +827,9 @@ def gerer_document_bibliotheque(
 
     return (
         f"Erreur : action '{action}' inconnue. Actions valides : chercher, chercher_publique, "
-        "trouver_catalogue_public, lire_catalogue_public, lister, ajouter_lien, ajouter_texte, "
-        "ajouter_fichier, supprimer, classer, declasser, ranger_dossier, retirer_dossier, lire_entier."
+        "trouver_catalogue_public, lire_catalogue_public, lister_catalogue_public, lister, "
+        "ajouter_lien, ajouter_texte, ajouter_fichier, supprimer, classer, declasser, "
+        "ranger_dossier, retirer_dossier, lire_entier."
     )
 
 
