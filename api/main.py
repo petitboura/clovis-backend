@@ -433,6 +433,36 @@ def health():
     return {"status": "ok"}
 
 
+class _DebugCitationPayload(BaseModel):
+    numero: int
+    nb_sources_disponibles: int
+    titres_sources_disponibles: list
+    href: str
+    enfants: str
+
+
+@app.post("/api/debug/citation")
+def debug_citation(payload: _DebugCitationPayload):
+    """
+    TEMPORAIRE (29/08/2026, diagnostic demande par Bourama) -- appelee par
+    BulleMessage.tsx uniquement quand une citation [n](citation:n) echoue a
+    se resoudre cote frontend, pour voir dans les logs Railway l'etat exact
+    de sourcesAplaties a cet instant precis, sans depit de la console du
+    navigateur. A SUPPRIMER (cette route + son appel cote frontend) une
+    fois la cause trouvee.
+    """
+    logging.warning(
+        "DEBUG_CITATION echec resolution : numero=%s href=%r enfants=%r "
+        "nb_sources_disponibles=%s titres_disponibles=%r",
+        payload.numero,
+        payload.href,
+        payload.enfants,
+        payload.nb_sources_disponibles,
+        payload.titres_sources_disponibles,
+    )
+    return {"status": "ok"}
+
+
 @app.get("/health/me")
 def health_me(utilisateur=Depends(utilisateur_courant)):
     """
