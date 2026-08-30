@@ -1478,9 +1478,12 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         "connaissance générale, \"c'est quoi dans MON cours sur la "
         "mitose ?\" = monde 1) -- le mot \"mon\"/\"ma\" ou une référence "
         "implicite à un cours déjà uploadé est le signal, pas le sujet "
-        "lui-même. Ne suggère JAMAIS deux mondes de documents à la fois "
-        "sauf si la question mélange explicitement deux intentions "
-        "distinctes (rare).\n\n"
+        "lui-même.\n\n"
+        "SI TU HÉSITES entre plusieurs mondes, élargis au lieu de "
+        "choisir au hasard : hésitation entre perso et publique -> "
+        "suggère les 2 ; hésitation plus large (type \"cherche-moi...\") "
+        "-> suggère perso + publique + web ; hésitation totale -> "
+        "suggère les 4 (perso, publique, web, base de connaissance).\n\n"
         # AJOUT 2026-08-22 (demande Bourama : "les skills ont été
         # corrigés visuellement, mais intérieurement non, il faut que
         # le LLM soit au courant") : lister_comportements/
@@ -1621,7 +1624,8 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
             "tes limitations par défaut, donc ne refuse pas une tâche qu'ils permettent. Appelle-les "
             "uniquement via le vrai mécanisme d'appel d'outil de l'API ; le texte de ta réponse ne doit "
             "jamais contenir de pseudo-syntaxe d'appel (TOOL_CODE, nom_outil(...), nom_outil{...}, "
-            "call:nom_outil{...}).\n"
+            "call:nom_outil{...}). Si plusieurs de ces outils couvrent bibliothèque perso, publique et web, "
+            "priorité : perso, puis publique, puis web.\n"
             "</outils_actifs>"
         )
     else:
