@@ -48,6 +48,7 @@ from api.contenu_legal import router as contenu_legal_router
 from api.codes_partage import router_mes_codes, router_rattachements
 from api.outils_registre import router as outils_registre_router
 from api.appareils_mobiles import router as appareils_mobiles_router
+from api.canal_temps_reel import router as canal_temps_reel_router
 from core.serveur_mcp_generation import mcp_generation
 from core.notifications_push import traiter_rappels_echus, un_canal_push_disponible
 from core.proactivite import verifier_relances_proactives
@@ -425,6 +426,7 @@ app.include_router(router_mes_codes)
 app.include_router(router_rattachements)
 app.include_router(outils_registre_router)
 app.include_router(appareils_mobiles_router)
+app.include_router(canal_temps_reel_router)
 
 
 @app.get("/health")
