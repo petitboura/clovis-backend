@@ -276,6 +276,25 @@ def statut_notion(utilisateur=Depends(utilisateur_courant)):
     return {"connecte": notion_est_connecte(utilisateur.id)}
 
 
+# Ajoute le 30/08/2026, Bourama : la reponse brute de l'API Notion ne donne
+# jamais le titre directement au meme endroit -- pour une "database", il est
+# dans le champ "title" a la racine ; pour une "page", il faut trouver, parmi
+# ses "properties", celle dont le type vaut "title" (son nom varie, ce n'est
+# pas toujours "Name"), chacune etant une liste de blocs de texte enrichi a
+# concatener. Sans ca l'etudiant ne voyait qu'un identifiant technique brut.
+def _titre_resultat_notion(resultat: dict) -> str | None:
+    if resultat.get("object") == "database":
+        blocs = resultat.get("title", [])
+    else:
+        blocs = []
+        for propriete in (resultat.get("properties") or {}).values():
+            if propriete.get("type") == "title":
+                blocs = propriete.get("title", [])
+                break
+    texte = "".join(bloc.get("plain_text", "") for bloc in blocs).strip()
+    return texte or None
+
+
 @router.get("/connecteurs/notion/rechercher")
 def rechercher_notion(q: str = "", utilisateur=Depends(utilisateur_courant)):
     """
@@ -310,6 +329,7 @@ def rechercher_notion(q: str = "", utilisateur=Depends(utilisateur_courant)):
                 "id": r.get("id"),
                 "type": r.get("object"),
                 "url": r.get("url"),
+                "titre": _titre_resultat_notion(r),
             }
             for r in resultats
         ]
