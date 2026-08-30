@@ -57,7 +57,11 @@ from core.notifications_push import (
     un_canal_push_disponible,
 )
 from core.actions_appareil_mobile import creer_action as _creer_action_mobile
-from core.exploration_dossier_mobile import lister_contenu_dossier as _lister_contenu_dossier
+from core.exploration_dossier_mobile import (
+    chercher_par_nom as _chercher_par_nom,
+    lister_contenu_dossier as _lister_contenu_dossier,
+    ouvrir_sous_dossier as _ouvrir_sous_dossier,
+)
 from core.dossiers_designes_mobile import lire_dossiers_designes as _lire_dossiers_designes
 from api.roles import (
     resoudre_destinataire_autorise as _resoudre_destinataire_autorise,
@@ -1927,14 +1931,29 @@ def gerer_action_mobile(
 # de suite, dans le même tour de raisonnement, en interrogeant le
 # téléphone EN DIRECT via le canal temps réel (core/canal_temps_reel.py,
 # Lot 1) -- pas une lecture d'une table miroir en base comme
-# "lister_dossiers" ci-dessus. Une seule action à ce stade
-# ("lister_contenu") ; ouvrir un sous-dossier, lire un fichier et
-# chercher arriveront aux lots 3 à 5.
+# "lister_dossiers" ci-dessus.
+def _formatter_elements_dossier(elements: list) -> str:
+    lignes = []
+    for element in elements:
+        nom = element.get("nom")
+        chemin = element.get("chemin")
+        libelle = "/".join(chemin) if chemin else nom
+        if element.get("estDossier"):
+            lignes.append(f"- {libelle} (dossier)")
+        else:
+            taille = element.get("tailleOctets")
+            suffixe = f", {taille} octets" if taille is not None else ""
+            lignes.append(f"- {libelle} (fichier{suffixe})")
+    return "\n".join(lignes)
+
+
 @mcp_generation.tool()
 async def explorer_dossier(
     action: str,
     ctx: Context,
     dossier_nom: str = "",
+    chemin: list[str] = None,
+    terme_recherche: str = "",
 ) -> str:
     """
     Explore EN DIRECT le contenu d'un dossier désigné par l'étudiant sur
@@ -1943,28 +1962,53 @@ async def explorer_dossier(
     ouverte sur le téléphone au moment de l'appel, sinon échoue avec un
     message clair à relayer à l'étudiant.
 
-    `action` doit être :
+    `action` doit être l'une de :
     - "lister_contenu" : liste le contenu du dossier désigné
       `dossier_nom` à l'instant présent (noms, tailles, type
       fichier/dossier). `dossier_nom` DOIT être un nom renvoyé par
       l'action "lister_dossiers" de l'outil gerer_action_mobile --
       appelle-la avant si tu ne connais pas déjà la liste à jour, ne
       devine jamais un nom de dossier.
+    - "ouvrir_sous_dossier" : descend dans l'arborescence depuis
+      `dossier_nom` en suivant `chemin` (liste ordonnée de noms de
+      sous-dossiers vus dans un listing précédent, ex. ["Maths",
+      "Chapitre 3"]), et renvoie le contenu du sous-dossier atteint.
+      Utilise ceci pour continuer à descendre plutôt que de deviner un
+      chemin : chaque nom de `chemin` doit venir d'un listing déjà vu.
+    - "chercher_par_nom" : cherche `terme_recherche` (partiel, insensible
+      à la casse) dans toute l'arborescence sous `dossier_nom`, sans
+      avoir à lister niveau par niveau. Renvoie les éléments trouvés,
+      chacun avec son chemin depuis la racine désignée (réutilisable
+      ensuite avec "ouvrir_sous_dossier"). Si rien n'est trouvé, dis-le
+      directement à l'étudiant -- n'invente jamais un résultat et ne
+      propose pas de recherche par contenu, qui n'existe pas encore.
     """
     user_id = ctx.request_context.request.query_params.get("user_id")
     if not user_id:
         return "Erreur : impossible d'identifier l'utilisateur."
 
-    if action != "lister_contenu":
-        return f"Erreur : action '{action}' inconnue. Action valide : lister_contenu."
+    actions_valides = {"lister_contenu", "ouvrir_sous_dossier", "chercher_par_nom"}
+    if action not in actions_valides:
+        return f"Erreur : action '{action}' inconnue. Actions valides : {', '.join(sorted(actions_valides))}."
 
     if not dossier_nom:
         return "Erreur : paramètre 'dossier_nom' manquant."
 
+    if action == "ouvrir_sous_dossier" and not chemin:
+        return "Erreur : paramètre 'chemin' manquant pour l'action 'ouvrir_sous_dossier'."
+
+    if action == "chercher_par_nom" and not terme_recherche:
+        return "Erreur : paramètre 'terme_recherche' manquant pour l'action 'chercher_par_nom'."
+
     try:
-        resultat = await _lister_contenu_dossier(user_id, dossier_nom)
+        if action == "lister_contenu":
+            resultat = await _lister_contenu_dossier(user_id, dossier_nom)
+        elif action == "ouvrir_sous_dossier":
+            resultat = await _ouvrir_sous_dossier(user_id, dossier_nom, chemin)
+        else:
+            resultat = await _chercher_par_nom(user_id, dossier_nom, terme_recherche)
     except Exception as e:
-        logging.error(f"ERREUR explorer_dossier (lister_contenu, {dossier_nom}) : {e}")
+        logging.error(f"ERREUR explorer_dossier ({action}, {dossier_nom}) : {e}")
         return "Erreur : impossible d'explorer ce dossier, réessaie."
 
     if resultat is None:
@@ -1979,15 +2023,8 @@ async def explorer_dossier(
 
     elements = resultat.get("elements") or []
     if not elements:
+        if action == "chercher_par_nom":
+            return f'Aucun élément trouvé pour "{terme_recherche}" dans "{dossier_nom}".'
         return f'Le dossier "{dossier_nom}" est vide.'
 
-    lignes = []
-    for element in elements:
-        nom = element.get("nom")
-        if element.get("estDossier"):
-            lignes.append(f"- {nom} (dossier)")
-        else:
-            taille = element.get("tailleOctets")
-            suffixe = f", {taille} octets" if taille is not None else ""
-            lignes.append(f"- {nom} (fichier{suffixe})")
-    return "\n".join(lignes)
+    return _formatter_elements_dossier(elements)
