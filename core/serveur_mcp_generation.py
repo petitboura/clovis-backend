@@ -406,6 +406,10 @@ def gerer_document_bibliotheque(
     pattern "action + paramètres" -- réduit le catalogue envoyé au
     routeur/modèle et limite les confusions de noms d'outils proches).
 
+    Quand tu affiches le lien d'un document (n'importe quelle action
+    ci-dessous), le texte entre crochets DOIT être le vrai nom du
+    fichier, jamais l'URL elle-même.
+
     `action` doit être l'une de :
     - "chercher" : cherche par contenu dans la bibliothèque PERSONNELLE.
       Paramètre : `question`.

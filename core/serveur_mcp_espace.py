@@ -221,8 +221,10 @@ def consulter_bibliotheque(question: str, ctx: Context) -> str:
     trouvés, chacun accompagné du nom et du lien de son document
     d'origine -- si tu juges utile de montrer un document en entier
     plutôt que de le résumer, inclus son lien dans ta réponse
-    (![...](url) pour une image, [...](url) pour les autres types).
-    Renvoie un message si rien de pertinent n'a été trouvé.
+    (![nom du fichier](url) pour une image, [nom du fichier](url) pour
+    les autres types) -- le texte entre crochets DOIT être le vrai nom
+    du fichier, jamais l'URL elle-même. Renvoie un message si rien de
+    pertinent n'a été trouvé.
     """
     user_id = _user_id_authentifie(ctx)
     if not user_id:
