@@ -62,6 +62,7 @@ from core.exploration_dossier_mobile import (
     lister_contenu_dossier as _lister_contenu_dossier,
     ouvrir_sous_dossier as _ouvrir_sous_dossier,
     lire_fichier as _lire_fichier,
+    chercher_par_contenu as _chercher_par_contenu,
 )
 from core.lecture_fichier_mobile import (
     lire_contenu_fichier as _lire_contenu_fichier,
@@ -1943,7 +1944,12 @@ def _formatter_elements_dossier(elements: list) -> str:
         nom = element.get("nom")
         chemin = element.get("chemin")
         libelle = "/".join(chemin) if chemin else nom
-        if element.get("estDossier"):
+        extrait = element.get("extrait")
+        if extrait:
+            # Resultat de chercher_par_contenu (Lot 5) : pas de notion de
+            # dossier/fichier ici, seulement un extrait du contenu trouve.
+            lignes.append(f"- {libelle} : \"...{extrait}...\"")
+        elif element.get("estDossier"):
             lignes.append(f"- {libelle} (dossier)")
         else:
             taille = element.get("tailleOctets")
@@ -1984,9 +1990,11 @@ async def explorer_dossier(
       à la casse) dans toute l'arborescence sous `dossier_nom`, sans
       avoir à lister niveau par niveau. Renvoie les éléments trouvés,
       chacun avec son chemin depuis la racine désignée (réutilisable
-      ensuite avec "ouvrir_sous_dossier"). Si rien n'est trouvé, dis-le
-      directement à l'étudiant -- n'invente jamais un résultat et ne
-      propose pas de recherche par contenu, qui n'existe pas encore.
+      ensuite avec "ouvrir_sous_dossier"). Si rien n'est trouvé et que la
+      demande de l'étudiant porte sur un contenu ("le cours où on parle
+      de...") plutôt que sur un nom précis, enchaîne avec
+      "chercher_par_contenu" plutôt que de conclure trop vite qu'il
+      n'existe pas.
     - "lire_fichier" : lit vraiment le contenu d'un fichier déjà repéré
       via un listing ou une recherche précédente. `chemin` DOIT être le
       chemin exact vu dans ce listing/cette recherche (dernier élément =
@@ -1996,12 +2004,27 @@ async def explorer_dossier(
       transcription d'un audio). Si le fichier est trop volumineux,
       dis clairement à l'étudiant que ce n'est pas encore possible mais
       que ça arrivera plus tard, n'essaie pas de contourner.
+    - "chercher_par_contenu" : cherche `terme_recherche` dans le CONTENU
+      des fichiers sous `dossier_nom` (pas dans leur nom, utilise
+      "chercher_par_nom" pour ça), en lisant chaque fichier un par un.
+      Utilise cette action quand l'étudiant décrit ce qu'il cherche sans
+      en connaître le nom exact ("le cours où on parle des dérivées"),
+      ou juste après un "chercher_par_nom" resté sans résultat si ça
+      semble pertinent. Peut prendre plus de temps qu'une recherche par
+      nom si le dossier contient beaucoup de fichiers, c'est normal.
+      Renvoie les fichiers correspondants avec un court extrait de leur
+      contenu autour de la correspondance trouvée, réutilisable ensuite
+      avec "lire_fichier" (même convention de chemin) pour lire le
+      fichier en entier si besoin.
     """
     user_id = ctx.request_context.request.query_params.get("user_id")
     if not user_id:
         return "Erreur : impossible d'identifier l'utilisateur."
 
-    actions_valides = {"lister_contenu", "ouvrir_sous_dossier", "chercher_par_nom", "lire_fichier"}
+    actions_valides = {
+        "lister_contenu", "ouvrir_sous_dossier", "chercher_par_nom",
+        "lire_fichier", "chercher_par_contenu",
+    }
     if action not in actions_valides:
         return f"Erreur : action '{action}' inconnue. Actions valides : {', '.join(sorted(actions_valides))}."
 
@@ -2011,8 +2034,8 @@ async def explorer_dossier(
     if action == "ouvrir_sous_dossier" and not chemin:
         return "Erreur : paramètre 'chemin' manquant pour l'action 'ouvrir_sous_dossier'."
 
-    if action == "chercher_par_nom" and not terme_recherche:
-        return "Erreur : paramètre 'terme_recherche' manquant pour l'action 'chercher_par_nom'."
+    if action in ("chercher_par_nom", "chercher_par_contenu") and not terme_recherche:
+        return f"Erreur : paramètre 'terme_recherche' manquant pour l'action '{action}'."
 
     if action == "lire_fichier" and not chemin:
         return "Erreur : paramètre 'chemin' manquant pour l'action 'lire_fichier'."
@@ -2024,17 +2047,23 @@ async def explorer_dossier(
             resultat = await _ouvrir_sous_dossier(user_id, dossier_nom, chemin)
         elif action == "chercher_par_nom":
             resultat = await _chercher_par_nom(user_id, dossier_nom, terme_recherche)
+        elif action == "chercher_par_contenu":
+            resultat = await _chercher_par_contenu(user_id, dossier_nom, terme_recherche)
         else:
             resultat = await _lire_fichier(user_id, dossier_nom, chemin)
     except Exception as e:
         logging.error(f"ERREUR explorer_dossier ({action}, {dossier_nom}) : {e}")
         return "Erreur : impossible d'explorer ce dossier, réessaie."
 
+    # Message unifié pour TOUTES les actions ci-dessus quand l'app n'est
+    # pas ouverte (validé avec Bourama le 30/08/2026, voir
+    # 05-recherche-contenu-app-fermee.md) : toujours la même phrase à
+    # relayer à l'étudiant, jamais une erreur technique brute.
     if resultat is None:
         return (
-            "Impossible de regarder dans ce dossier : l'app Clovis n'est pas "
-            "ouverte sur le téléphone de l'étudiant en ce moment. Dis-lui "
-            "d'ouvrir l'app pour que je puisse regarder."
+            "L'app Clovis n'est pas ouverte sur le téléphone de l'étudiant "
+            "en ce moment : dis-lui exactement ceci : \"Ouvre l'app pour "
+            "que je regarde.\""
         )
 
     if "erreur" in resultat:
@@ -2067,7 +2096,14 @@ async def explorer_dossier(
     elements = resultat.get("elements") or []
     if not elements:
         if action == "chercher_par_nom":
-            return f'Aucun élément trouvé pour "{terme_recherche}" dans "{dossier_nom}".'
+            return (
+                f'Aucun élément trouvé pour "{terme_recherche}" dans '
+                f'"{dossier_nom}" par le nom. Tu peux enchaîner avec '
+                '"chercher_par_contenu" si la demande de l\'étudiant porte '
+                "sur un contenu plutôt que sur un nom précis."
+            )
+        if action == "chercher_par_contenu":
+            return f'Aucun fichier dont le contenu correspond à "{terme_recherche}" dans "{dossier_nom}".'
         return f'Le dossier "{dossier_nom}" est vide.'
 
     return _formatter_elements_dossier(elements)
