@@ -61,6 +61,11 @@ from core.exploration_dossier_mobile import (
     chercher_par_nom as _chercher_par_nom,
     lister_contenu_dossier as _lister_contenu_dossier,
     ouvrir_sous_dossier as _ouvrir_sous_dossier,
+    lire_fichier as _lire_fichier,
+)
+from core.lecture_fichier_mobile import (
+    lire_contenu_fichier as _lire_contenu_fichier,
+    fichier_trop_volumineux as _fichier_trop_volumineux,
 )
 from core.dossiers_designes_mobile import lire_dossiers_designes as _lire_dossiers_designes
 from api.roles import (
@@ -1982,12 +1987,21 @@ async def explorer_dossier(
       ensuite avec "ouvrir_sous_dossier"). Si rien n'est trouvé, dis-le
       directement à l'étudiant -- n'invente jamais un résultat et ne
       propose pas de recherche par contenu, qui n'existe pas encore.
+    - "lire_fichier" : lit vraiment le contenu d'un fichier déjà repéré
+      via un listing ou une recherche précédente. `chemin` DOIT être le
+      chemin exact vu dans ce listing/cette recherche (dernier élément =
+      nom du fichier), ne devine jamais un chemin. Renvoie un texte
+      exploitable quel que soit le type de fichier (texte brut lu tel
+      quel, texte extrait d'un PDF/Word/Excel, description d'une image,
+      transcription d'un audio). Si le fichier est trop volumineux,
+      dis clairement à l'étudiant que ce n'est pas encore possible mais
+      que ça arrivera plus tard, n'essaie pas de contourner.
     """
     user_id = ctx.request_context.request.query_params.get("user_id")
     if not user_id:
         return "Erreur : impossible d'identifier l'utilisateur."
 
-    actions_valides = {"lister_contenu", "ouvrir_sous_dossier", "chercher_par_nom"}
+    actions_valides = {"lister_contenu", "ouvrir_sous_dossier", "chercher_par_nom", "lire_fichier"}
     if action not in actions_valides:
         return f"Erreur : action '{action}' inconnue. Actions valides : {', '.join(sorted(actions_valides))}."
 
@@ -2000,13 +2014,18 @@ async def explorer_dossier(
     if action == "chercher_par_nom" and not terme_recherche:
         return "Erreur : paramètre 'terme_recherche' manquant pour l'action 'chercher_par_nom'."
 
+    if action == "lire_fichier" and not chemin:
+        return "Erreur : paramètre 'chemin' manquant pour l'action 'lire_fichier'."
+
     try:
         if action == "lister_contenu":
             resultat = await _lister_contenu_dossier(user_id, dossier_nom)
         elif action == "ouvrir_sous_dossier":
             resultat = await _ouvrir_sous_dossier(user_id, dossier_nom, chemin)
-        else:
+        elif action == "chercher_par_nom":
             resultat = await _chercher_par_nom(user_id, dossier_nom, terme_recherche)
+        else:
+            resultat = await _lire_fichier(user_id, dossier_nom, chemin)
     except Exception as e:
         logging.error(f"ERREUR explorer_dossier ({action}, {dossier_nom}) : {e}")
         return "Erreur : impossible d'explorer ce dossier, réessaie."
@@ -2020,6 +2039,30 @@ async def explorer_dossier(
 
     if "erreur" in resultat:
         return f"Erreur : {resultat['erreur']}"
+
+    if action == "lire_fichier":
+        nom_fichier = resultat.get("nom_fichier") or chemin[-1]
+        type_mime = resultat.get("type_mime") or ""
+        taille_octets = resultat.get("tailleOctets")
+
+        # Point tranché avec Bourama le 30/08/2026 (voir
+        # 04-lecture-contenu.md) : pas de lecture pour un fichier trop
+        # volumineux pour l'instant, capacité prévue plus tard.
+        if _fichier_trop_volumineux(type_mime, taille_octets):
+            return (
+                f'Le fichier "{nom_fichier}" est trop volumineux pour que je '
+                "puisse le lire pour l'instant. Cette capacité arrivera plus "
+                "tard."
+            )
+
+        contenu_base64 = resultat.get("contenu_base64")
+        if not contenu_base64:
+            return f'Erreur : contenu de "{nom_fichier}" introuvable dans la réponse du téléphone.'
+
+        lecture = _lire_contenu_fichier(contenu_base64, type_mime, nom_fichier)
+        if "erreur" in lecture:
+            return f'Erreur de lecture de "{nom_fichier}" : {lecture["erreur"]}'
+        return f'Contenu de "{nom_fichier}" :\n\n{lecture["texte"]}'
 
     elements = resultat.get("elements") or []
     if not elements:

@@ -87,3 +87,33 @@ async def chercher_par_nom(
         {"action": "chercher_par_nom", "dossier_nom": dossier_nom, "terme_recherche": terme_recherche},
         on_statut=on_statut,
     )
+
+
+async def lire_fichier(
+    user_id: str, dossier_nom: str, chemin: list[str], on_statut=None
+) -> dict[str, Any] | None:
+    """
+    Cree le 30/08/2026, Bourama : Lot 4 (voir 04-lecture-contenu.md).
+
+    Demande en direct au telephone le contenu brut du fichier situe a
+    `chemin` depuis la racine designee `dossier_nom` (liste de noms,
+    DERNIER element = nom du fichier, meme convention que le "chemin"
+    deja renvoye par chercher_par_nom pour un element trouve). Le
+    traitement du contenu recu selon le type de fichier vit dans
+    core/lecture_fichier_mobile.py, pas ici : ce module ne fait que
+    demander et transmettre, comme les autres fonctions ci-dessus.
+
+    Renvoie :
+    - None si l'app n'est pas ouverte sur le telephone ;
+    - {"contenu_base64": ..., "type_mime": ..., "nom_fichier": ...,
+      "tailleOctets": int|None} si la demande a abouti (le telephone a
+      trouve et lu le fichier) ;
+    - {"erreur": "..."} si l'app a repondu mais n'a pas trouve ce
+      fichier a ce chemin (chemin errone, fichier deplace/supprime
+      entre-temps).
+    """
+    return await poser_question_appareil(
+        user_id,
+        {"action": "lire_fichier", "dossier_nom": dossier_nom, "chemin": chemin},
+        on_statut=on_statut,
+    )
