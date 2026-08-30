@@ -57,6 +57,7 @@ from core.notifications_push import (
     un_canal_push_disponible,
 )
 from core.actions_appareil_mobile import creer_action as _creer_action_mobile
+from core.exploration_dossier_mobile import lister_contenu_dossier as _lister_contenu_dossier
 from core.dossiers_designes_mobile import lire_dossiers_designes as _lire_dossiers_designes
 from api.roles import (
     resoudre_destinataire_autorise as _resoudre_destinataire_autorise,
@@ -1917,3 +1918,76 @@ def gerer_action_mobile(
         f"Erreur : action '{action}' inconnue. Actions valides : lister_dossiers, "
         "executer."
     )
+
+
+# Ajouté le 30/08/2026, Bourama : Lot 2, chantier "Exploration de dossier
+# en temps réel" (voir 00-commun-exploration-dossier.md et
+# 02-outil-exploration.md). Outil SÉPARÉ de gerer_action_mobile ci-dessus
+# (celui-ci reste dédié au fire-and-forget) : ici la réponse arrive tout
+# de suite, dans le même tour de raisonnement, en interrogeant le
+# téléphone EN DIRECT via le canal temps réel (core/canal_temps_reel.py,
+# Lot 1) -- pas une lecture d'une table miroir en base comme
+# "lister_dossiers" ci-dessus. Une seule action à ce stade
+# ("lister_contenu") ; ouvrir un sous-dossier, lire un fichier et
+# chercher arriveront aux lots 3 à 5.
+@mcp_generation.tool()
+async def explorer_dossier(
+    action: str,
+    ctx: Context,
+    dossier_nom: str = "",
+) -> str:
+    """
+    Explore EN DIRECT le contenu d'un dossier désigné par l'étudiant sur
+    son téléphone (contrairement à gerer_action_mobile, qui est
+    asynchrone et fire-and-forget). NÉCESSITE que l'app Clovis soit
+    ouverte sur le téléphone au moment de l'appel, sinon échoue avec un
+    message clair à relayer à l'étudiant.
+
+    `action` doit être :
+    - "lister_contenu" : liste le contenu du dossier désigné
+      `dossier_nom` à l'instant présent (noms, tailles, type
+      fichier/dossier). `dossier_nom` DOIT être un nom renvoyé par
+      l'action "lister_dossiers" de l'outil gerer_action_mobile --
+      appelle-la avant si tu ne connais pas déjà la liste à jour, ne
+      devine jamais un nom de dossier.
+    """
+    user_id = ctx.request_context.request.query_params.get("user_id")
+    if not user_id:
+        return "Erreur : impossible d'identifier l'utilisateur."
+
+    if action != "lister_contenu":
+        return f"Erreur : action '{action}' inconnue. Action valide : lister_contenu."
+
+    if not dossier_nom:
+        return "Erreur : paramètre 'dossier_nom' manquant."
+
+    try:
+        resultat = await _lister_contenu_dossier(user_id, dossier_nom)
+    except Exception as e:
+        logging.error(f"ERREUR explorer_dossier (lister_contenu, {dossier_nom}) : {e}")
+        return "Erreur : impossible d'explorer ce dossier, réessaie."
+
+    if resultat is None:
+        return (
+            "Impossible de regarder dans ce dossier : l'app Clovis n'est pas "
+            "ouverte sur le téléphone de l'étudiant en ce moment. Dis-lui "
+            "d'ouvrir l'app pour que je puisse regarder."
+        )
+
+    if "erreur" in resultat:
+        return f"Erreur : {resultat['erreur']}"
+
+    elements = resultat.get("elements") or []
+    if not elements:
+        return f'Le dossier "{dossier_nom}" est vide.'
+
+    lignes = []
+    for element in elements:
+        nom = element.get("nom")
+        if element.get("estDossier"):
+            lignes.append(f"- {nom} (dossier)")
+        else:
+            taille = element.get("tailleOctets")
+            suffixe = f", {taille} octets" if taille is not None else ""
+            lignes.append(f"- {nom} (fichier{suffixe})")
+    return "\n".join(lignes)

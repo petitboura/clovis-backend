@@ -21,6 +21,7 @@ docstring plus bas).
 import asyncio
 import logging
 import uuid
+from typing import Any
 
 from fastapi import WebSocket
 
@@ -33,7 +34,7 @@ _verrou_connexions = asyncio.Lock()
 # Requetes en attente de reponse, indexees par identifiant de correlation
 # -- permet de ne jamais melanger deux echanges si plusieurs surviennent
 # a la suite pour le meme utilisateur.
-_attentes: dict[str, "asyncio.Future[str]"] = {}
+_attentes: dict[str, "asyncio.Future[Any]"] = {}
 
 # Timeouts decides avec Bourama le 29/08/2026 (voir 01-canal-temps-reel.md) :
 # 30 secondes au total avant abandon, avec deux points d'etape
@@ -79,7 +80,7 @@ async def deconnecter(user_id: str, websocket: WebSocket) -> None:
             del _connexions[user_id]
 
 
-def recevoir_reponse(correlation_id: str, reponse: str) -> None:
+def recevoir_reponse(correlation_id: str, reponse: Any) -> None:
     """
     Appelee par la route WebSocket a chaque message recu du telephone.
     Resout la Future en attente correspondante si elle existe encore
@@ -102,15 +103,21 @@ async def _appeler_statut(on_statut, texte: str) -> None:
         logging.error(f"ERREUR callback statut canal temps reel : {e}")
 
 
-async def poser_question_appareil(user_id: str, contenu: str, on_statut=None) -> str | None:
+async def poser_question_appareil(user_id: str, contenu: Any, on_statut=None) -> Any | None:
     """
     Fonction centrale du canal temps reel (voir 01-canal-temps-reel.md).
 
     Pose `contenu` comme question au telephone de `user_id` et attend la
-    reponse. Renvoie :
+    reponse. `contenu` est un texte simple pour un test basique (Lot 1),
+    ou un objet JSON structure (ex: {"action": "lister_contenu",
+    "dossier_nom": ...}) pour les capacites d'exploration reelles (Lot 2
+    et suivants, voir core/exploration_dossier_mobile.py) -- transmis tel
+    quel au telephone via le champ "question" du message WebSocket.
+    Renvoie :
     - None IMMEDIATEMENT si aucune connexion active pour cet utilisateur
       (app fermee) -- jamais d'attente de 30 secondes inutile dans ce cas ;
-    - la reponse texte du telephone des qu'elle arrive ;
+    - la reponse du telephone des qu'elle arrive (meme forme que ce que
+      l'app a mis dans le champ "reponse" -- texte ou objet JSON) ;
     - None apres 30 secondes si la connexion existait mais n'a jamais
       repondu (coupure reseau en cours de route, app fermee entre-temps,
       etc).
@@ -130,7 +137,7 @@ async def poser_question_appareil(user_id: str, contenu: str, on_statut=None) ->
         return None
 
     correlation_id = str(uuid.uuid4())
-    future: "asyncio.Future[str]" = asyncio.get_event_loop().create_future()
+    future: "asyncio.Future[Any]" = asyncio.get_event_loop().create_future()
     _attentes[correlation_id] = future
 
     try:
