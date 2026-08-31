@@ -344,6 +344,14 @@ for _chemin_public in ("/mcp/public", "/mcp/espace"):
 # app.djiguigne.com) retirées puisque ce service ne les sert plus.
 ORIGINES_AUTORISEES = [
     "http://localhost:3000",
+    # App mobile Capacitor (Android/iOS) : la WebView sert le site depuis
+    # un serveur local interne au telephone, sous cette adresse fixe par
+    # defaut de Capacitor (voir clovis-frontend/capacitor.config.ts,
+    # androidScheme non redefini). Sans cette ligne, tout appel de l'app
+    # mobile vers ce backend (bibliotheque, comportements, chat...) est
+    # bloque par le navigateur avec "Failed to fetch", meme si la
+    # connexion Supabase (qui n'a pas cette restriction) fonctionne.
+    "https://localhost",
 ]
 
 # Vercel donne une URL DIFFERENTE a chaque deploiement de preview (en plus
