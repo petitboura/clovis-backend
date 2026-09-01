@@ -421,7 +421,7 @@ REGISTRE_AFFICHAGE_OUTILS = {
     # onglet=None, même logique que les blocs "Programme adaptatif"/
     # "Bibliothèque" plus haut : outils que le modèle appelle lui-même en
     # autonomie pendant la conversation, jamais des boutons cliqués.
-    "gerer_action_mobile": {"label": "Action sur ton téléphone", "icone": "Smartphone", "onglet": None},
+    "gerer_dossier_telephone": {"label": "Dossiers du téléphone", "icone": "FolderPen", "onglet": None},
     "explorer_dossier": {"label": "Exploration du dossier en direct", "icone": "FolderOpen", "onglet": None},
 }
 

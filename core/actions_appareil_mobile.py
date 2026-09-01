@@ -15,12 +15,15 @@ Cycle de vie d'une action :
 3. L'app execute, puis rapporte via POST /actions/{id}/resultat.
 4. marquer_resultat met a jour le statut ici.
 
-Branche le 26/08/2026 : l'outil agent executer_action_mobile (voir
-core/serveur_mcp_generation.py) appelle desormais creer_action() avec
-des types_action reels, "dossier_*" (voir
-core/dossiers_designes_mobile.py pour le miroir des noms de dossiers
-que l'agent peut cibler) et "accessibilite_*" (flavor Android externe
-uniquement, cliquer/saisir par texte cible). Liste exacte et forme des
+Branche le 26/08/2026 : l'outil agent gerer_dossier_telephone (voir
+core/serveur_mcp_generation.py, renomme le 01/09/2026, ex-
+gerer_action_mobile) appelle desormais creer_action() avec des
+types_action reels, "dossier_*" (voir core/dossiers_designes_mobile.py
+pour le miroir des noms de dossiers que l'agent peut cibler). Les types
+"accessibilite_*" (flavor Android externe uniquement, cliquer/saisir
+par texte cible) ont ete retires cote agent le 01/09/2026 (demande
+Bourama) -- le plugin/flavor mobile existe toujours, mais l'agent n'a
+plus aucun moyen de le declencher. Liste exacte et forme des
 `parametres` documentee dans le docstring de l'outil, seule source de
 verite a tenir a jour si de nouveaux types sont ajoutes.
 

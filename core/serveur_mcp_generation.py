@@ -1838,23 +1838,40 @@ TYPES_ACTION_MOBILE_VALIDES = {
     "dossier_renommer": {"dossier_nom", "element_nom", "nouveau_nom"},
     "dossier_supprimer": {"dossier_nom", "element_nom"},
     "dossier_deplacer": {"dossier_nom", "element_nom", "nouveau_dossier_nom"},
-    # Accessibilité (Lot 6/7), flavor Android "externe" UNIQUEMENT,
-    # échoue proprement sur flavor "play" et sur iOS (pas d'équivalent).
-    "accessibilite_cliquer": {"texte_cible"},
-    "accessibilite_saisir": {"texte_cible", "valeur"},
+    # Accessibilité (Lot 6/7) retirée le 01/09/2026 (demande Bourama) :
+    # l'agent ne peut plus déclencher accessibilite_cliquer/
+    # accessibilite_saisir. Le plugin/flavor "externe" reste inchangé côté
+    # app mobile (portée de la désactivation limitée à l'agent) -- ce
+    # n'est donc plus qu'une capacité dormante côté téléphone, sans aucun
+    # moyen de la déclencher tant qu'elle n'est pas réintroduite ici.
 }
 
 
 @mcp_generation.tool()
-def gerer_action_mobile(
+def gerer_dossier_telephone(
     action: str,
     ctx: Context,
     type_action: str = "",
     parametres: dict = None,
 ) -> str:
     """
-    Interagit avec l'app Clovis mobile de l'étudiant, consolidé le
-    26/08, un seul outil, deux actions.
+    Gère les DOSSIERS ET FICHIERS PHYSIQUES du téléphone de l'étudiant
+    (renommé le 01/09/2026, ex-gerer_action_mobile -- l'accessibilité a
+    été retirée de cet outil, il ne gère plus QUE les dossiers désignés
+    sur l'appareil). Un seul outil, deux actions.
+
+    NE PAS CONFONDRE avec :
+    - gerer_dossier_bibliotheque : gère les dossiers de la bibliothèque
+      PERSONNELLE de l'étudiant dans Clovis (organisation de SES
+      documents/liens/notes uploadés dans l'app) -- aucun rapport avec
+      son téléphone physique.
+    - gerer_document_bibliotheque : cherche/lit des documents, y compris
+      dans le catalogue PUBLIC partagé -- là non plus aucun rapport avec
+      le téléphone de l'étudiant.
+    - explorer_dossier : lecture EN DIRECT (app ouverte requise) du
+      contenu d'un dossier du téléphone -- utilise cet outil-ci
+      uniquement pour AGIR (créer/renommer/supprimer/déplacer), jamais
+      pour lire ou lister en détail.
 
     `action` doit être l'une de :
     - "lister_dossiers" : liste les noms des dossiers que l'étudiant a
@@ -1877,17 +1894,12 @@ def gerer_action_mobile(
       - "dossier_renommer" : {"dossier_nom", "element_nom", "nouveau_nom"}
       - "dossier_supprimer" : {"dossier_nom", "element_nom"}
       - "dossier_deplacer" : {"dossier_nom", "element_nom", "nouveau_dossier_nom"}
-      - "accessibilite_cliquer" : {"texte_cible"}
-      - "accessibilite_saisir" : {"texte_cible", "valeur"}
 
       Paramètre `parametres` : objet correspondant au `type_action`
-      choisi (voir ci-dessus). Pour un type "dossier_*", "dossier_nom"
-      (et "nouveau_dossier_nom" le cas échéant) DOIT être un nom renvoyé
-      par l'action "lister_dossiers", appelle-la avant si tu ne connais
-      pas déjà la liste à jour. Les actions "accessibilite_*" ne
-      fonctionnent que sur la version Android hors Play Store de
-      l'étudiant (elles échouent proprement sinon, avec un message clair
-      rapporté dans la conversation).
+      choisi (voir ci-dessus). "dossier_nom" (et "nouveau_dossier_nom"
+      le cas échéant) DOIT être un nom renvoyé par l'action
+      "lister_dossiers", appelle-la avant si tu ne connais pas déjà la
+      liste à jour.
     """
     user_id = ctx.request_context.request.query_params.get("user_id")
     if not user_id:
@@ -1897,7 +1909,7 @@ def gerer_action_mobile(
         try:
             dossiers = _lire_dossiers_designes(user_id)
         except Exception as e:
-            logging.error(f"ERREUR gerer_action_mobile (lister_dossiers) : {e}")
+            logging.error(f"ERREUR gerer_dossier_telephone (lister_dossiers) : {e}")
             return "Erreur : impossible de lister les dossiers désignés, réessaie."
         if not dossiers:
             return "Aucun dossier désigné sur le téléphone de l'étudiant pour l'instant."
@@ -1918,7 +1930,7 @@ def gerer_action_mobile(
         try:
             _creer_action_mobile(user_id, type_action, parametres)
         except Exception as e:
-            logging.error(f"ERREUR gerer_action_mobile (executer, {type_action}) : {e}")
+            logging.error(f"ERREUR gerer_dossier_telephone (executer, {type_action}) : {e}")
             return "Erreur : impossible de programmer cette action, réessaie."
 
         return (
@@ -1936,7 +1948,7 @@ def gerer_action_mobile(
 
 # Ajouté le 30/08/2026, Bourama : Lot 2, chantier "Exploration de dossier
 # en temps réel" (voir 00-commun-exploration-dossier.md et
-# 02-outil-exploration.md). Outil SÉPARÉ de gerer_action_mobile ci-dessus
+# 02-outil-exploration.md). Outil SÉPARÉ de gerer_dossier_telephone ci-dessus
 # (celui-ci reste dédié au fire-and-forget) : ici la réponse arrive tout
 # de suite, dans le même tour de raisonnement, en interrogeant le
 # téléphone EN DIRECT via le canal temps réel (core/canal_temps_reel.py,
@@ -1972,16 +1984,20 @@ async def explorer_dossier(
 ) -> str:
     """
     Explore EN DIRECT le contenu d'un dossier désigné par l'étudiant sur
-    son téléphone (contrairement à gerer_action_mobile, qui est
-    asynchrone et fire-and-forget). NÉCESSITE que l'app Clovis soit
-    ouverte sur le téléphone au moment de l'appel, sinon échoue avec un
-    message clair à relayer à l'étudiant.
+    son téléphone (contrairement à gerer_dossier_telephone, qui est
+    asynchrone et fire-and-forget, et sert à AGIR sur les dossiers, pas
+    à les lire ou les explorer). NÉCESSITE que l'app Clovis soit ouverte
+    sur le téléphone au moment de l'appel, sinon échoue avec un message
+    clair à relayer à l'étudiant. NE PAS CONFONDRE non plus avec
+    gerer_dossier_bibliotheque/gerer_document_bibliotheque, qui portent
+    sur la bibliothèque Clovis (privée ou catalogue public), jamais sur
+    le téléphone physique de l'étudiant.
 
     `action` doit être l'une de :
     - "lister_contenu" : liste le contenu du dossier désigné
       `dossier_nom` à l'instant présent (noms, tailles, type
       fichier/dossier). `dossier_nom` DOIT être un nom renvoyé par
-      l'action "lister_dossiers" de l'outil gerer_action_mobile --
+      l'action "lister_dossiers" de l'outil gerer_dossier_telephone --
       appelle-la avant si tu ne connais pas déjà la liste à jour, ne
       devine jamais un nom de dossier.
     - "ouvrir_sous_dossier" : descend dans l'arborescence depuis

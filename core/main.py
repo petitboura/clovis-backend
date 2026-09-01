@@ -1457,6 +1457,32 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         "compétences, talents ou aptitudes personnelles de l'utilisateur "
         "(\"qu'est-ce que je sais bien faire ?\") -- aucun rapport, ne "
         "suggère rien dans ce cas.\n\n"
+        # AJOUT 2026-09-01 (demande Bourama, suite au renommage de
+        # gerer_action_mobile en gerer_dossier_telephone) : le mot
+        # "dossier" désigne DEUX choses totalement différentes dans le
+        # catalogue, un piège classique pour un petit modèle qui ne
+        # regarde que le mot-clé. Même logique que le bloc "quatre
+        # mondes" plus haut : en cas de doute, élargir plutôt que
+        # choisir au hasard OU ne rien suggérer -- l'erreur qui coûte le
+        # plus cher ici est de rester silencieux, pas de suggérer un
+        # outil de trop.
+        "IMPORTANT : ne confonds JAMAIS un dossier de la BIBLIOTHÈQUE "
+        "Clovis (documents/liens/notes que l'étudiant a uploadés dans "
+        "l'app, privés ou dans le catalogue public -> "
+        "gerer_dossier_bibliotheque / gerer_document_bibliotheque) avec "
+        "un dossier PHYSIQUE sur le TÉLÉPHONE de l'étudiant (fichiers "
+        "réels de son appareil, aucun rapport avec la bibliothèque "
+        "Clovis -> gerer_dossier_telephone pour créer/renommer/"
+        "supprimer/déplacer, explorer_dossier pour lire/chercher en "
+        "direct). Exemples bibliothèque : \"crée-moi un dossier pour mes "
+        "cours de maths\", \"range ce document dans un nouveau dossier\", "
+        "\"supprime mon dossier Chimie\" (dans l'app). Exemples "
+        "téléphone : \"crée un dossier Téléchargements sur mon "
+        "téléphone\", \"renomme le dossier Photos sur mon tel\", "
+        "\"qu'est-ce qu'il y a dans mon dossier Cours sur mon "
+        "téléphone ?\". SI TU HÉSITES entre les deux, suggère les DEUX "
+        "outils concernés plutôt que de choisir au hasard ou de ne rien "
+        "suggérer.\n\n"
         f"Outils disponibles :\n{catalogue}\n\n"
         f"{contexte}"
         f"Question de l'utilisateur : {message_utilisateur}\n\n"
