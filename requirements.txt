@@ -1,5 +1,6 @@
 fastapi
 uvicorn[standard]
+slowapi
 python-multipart
 supabase
 PyPDF2

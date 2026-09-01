@@ -8,11 +8,12 @@ avec Bourama le 2026-07-20.
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from core.erreurs import erreur_api
 from pydantic import BaseModel
 
 from api.auth import utilisateur_courant
+from core.limitation_debit import limiteur
 from core.generation_documents import generer_pdf_depuis_markdown
 from core.generation_code import generer_zip_depuis_fichiers
 from core.generation_donnees import exporter_donnees
@@ -88,7 +89,8 @@ class ReponseGeneration(BaseModel):
 
 
 @router.post("/document", response_model=ReponseGeneration)
-def generer_document_route(demande: DemandeDocument, utilisateur=Depends(utilisateur_courant)):
+@limiteur.limit("10/minute")
+def generer_document_route(request: Request, demande: DemandeDocument, utilisateur=Depends(utilisateur_courant)):
     try:
         url = generer_pdf_depuis_markdown(demande.titre, demande.contenu_markdown)
     except Exception as e:
@@ -98,7 +100,8 @@ def generer_document_route(demande: DemandeDocument, utilisateur=Depends(utilisa
 
 
 @router.post("/code", response_model=ReponseGeneration)
-def generer_code_route(demande: DemandeCode, utilisateur=Depends(utilisateur_courant)):
+@limiteur.limit("10/minute")
+def generer_code_route(request: Request, demande: DemandeCode, utilisateur=Depends(utilisateur_courant)):
     try:
         url = generer_zip_depuis_fichiers(demande.nom_projet, demande.fichiers)
     except Exception as e:
@@ -108,7 +111,8 @@ def generer_code_route(demande: DemandeCode, utilisateur=Depends(utilisateur_cou
 
 
 @router.post("/donnees", response_model=ReponseGeneration)
-def exporter_donnees_route(demande: DemandeDonnees, utilisateur=Depends(utilisateur_courant)):
+@limiteur.limit("10/minute")
+def exporter_donnees_route(request: Request, demande: DemandeDonnees, utilisateur=Depends(utilisateur_courant)):
     try:
         url = exporter_donnees(demande.nom, demande.donnees, demande.format)
     except ValueError as e:
@@ -120,7 +124,8 @@ def exporter_donnees_route(demande: DemandeDonnees, utilisateur=Depends(utilisat
 
 
 @router.post("/signature")
-def envoyer_pour_signature_route(demande: DemandeSignature, utilisateur=Depends(utilisateur_courant)):
+@limiteur.limit("10/minute")
+def envoyer_pour_signature_route(request: Request, demande: DemandeSignature, utilisateur=Depends(utilisateur_courant)):
     if not signature_disponible():
         raise erreur_api(503, "SIGNATURE_INDISPONIBLE")
     try:
@@ -147,7 +152,8 @@ def statut_signature_route(signature_request_id: str, utilisateur=Depends(utilis
 
 
 @router.post("/3d")
-def lancer_3d_route(demande: Demande3D, utilisateur=Depends(utilisateur_courant)):
+@limiteur.limit("10/minute")
+def lancer_3d_route(request: Request, demande: Demande3D, utilisateur=Depends(utilisateur_courant)):
     if not modele_3d_disponible():
         raise erreur_api(503, "GENERATION_3D_INDISPONIBLE")
     try:
@@ -169,7 +175,8 @@ def statut_3d_route(request_id: str, utilisateur=Depends(utilisateur_courant)):
 
 
 @router.post("/video")
-def lancer_video_route(demande: DemandeVideo, utilisateur=Depends(utilisateur_courant)):
+@limiteur.limit("10/minute")
+def lancer_video_route(request: Request, demande: DemandeVideo, utilisateur=Depends(utilisateur_courant)):
     if not video_disponible():
         raise erreur_api(503, "GENERATION_VIDEO_INDISPONIBLE")
     try:
@@ -191,7 +198,8 @@ def statut_video_route(request_id: str, utilisateur=Depends(utilisateur_courant)
 
 
 @router.post("/audio", response_model=ReponseGeneration)
-def generer_audio_route(demande: DemandeAudio, utilisateur=Depends(utilisateur_courant)):
+@limiteur.limit("10/minute")
+def generer_audio_route(request: Request, demande: DemandeAudio, utilisateur=Depends(utilisateur_courant)):
     if not audio_disponible():
         raise erreur_api(503, "GENERATION_AUDIO_INDISPONIBLE")
     try:
@@ -203,7 +211,8 @@ def generer_audio_route(demande: DemandeAudio, utilisateur=Depends(utilisateur_c
 
 
 @router.post("/image", response_model=ReponseGeneration)
-def generer_image_route(demande: DemandeImage, utilisateur=Depends(utilisateur_courant)):
+@limiteur.limit("10/minute")
+def generer_image_route(request: Request, demande: DemandeImage, utilisateur=Depends(utilisateur_courant)):
     # Plus de check "disponible" ici : generer_image() gère elle-même le
     # choix Pollinations (gratuit)/Together AI (payant) en interne, voir
     # generation_images.py. Toujours actif.

@@ -20,12 +20,13 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "core"))
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Literal
 
 from api.auth import utilisateur_optionnel, supabase
+from core.limitation_debit import limiteur
 from main import chat as chat_generateur  # core/main.py:chat()
 from fournisseurs_llm import modele_id_est_autorise
 
@@ -199,8 +200,14 @@ def _evenements_sse(payload: EnvoyerMessagePayload, user_id: Optional[str]):
 
 
 @router.post("")
-def envoyer_message(payload: EnvoyerMessagePayload, utilisateur=Depends(utilisateur_optionnel)):
+@limiteur.limit("20/minute")
+def envoyer_message(request: Request, payload: EnvoyerMessagePayload, utilisateur=Depends(utilisateur_optionnel)):
     """
+    Limite : 20 messages/minute par utilisateur connecté (ou par IP pour
+    un visiteur anonyme) -- voir core/limitation_debit.py. Empêche le
+    spam/abus sur l'endpoint le plus coûteux de l'API (appels Groq/Gemini
+    à chaque message).
+
     Chat accessible aux visiteurs non connectés (utilisateur_optionnel),
     comme sur chat.py -- voir SEUIL_VISITEUR_NON_CONNECTE côté ancien
     frontend Streamlit ; la même limite devra être réimplémentée côté

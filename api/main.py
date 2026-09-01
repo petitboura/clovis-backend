@@ -15,7 +15,10 @@ from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
+from core.limitation_debit import limiteur, gestionnaire_limite_depassee
 from api.auth import utilisateur_courant, supabase
 from api.agents import router as agents_router
 from api.profiles import router as profiles_router
@@ -167,6 +170,16 @@ async def _lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Clovis API", version="0.1.0", lifespan=_lifespan)
+
+# Limitation de débit (rate limiting) -- voir core/limitation_debit.py.
+# Empêche qu'un utilisateur (ou un spam anonyme) puisse envoyer un nombre
+# illimité de requêtes/minute sur les endpoints coûteux (chat, génération),
+# ce qui ferait exploser la facture des APIs externes ou saturerait le
+# serveur. Les limites précises sont posées par endpoint (voir api/chat.py
+# et api/generation.py), pas ici.
+app.state.limiter = limiteur
+app.add_exception_handler(RateLimitExceeded, gestionnaire_limite_depassee)
+app.add_middleware(SlowAPIMiddleware)
 
 # Serveur MCP interne (documents/code/images), monté en sous-application
 # ASGI : voir core/serveur_mcp_generation.py pour le detail des outils, et
