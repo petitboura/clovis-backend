@@ -1833,11 +1833,22 @@ TYPES_ACTION_MOBILE_VALIDES = {
     # ciblent TOUJOURS un nom renvoyé par lister_dossiers_designes_mobile,
     # jamais une URI : l'app résout le nom en URI localement (voir
     # ActionsAppareilExecuteur.kt/.swift, clovis-frontend).
-    "dossier_creer_fichier": {"dossier_nom", "nom"},  # "type_mime" optionnel
-    "dossier_creer_sous_dossier": {"dossier_nom", "nom"},
-    "dossier_renommer": {"dossier_nom", "element_nom", "nouveau_nom"},
-    "dossier_supprimer": {"dossier_nom", "element_nom"},
-    "dossier_deplacer": {"dossier_nom", "element_nom", "nouveau_dossier_nom"},
+    #
+    # "chemin"/"nouveau_chemin" (01/09/2026, demande Bourama) : listes
+    # OPTIONNELLES de noms de sous-dossiers PARENTS (jamais l'élément
+    # ciblé lui-même, qui reste "element_nom"/"nom") -- même convention
+    # que "chemin" dans explorer_dossier. Absent ou vide = racine du
+    # dossier désigné. Profondeur illimitée. "chemin" cible l'emplacement
+    # SOURCE (où créer, où trouver l'élément à renommer/supprimer/
+    # déplacer) ; "nouveau_chemin" (dossier_deplacer uniquement) cible
+    # l'emplacement DESTINATION, à l'intérieur de "nouveau_dossier_nom".
+    # Un sous-dossier peut être "element_nom" comme un fichier : les deux
+    # sont des cibles valides pour renommer/supprimer/déplacer.
+    "dossier_creer_fichier": {"dossier_nom", "nom"},  # "type_mime"/"chemin" optionnels
+    "dossier_creer_sous_dossier": {"dossier_nom", "nom"},  # "chemin" optionnel
+    "dossier_renommer": {"dossier_nom", "element_nom", "nouveau_nom"},  # "chemin" optionnel
+    "dossier_supprimer": {"dossier_nom", "element_nom"},  # "chemin" optionnel
+    "dossier_deplacer": {"dossier_nom", "element_nom", "nouveau_dossier_nom"},  # "chemin"/"nouveau_chemin" optionnels
     # Accessibilité (Lot 6/7) retirée le 01/09/2026 (demande Bourama) :
     # l'agent ne peut plus déclencher accessibilite_cliquer/
     # accessibilite_saisir. Le plugin/flavor "externe" reste inchangé côté
@@ -1889,17 +1900,29 @@ def gerer_dossier_telephone(
       été envoyée, sans garantir qu'elle a déjà réussi.
 
       Paramètre `type_action`, EXACTEMENT l'un de :
-      - "dossier_creer_fichier" : {"dossier_nom", "nom", "type_mime"?}
-      - "dossier_creer_sous_dossier" : {"dossier_nom", "nom"}
-      - "dossier_renommer" : {"dossier_nom", "element_nom", "nouveau_nom"}
-      - "dossier_supprimer" : {"dossier_nom", "element_nom"}
-      - "dossier_deplacer" : {"dossier_nom", "element_nom", "nouveau_dossier_nom"}
+      - "dossier_creer_fichier" : {"dossier_nom", "nom", "type_mime"?, "chemin"?}
+      - "dossier_creer_sous_dossier" : {"dossier_nom", "nom", "chemin"?}
+      - "dossier_renommer" : {"dossier_nom", "element_nom", "nouveau_nom", "chemin"?}
+      - "dossier_supprimer" : {"dossier_nom", "element_nom", "chemin"?}
+      - "dossier_deplacer" : {"dossier_nom", "element_nom", "nouveau_dossier_nom", "chemin"?, "nouveau_chemin"?}
 
       Paramètre `parametres` : objet correspondant au `type_action`
       choisi (voir ci-dessus). "dossier_nom" (et "nouveau_dossier_nom"
       le cas échéant) DOIT être un nom renvoyé par l'action
       "lister_dossiers", appelle-la avant si tu ne connais pas déjà la
       liste à jour.
+
+      "chemin" (liste de noms de sous-dossiers, ex. ["Cours", "Maths"]) :
+      OPTIONNEL, cible un sous-dossier niché à n'importe quelle
+      profondeur SOUS "dossier_nom" -- absent ou vide = racine du
+      dossier désigné. Ne contient JAMAIS l'élément visé lui-même
+      ("element_nom"/"nom" restent séparés). Un sous-dossier peut lui
+      aussi être "element_nom" (renommer/supprimer/déplacer un
+      sous-dossier entier fonctionne comme pour un fichier). Utilise
+      "explorer_dossier" avant si tu ne connais pas déjà l'arborescence
+      exacte, ne devine jamais un chemin. Pour "dossier_deplacer",
+      "nouveau_chemin" cible de la même façon l'emplacement niché de
+      DESTINATION à l'intérieur de "nouveau_dossier_nom".
     """
     user_id = ctx.request_context.request.query_params.get("user_id")
     if not user_id:
@@ -1926,6 +1949,13 @@ def gerer_dossier_telephone(
         manquantes = cles_requises - set(parametres or {})
         if manquantes:
             return f"Erreur : paramètres manquants pour \"{type_action}\" : {', '.join(sorted(manquantes))}."
+
+        for cle_chemin in ("chemin", "nouveau_chemin"):
+            valeur = (parametres or {}).get(cle_chemin)
+            if valeur is not None and (
+                not isinstance(valeur, list) or not all(isinstance(s, str) for s in valeur)
+            ):
+                return f"Erreur : \"{cle_chemin}\" doit être une liste de noms de sous-dossiers."
 
         try:
             _creer_action_mobile(user_id, type_action, parametres)
