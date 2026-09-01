@@ -80,7 +80,7 @@ def lire_action(action_id: str, user_id: str) -> dict | None:
     try:
         res = (
             supabase.table("actions_appareil_mobile")
-            .select("id, type_action, parametres, statut")
+            .select("id, type_action, parametres, statut, resultat")
             .eq("id", action_id)
             .eq("user_id", user_id)
             .single()
@@ -90,6 +90,35 @@ def lire_action(action_id: str, user_id: str) -> dict | None:
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (lire_action id={action_id}) : {e}")
         return None
+
+
+def attendre_resultat_action(
+    action_id: str, user_id: str, timeout_s: float = 10.0, intervalle_s: float = 0.5
+) -> dict | None:
+    """
+    Ajoute le 01/09/2026, Bourama : fiabiliser l'enchainement de
+    plusieurs actions dependantes (ex: renommer puis deplacer le meme
+    fichier) en une seule demande -- sans attente, gerer_dossier_telephone
+    renvoyait juste "action creee" sans jamais confirmer le vrai resultat,
+    donc un appel suivant pouvait partir avant que le precedent soit
+    reellement execute sur le telephone.
+
+    Poll `statut` (colonne actions_appareil_mobile) toutes les
+    `intervalle_s` jusqu'a "executee"/"echouee" ou expiration de
+    `timeout_s`. Renvoie le dict complet (avec `resultat`) des que
+    l'action est terminee, ou None si toujours "en_attente" au bout du
+    timeout (app fermee/pas de reseau : reste en base, sera rattrapee au
+    prochain lancement, voir lire_actions_en_attente).
+    """
+    import time
+
+    fin = time.monotonic() + timeout_s
+    while time.monotonic() < fin:
+        action = lire_action(action_id, user_id)
+        if action and action.get("statut") in ("executee", "echouee"):
+            return action
+        time.sleep(intervalle_s)
+    return None
 
 
 def lire_actions_en_attente(user_id: str) -> list[dict]:

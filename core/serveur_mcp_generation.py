@@ -57,6 +57,7 @@ from core.notifications_push import (
     un_canal_push_disponible,
 )
 from core.actions_appareil_mobile import creer_action as _creer_action_mobile
+from core.actions_appareil_mobile import attendre_resultat_action as _attendre_resultat_action_mobile
 from core.exploration_dossier_mobile import (
     chercher_par_nom as _chercher_par_nom,
     lister_contenu_dossier as _lister_contenu_dossier,
@@ -1893,11 +1894,14 @@ def gerer_dossier_telephone(
       paramètre.
     - "executer" : décide une action à exécuter sur le téléphone de
       l'étudiant. L'action est mise en attente et poussée immédiatement
-      au téléphone (ou rattrapée à sa prochaine ouverture s'il est hors
-      ligne). LIMITE CONNUE : cette action est asynchrone et son
-      résultat (succès/échec) n'est PAS relayé automatiquement dans
-      cette conversation pour l'instant, dis à l'étudiant que l'action a
-      été envoyée, sans garantir qu'elle a déjà réussi.
+      au téléphone. Depuis le 01/09/2026, cet appel ATTEND jusqu'à ~10s
+      la confirmation réelle du téléphone avant de répondre : le message
+      renvoyé reflète le VRAI résultat (succès/échec) si l'app a
+      confirmé à temps, sinon un message explicite "pas encore
+      confirmée" (app fermée/hors ligne, l'action reste en attente et
+      sera rattrapée plus tard). Attends toujours ce résultat avant de
+      lancer une action suivante qui en dépendrait (ex: déplacer un
+      fichier juste renommé).
 
       Paramètre `type_action`, EXACTEMENT l'un de :
       - "dossier_creer_fichier" : {"dossier_nom", "nom", "type_mime"?, "chemin"?}
@@ -1958,17 +1962,22 @@ def gerer_dossier_telephone(
                 return f"Erreur : \"{cle_chemin}\" doit être une liste de noms de sous-dossiers."
 
         try:
-            _creer_action_mobile(user_id, type_action, parametres)
+            action_id = _creer_action_mobile(user_id, type_action, parametres)
         except Exception as e:
             logging.error(f"ERREUR gerer_dossier_telephone (executer, {type_action}) : {e}")
             return "Erreur : impossible de programmer cette action, réessaie."
 
-        return (
-            f"Action \"{type_action}\" envoyée au téléphone de l'étudiant. "
-            "Le résultat n'est pas encore relayé automatiquement ici : "
-            "informe l'étudiant que l'action a été envoyée, sans confirmer "
-            "qu'elle a déjà réussi."
-        )
+        action_terminee = _attendre_resultat_action_mobile(action_id, user_id)
+        if action_terminee is None:
+            return (
+                f"Action \"{type_action}\" envoyée au téléphone de l'étudiant, mais "
+                "pas encore confirmée (app peut-être fermée ou en arrière-plan) : "
+                "informe l'étudiant que l'action est en attente, ne dis PAS qu'elle "
+                "a réussi, et ne lance PAS une action suivante qui en dépendrait."
+            )
+        if action_terminee.get("statut") == "echouee":
+            return f"Échec de l'action \"{type_action}\" sur le téléphone : {action_terminee.get('resultat') or 'raison inconnue'}."
+        return action_terminee.get("resultat") or f"Action \"{type_action}\" exécutée avec succès sur le téléphone."
 
     return (
         f"Erreur : action '{action}' inconnue. Actions valides : lister_dossiers, "
