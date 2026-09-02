@@ -27,6 +27,7 @@ from codes_partage import lister_comportements_recus
 from mcp_tools import lister_tous_les_outils, lister_outils_autorises_pour_agent, appeler_outil, parametres_outils
 from registre_outils import OUTILS_SENSIBLES, REGISTRE_AFFICHAGE_OUTILS
 from fournisseurs_llm import generer_reponse_premium
+from securite_url import valider_url_externe, UrlNonAutorisee
 
 logging.basicConfig(level=logging.INFO)
 
@@ -668,6 +669,7 @@ def _telecharger_image(image_url):
     URLs Supabase ne sont pas des URI Google Cloud Storage, `Part.from_uri`
     ne les accepterait pas.
     """
+    valider_url_externe(image_url)  # anti-SSRF : voir core/securite_url.py
     reponse = requests.get(image_url, timeout=15)
     reponse.raise_for_status()
     return reponse.content, reponse.headers.get("content-type", "image/jpeg")
@@ -878,6 +880,7 @@ def _lire_url(url, user_id=None):
 
     try:
         import trafilatura
+        valider_url_externe(url)  # anti-SSRF : voir core/securite_url.py
         # BUG corrigé le 2026-07-20 : trafilatura 2.1.0 n'a pas de paramètre
         # `timeout` sur fetch_url() (TypeError à CHAQUE appel, silencieux
         # car avalé par le except plus bas -- résultat : cette fonction ne
@@ -901,6 +904,12 @@ def _lire_url(url, user_id=None):
             logging.warning(f"LECTURE URL ECHOUEE (page téléchargée mais aucun texte extrait, ex: page vide/JS-only) : {url}")
             return None
         return texte[:LONGUEUR_MAX_TEXTE_URL]
+    except UrlNonAutorisee as e:
+        # Distinct du except générique plus bas : ceci est un blocage
+        # VOLONTAIRE (SSRF), pas un échec de récupération -- utile pour
+        # repérer un pattern d'abus (voir core/securite_url.py).
+        logging.warning(f"URL BLOQUEE (SSRF) : {url} -- {e}")
+        return None
     except Exception as e:
         logging.error(f"ERREUR LECTURE URL ({url}): {e}")
         return None
