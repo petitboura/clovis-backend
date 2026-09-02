@@ -542,5 +542,19 @@ def traiter_rappels_echus() -> int:
             traites += 1
         except Exception as e:
             logging.error(f"ERREUR traitement rappel id={rappel['id']} : {e}")
+            continue
+
+        # Ajoute le 02/09/2026, Bourama : centre de notifications (bouton
+        # cloche). Import local (comme envoyer_action_appareil plus haut
+        # dans ce fichier) pour eviter tout risque de cycle d'import
+        # entre notifications_push et notifications. Best effort : le
+        # rappel lui-meme est deja traite au-dessus, une erreur ici ne
+        # doit jamais faire echouer le planificateur.
+        try:
+            from core.notifications import creer_notification
+
+            creer_notification(rappel["user_id"], "rappel_echu", "Rappel", rappel["contenu"], lien="/rappels")
+        except Exception as e:
+            logging.error(f"ERREUR creation notification rappel id={rappel['id']} : {e}")
 
     return traites

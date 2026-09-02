@@ -214,6 +214,9 @@ MESSAGES_FR: dict[str, str] = {
     # api/bibliotheque_publique.py.
     "NOM_DEJA_UTILISE_BIBLIOTHEQUE_PERSO": "Tu as déjà un fichier nommé « {nom} » dans ta bibliothèque. Renomme-le ou remplace l'existant.",
     "NOM_DEJA_UTILISE_BIBLIOTHEQUE_PUBLIQUE": "Un document nommé « {nom} » existe déjà dans la bibliothèque publique. Choisis un autre nom.",
+    # 02/09, centre de notifications (bouton cloche) -- voir api/notifications.py.
+    "NOTIFICATIONS_LECTURE_ECHEC": "Impossible de récupérer tes notifications pour le moment.",
+    "NOTIFICATIONS_MAJ_ECHEC": "Impossible de mettre à jour tes notifications pour le moment.",
 }
 
 

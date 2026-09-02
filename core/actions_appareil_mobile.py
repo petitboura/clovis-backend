@@ -154,3 +154,29 @@ def marquer_resultat(action_id: str, user_id: str, succes: bool, resultat: str =
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (marquer_resultat id={action_id}) : {e}")
         raise
+
+    # Ajoute le 02/09/2026, Bourama : centre de notifications (bouton
+    # cloche). Ne fait volontairement PAS echouer marquer_resultat si
+    # cette partie plante -- le vrai resultat de l'action est deja
+    # enregistre au-dessus, la notification est un bonus d'affichage.
+    try:
+        type_action = None
+        try:
+            ligne = (
+                supabase.table("actions_appareil_mobile")
+                .select("type_action")
+                .eq("id", action_id)
+                .single()
+                .execute()
+            )
+            type_action = ligne.data.get("type_action") if ligne.data else None
+        except Exception as e:
+            logging.error(f"ERREUR SUPABASE (lecture type_action pour notification id={action_id}) : {e}")
+
+        from core.notifications import creer_notification
+
+        titre = "Action terminée" if succes else "Action échouée"
+        contenu = f"{type_action} : {resultat}" if type_action else resultat
+        creer_notification(user_id, "action_ia_terminee", titre, contenu)
+    except Exception as e:
+        logging.error(f"ERREUR creation notification action id={action_id} : {e}")

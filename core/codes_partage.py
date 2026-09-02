@@ -392,6 +392,16 @@ def propager_fichier_range_dossier(fichier_id: str, dossier_id: str, proprietair
     est partagé via un ou plusieurs codes actifs, copie ce fichier chez
     chaque receveur de ces codes, rangé dans le dossier miroir
     correspondant. Non bloquant."""
+    # Ajoute le 02/09/2026, Bourama : centre de notifications (bouton
+    # cloche) -- nom du fichier pour un texte lisible, une seule lecture
+    # pour tous les receveurs plutot qu'une par receveur.
+    nom_fichier = None
+    try:
+        ligne_fichier = supabase.table("fichiers_uploades").select("nom_fichier").eq("id", fichier_id).maybe_single().execute()
+        nom_fichier = ligne_fichier.data.get("nom_fichier") if ligne_fichier and ligne_fichier.data else None
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture nom fichier {fichier_id} pour notification) : {e}")
+
     for code_id, dossier_racine_id in _ancetres_partages(dossier_id, proprietaire_id):
         try:
             receveurs = supabase.table("rattachements_codes").select("receveur_id").eq("code_id", code_id).execute()
@@ -410,6 +420,18 @@ def propager_fichier_range_dossier(fichier_id: str, dossier_id: str, proprietair
             nouvel_id = _copier_fichier_pour_receveur(fichier_id, receveur_id, proprietaire_id)
             if nouvel_id:
                 ranger_fichier(nouvel_id, dossier_miroir_id)
+                try:
+                    from core.notifications import creer_notification
+
+                    creer_notification(
+                        receveur_id,
+                        "document_recu_code",
+                        "Nouveau document reçu",
+                        f"\"{nom_fichier}\" a été ajouté à votre bibliothèque." if nom_fichier else "Un nouveau document a été ajouté à votre bibliothèque.",
+                        lien="/bureau",
+                    )
+                except Exception as e:
+                    logging.error(f"ERREUR creation notification nouveau fichier {fichier_id} pour {receveur_id} : {e}")
 
 
 def _remplacer_dossiers_du_code(code_id: str, proprietaire_id: str, dossier_ids: list[str]) -> None:
@@ -576,7 +598,7 @@ def entrer_code(code: str, receveur_id: str) -> dict | None:
     try:
         ligne_code = (
             supabase.table("codes_partage")
-            .select("id, proprietaire_id, actif")
+            .select("id, nom, proprietaire_id, actif")
             .eq("code", code.strip().upper())
             .maybe_single()
             .execute()
@@ -611,6 +633,23 @@ def entrer_code(code: str, receveur_id: str) -> dict | None:
             propager_dossier_vers_receveur(d["dossier_id"], receveur_id, ligne_code.data["proprietaire_id"])
     except Exception as e:
         logging.error(f"ERREUR propagation rétroactive dossiers à l'entrée du code {code_id} pour {receveur_id} : {e}")
+
+    # Ajoute le 02/09/2026, Bourama : centre de notifications (bouton
+    # cloche). Best effort, ne fait jamais echouer entrer_code -- le
+    # rattachement est deja effectif au-dessus.
+    try:
+        from core.notifications import creer_notification
+
+        nom_code = ligne_code.data.get("nom") or code.strip().upper()
+        creer_notification(
+            receveur_id,
+            "document_recu_code",
+            "Nouveau contenu reçu",
+            f"Vous avez reçu le contenu du code \"{nom_code}\".",
+            lien="/bureau",
+        )
+    except Exception as e:
+        logging.error(f"ERREUR creation notification entree code {code_id} pour {receveur_id} : {e}")
 
     return res.data[0]
 

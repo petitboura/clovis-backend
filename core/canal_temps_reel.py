@@ -92,6 +92,36 @@ def recevoir_reponse(correlation_id: str, reponse: Any) -> None:
         future.set_result(reponse)
 
 
+async def notifier_utilisateur(user_id: str, notification: dict) -> bool:
+    """
+    Ajoute le 02/09/2026, Bourama : centre de notifications Clovis.
+    Diffuse `notification` en direct sur la MEME connexion WebSocket que
+    poser_question_appareil, mais sans jamais toucher a sa logique de
+    correlation/attente -- ceci est un envoi serveur->client simple,
+    fire-and-forget, distingue par son champ "type" au niveau du message
+    ({"type": "notification_nouvelle", "notification": {...}}) plutot
+    que {"id":..., "question":...}. Le cote client (lib/canalTempsReel.ts)
+    distingue les deux formes a la reception.
+
+    Renvoie False immediatement (pas d'attente, pas d'exception) si
+    l'utilisateur n'a aucune connexion active -- la notification reste
+    de toute facon en base (voir core/notifications.py), ce n'est qu'un
+    bonus temps reel.
+    """
+    async with _verrou_connexions:
+        websocket = _connexions.get(user_id)
+
+    if websocket is None:
+        return False
+
+    try:
+        await websocket.send_json({"type": "notification_nouvelle", "notification": notification})
+        return True
+    except Exception as e:
+        logging.error(f"ERREUR diffusion notification temps reel (user={user_id}) : {e}")
+        return False
+
+
 async def _appeler_statut(on_statut, texte: str) -> None:
     if on_statut is None:
         return
