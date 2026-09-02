@@ -96,3 +96,53 @@ def retirer_fichier(fichier_id: str, dossier_id: str) -> None:
 def supprimer_dossier(dossier_id: str) -> None:
     """Supprime le dossier (et ses sous-dossiers, ON DELETE CASCADE) -- ne touche JAMAIS aux documents eux-mêmes, voir docstring du module."""
     supabase.table("dossiers_catalogue_public").delete().eq("id", dossier_id).execute()
+
+
+# --- Attachement d'un dossier public à la bibliothèque personnelle -----
+# (02/09/2026, demande Bourama : "ajouter un dossier public à sa
+# bibliothèque perso, peu importe la contribution, et pouvoir librement
+# le nourrir depuis sa bibliothèque personnelle"). Voir migrations/
+# 2026_09_02_dossiers_publics_attaches.sql.
+#
+# Attacher est libre pour N'IMPORTE QUEL dossier public, quel que soit
+# son statut, même créé par quelqu'un d'autre -- ce n'est qu'un
+# raccourci/vue dans la bibliothèque perso, aucun droit supplémentaire.
+# Le droit d'y AJOUTER un document (nourrir) continue de suivre
+# EXACTEMENT peut_ajouter_contenu ci-dessus, pas de nouvelle règle.
+
+def attacher_dossier(user_id: str, dossier_public_id: str) -> None:
+    """Attache un dossier public à la bibliothèque perso de user_id. Idempotent (clé primaire composite)."""
+    supabase.table("dossiers_publics_attaches").upsert({
+        "user_id": user_id,
+        "dossier_public_id": dossier_public_id,
+    }).execute()
+
+
+def detacher_dossier(user_id: str, dossier_public_id: str) -> None:
+    """Détache un dossier public de la bibliothèque perso de user_id -- ne touche jamais au dossier public lui-même ni à son contenu."""
+    supabase.table("dossiers_publics_attaches").delete().eq("user_id", user_id).eq("dossier_public_id", dossier_public_id).execute()
+
+
+def lister_dossiers_attaches(user_id: str) -> list:
+    """
+    Liste les dossiers publics attachés à la bibliothèque perso de
+    user_id, avec les mêmes champs que lister_dossiers() plus
+    peut_ajouter (calculé pour user_id) afin que l'appelant (route API)
+    sache directement si le bouton d'ajout doit publier dans le dossier
+    public ou rester en privé -- voir docstring du module.
+    """
+    res = (
+        supabase.table("dossiers_publics_attaches")
+        .select("dossier_public_id, dossiers_catalogue_public(id, cree_par, nom, statut, dossier_parent_id, created_at)")
+        .eq("user_id", user_id)
+        .execute()
+    )
+    dossiers = []
+    for ligne in res.data:
+        dossier = ligne.get("dossiers_catalogue_public")
+        if not dossier:
+            continue  # dossier public supprimé entre-temps -- ligne orpheline ignorée, cascade Supabase la nettoiera
+        dossier["fichier_ids"] = lister_fichiers_ids_dossier(dossier["id"])
+        dossier["peut_ajouter"] = peut_ajouter_contenu(dossier["id"], user_id)
+        dossiers.append(dossier)
+    return dossiers

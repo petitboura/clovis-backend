@@ -11,8 +11,11 @@ from api.auth import utilisateur_courant
 from core.erreurs import erreur_api
 from core.dossiers_catalogue_public import (
     _dossier,
+    attacher_dossier,
     creer_dossier,
+    detacher_dossier,
     lister_dossiers,
+    lister_dossiers_attaches,
     lister_fichiers_ids_dossier,
     peut_ajouter_contenu,
     peut_retirer_contenu,
@@ -98,3 +101,26 @@ def retirer(dossier_id: str, fichier_id: str, utilisateur=Depends(utilisateur_co
     if not peut_retirer_contenu(dossier_id, utilisateur.id):
         raise erreur_api(403, "SEUL_LE_CREATEUR_DU_DOSSIER_PEUT_EN_RETIRER_UN_FICHIER")
     retirer_fichier(fichier_id, dossier_id)
+
+
+# --- Attachement à la bibliothèque perso (02/09/2026, demande Bourama) -
+# Attacher est libre pour n'importe quel dossier public quel que soit
+# son statut -- voir docstring de core/dossiers_catalogue_public.py.
+
+
+@router.get("/attaches")
+def lister_attaches(utilisateur=Depends(utilisateur_courant)):
+    return lister_dossiers_attaches(utilisateur.id)
+
+
+@router.post("/{dossier_id}/attacher", status_code=201)
+def attacher(dossier_id: str, utilisateur=Depends(utilisateur_courant)):
+    if not _dossier(dossier_id):
+        raise erreur_api(404, "DOSSIER_INTROUVABLE")
+    attacher_dossier(utilisateur.id, dossier_id)
+    return {"dossier_id": dossier_id}
+
+
+@router.delete("/{dossier_id}/attacher", status_code=204)
+def detacher(dossier_id: str, utilisateur=Depends(utilisateur_courant)):
+    detacher_dossier(utilisateur.id, dossier_id)
