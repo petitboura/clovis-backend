@@ -2899,6 +2899,11 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
       PAS ete execute. Une reponse texte explique le blocage, puis cet evenement porte
       l'etat pour un bouton "Reessayer" -- meme mecanisme de reprise que limite_outils_atteinte
       (chat(reprise={"etat_reprise": ..., "type": "continuer_agent"})).
+      `message_utilisateur` (optionnel) peut accompagner cette reprise : le bouton
+      Continuer/Reessayer envoie ce chemin SANS texte (equivaut a "continue"), mais si
+      l'utilisateur tape autre chose a la place (ajustement, "j'arrete"...), ce texte doit
+      passer par CE MEME chemin plutot que par un nouveau message normal, pour que le modele
+      garde tout le contexte deja accumule (voir chat.py cote frontend, reprendreAgent()).
     - {"type": "meta", "message_id_user": ..., "message_id_assistant": ...,
       "created_at_assistant": ...}                -> DERNIER evenement emis, une fois
       l'echange persiste dans historique_conversations (voir _sauvegarder_echange).
@@ -3009,12 +3014,24 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         # garde par _evenement_reprise_agent. messages_agent contient deja
         # tous les resultats d'outils obtenus jusque-la : rien n'est
         # reexecute, rien n'est perdu.
+        #
+        # `message_utilisateur` optionnel (02/09/2026, correction demandee
+        # par Bourama) : le bouton "Continuer" n'est qu'un raccourci pour
+        # eviter a l'utilisateur de taper ce mot -- si a la place il tape
+        # un ajustement ou "j'arrete", ce texte doit arriver DANS ce meme
+        # contexte complet (avec tous les resultats d'outils deja
+        # obtenus), pas repartir sur une conversation vierge. C'est au
+        # modele de decider quoi en faire (continuer, s'arreter,
+        # s'ajuster), pas au frontend de trancher en amont.
         etat = reprise["etat_reprise"]
         messages_agent = etat["messages_agent"]
         outils_mcp = etat["outils_mcp"]
         table_routage = etat["table_routage"]
         modele_reprise = etat.get("modele", GROQ_PRIMARY)
         reasoning_effort_reprise = etat.get("reasoning_effort")
+
+        if reprise.get("message_utilisateur"):
+            messages_agent.append({"role": "user", "content": reprise["message_utilisateur"]})
 
         client_groq = Groq(api_key=get_secret("GROQ_API_KEY"), max_retries=0)
         try:
