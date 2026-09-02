@@ -80,6 +80,8 @@ def forcer_rechargement_catalogue_outils():
     _cache_outils_generation_disponibles["valeur"] = None
     _cache_outils_generation_disponibles["expire_a"] = 0
     _cache_catalogue_outils.clear()
+    _cache_parametres_outils["valeur"] = None
+    _cache_parametres_outils["expire_a"] = 0
 
 
 def _serveurs_disponibles():
@@ -111,6 +113,43 @@ def _outils_generation_disponibles():
         valeur = _cache_outils_generation_disponibles["valeur"] or []
     _cache_outils_generation_disponibles["valeur"] = valeur
     _cache_outils_generation_disponibles["expire_a"] = maintenant + _DUREE_CACHE_SECONDES
+    return valeur
+
+
+# Valeurs de repli si parametres_outils est vide/injoignable ET qu'aucun
+# cache precedent n'existe encore (tout premier appel au demarrage) --
+# ce sont les memes valeurs que la ligne inseree en base a la creation
+# de la table (migration creation_parametres_outils).
+_REPLI_PARAMETRES_OUTILS = {
+    "budget_depart": 5,
+    "palier_extension": 5,
+    "plafond_absolu": 20,
+    "tolerance_repetition": 3,
+}
+
+_cache_parametres_outils = {"valeur": None, "expire_a": 0}
+
+
+def parametres_outils():
+    """
+    Reglages du budget d'appels d'outils par tour (voir core/main.py,
+    boucle _agent_groq) : budget_depart, palier_extension, plafond_absolu,
+    tolerance_repetition. Cache 24h, repli sur la derniere valeur connue
+    (ou sur _REPLI_PARAMETRES_OUTILS si aucun cache n'existe encore) si
+    Supabase repond mal -- meme logique que _serveurs_disponibles.
+    """
+    maintenant = time.time()
+    if _cache_parametres_outils["valeur"] is not None and _cache_parametres_outils["expire_a"] > maintenant:
+        return _cache_parametres_outils["valeur"]
+    try:
+        res = _supabase.table("parametres_outils").select("cle, valeur").execute()
+        lignes = {ligne["cle"]: ligne["valeur"] for ligne in (res.data or [])}
+        valeur = {**_REPLI_PARAMETRES_OUTILS, **lignes}
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture parametres_outils) : {e}")
+        valeur = _cache_parametres_outils["valeur"] or dict(_REPLI_PARAMETRES_OUTILS)
+    _cache_parametres_outils["valeur"] = valeur
+    _cache_parametres_outils["expire_a"] = maintenant + _DUREE_CACHE_SECONDES
     return valeur
 
 

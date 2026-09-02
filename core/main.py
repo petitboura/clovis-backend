@@ -24,7 +24,7 @@ from comportements_etudiants import (
 #   from programme_llm import lister_mes_programmes_legers
 #   from codes_partage import lister_programmes_recus_legers
 from codes_partage import lister_comportements_recus
-from mcp_tools import lister_tous_les_outils, lister_outils_autorises_pour_agent, appeler_outil
+from mcp_tools import lister_tous_les_outils, lister_outils_autorises_pour_agent, appeler_outil, parametres_outils
 from registre_outils import OUTILS_SENSIBLES, REGISTRE_AFFICHAGE_OUTILS
 from fournisseurs_llm import generer_reponse_premium
 
@@ -169,9 +169,14 @@ MODELES_AVEC_REASONING_EFFORT = {
     "qwen/qwen3.6-27b": "none",        # Qwen 3 peut vraiment desactiver le raisonnement
 }
 
-# Nombre maximum d'aller-retours "outil" autorisés pour une seule question,
-# pour éviter qu'un modèle ne boucle indéfiniment sur le même outil.
-MAX_ETAPES_OUTILS = 5
+# ANCIEN : MAX_ETAPES_OUTILS = 5, un plafond fixe d'aller-retours "outil"
+# par question, pour eviter qu'un modele ne boucle indefiniment sur le
+# meme outil -- remplace le 02/09/2026 (demande Bourama : un usage
+# legitime a plus de 5 etapes se faisait couper sans raison) par un
+# budget dynamique lu depuis parametres_outils() (table Supabase
+# parametres_outils, voir mcp_tools.py) + une vraie detection de
+# repetition (meme appel refait plusieurs fois d'affilee) plutot qu'un
+# simple compteur brut. Voir _agent_groq ci-dessous.
 
 def _verifier_message_utilisateur(message: str) -> tuple[bool, str | None]:
     """
@@ -2366,6 +2371,96 @@ def _evenement_confirmation(attente, messages_agent, outils_mcp, table_routage, 
     }
 
 
+def _evenement_reprise_agent(type_evenement, messages_agent, outils_mcp, table_routage, modele, reasoning_effort, agent_nom):
+    """
+    Meme principe que _evenement_confirmation, pour les deux cas ou la
+    boucle _agent_groq s'arrete SANS appel en attente : plafond_absolu
+    d'etapes atteint ("limite_outils_atteinte", bouton Continuer) ou
+    repetition detectee ("repetition_detectee", bouton Reessayer). Contrairement
+    a la reprise apres confirmation, la reprise ici rappelle directement
+    _agent_groq avec un budget neuf, sans rejouer d'appel -- voir chat().
+    """
+    return {
+        "type": type_evenement,
+        "etat_reprise": {
+            "messages_agent": messages_agent,
+            "outils_mcp": outils_mcp,
+            "table_routage": table_routage,
+            "modele": modele,
+            "reasoning_effort": reasoning_effort,
+            "agent_nom": agent_nom,
+        },
+    }
+
+
+def _detecter_appel_repete(historique_appels, nouveaux_appels, tolerance):
+    """
+    Parcourt `nouveaux_appels` (lot du tour courant) a la suite de
+    `historique_appels` (liste de tuples (nom, arguments) deja executes ce
+    tour, dans l'ordre) et retourne le premier appel qui ferait atteindre
+    `tolerance` repetitions IDENTIQUES CONSECUTIVES (meme nom, memes
+    arguments), ou None si aucune repetition de ce type n'apparait dans ce
+    lot. Ne modifie pas `historique_appels` -- a l'appelant de l'etendre
+    une fois la decision prise (executer ou arreter).
+    """
+    dernier = historique_appels[-1] if historique_appels else None
+    compteur = 0
+    if dernier is not None:
+        for cle in reversed(historique_appels):
+            if cle == dernier:
+                compteur += 1
+            else:
+                break
+    for appel in nouveaux_appels:
+        cle = (appel["name"], appel["arguments"])
+        if cle == dernier:
+            compteur += 1
+        else:
+            dernier = cle
+            compteur = 1
+        if compteur >= tolerance:
+            return appel
+    return None
+
+
+def _generer_conclusion_forcee(client_groq, messages_agent, outils_mcp, modele, kwargs_reasoning, timeout):
+    """
+    Force une reponse texte finale a partir de messages_agent tel quel
+    (utilise pour les deux fins de boucle de _agent_groq : plafond_absolu
+    atteint et repetition detectee -- un message systeme explicatif est
+    ajoute a messages_agent par l'appelant AVANT ce generateur, voir plus
+    bas). Factorise ce qui etait duplique dans l'ancien bloc "MAX_ETAPES_
+    OUTILS epuise".
+    """
+    completion = client_groq.chat.completions.create(
+        model=modele,
+        messages=messages_agent,
+        max_completion_tokens=None,
+        tools=outils_mcp if outils_mcp else None,
+        stream=True,
+        timeout=timeout,
+        **kwargs_reasoning,
+    )
+    etat_filtre = _nouvel_etat_filtre_texte()
+    for chunk in completion:
+        delta = chunk.choices[0].delta
+        raisonnement = getattr(delta, "reasoning", None)
+        if raisonnement:
+            yield {"type": "raisonnement", "texte": raisonnement}
+        token = delta.content or ""
+        if token:
+            for evenement in _traiter_fragment_texte(etat_filtre, token, messages_agent):
+                yield evenement
+    for evenement in _finaliser_fragment_texte(etat_filtre, messages_agent):
+        yield evenement
+    if etat_filtre["tool_code_detecte"]:
+        logging.error(f"Faux appel d'outil (bloc TOOL_CODE) détecté sur {modele} (conclusion forcée) -- abandon.")
+        yield {
+            "type": "reponse",
+            "texte": "Désolé, je n'ai pas réussi à exécuter l'action demandée. Peux-tu réessayer ou reformuler ta demande ?",
+        }
+
+
 def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
                  appels_en_cours_a_finir=None, modele=GROQ_PRIMARY, reasoning_effort=None, agent_nom=None,
                  rattrapage_tool_code_restant=1):
@@ -2428,7 +2523,29 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
             yield _evenement_confirmation(attente, messages_agent, outils_mcp, table_routage, modele, reasoning_effort, agent_nom)
             return
 
-    for _ in range(MAX_ETAPES_OUTILS):
+    # Budget dynamique d'aller-retours "outil" (02/09/2026, remplace
+    # MAX_ETAPES_OUTILS fixe -- voir sa note plus haut) : demarre a
+    # budget_depart, s'etend de palier_extension a chaque epuisement TANT
+    # QU'aucune repetition n'est detectee (progression jugee reelle),
+    # jusqu'a plafond_absolu qui reste la vraie limite infranchissable.
+    _params_outils = parametres_outils()
+    budget_courant = _params_outils["budget_depart"]
+    palier_extension = _params_outils["palier_extension"]
+    plafond_absolu = _params_outils["plafond_absolu"]
+    tolerance_repetition = _params_outils["tolerance_repetition"]
+    # (nom, arguments) de chaque appel deja execute ce tour, dans l'ordre
+    # -- sert uniquement a _detecter_appel_repete, jamais vide entre deux
+    # tours (nouvelle liste a chaque appel de _agent_groq).
+    historique_appels_tour = []
+    limite_atteinte = False
+    etape = 0
+    while True:
+        if etape >= budget_courant:
+            if budget_courant >= plafond_absolu:
+                limite_atteinte = True
+                break
+            budget_courant = min(budget_courant + palier_extension, plafond_absolu)
+        etape += 1
         # Forçage réel de l'appel d'outil (2026-07-28, correction demandée
         # par Bourama) : jusqu'ici, un outil sélectionné (bouton Outils ou
         # clic sur une suggestion du routeur) n'était qu'"encouragé" via une
@@ -2614,6 +2731,34 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
 
         appels = [appels_en_cours[i] for i in sorted(appels_en_cours)]
 
+        # Detection de repetition (02/09/2026, demande Bourama) : si l'un
+        # de ces appels ferait atteindre tolerance_repetition fois
+        # d'affilee EXACTEMENT le meme appel (nom + arguments), on
+        # s'arrete AVANT de l'executer -- signe d'une vraie boucle, pas
+        # d'un usage legitime. On ne l'ajoute pas a messages_agent
+        # (aucun tool_calls sans tool_result correspondant).
+        appel_repete = _detecter_appel_repete(historique_appels_tour, appels, tolerance_repetition)
+        historique_appels_tour.extend((a["name"], a["arguments"]) for a in appels)
+        if appel_repete:
+            logging.warning(
+                f"Répétition détectée sur {modele} -- même appel ({appel_repete['name']}) "
+                f"refait {tolerance_repetition}x d'affilée, arrêt avant exécution."
+            )
+            messages_agent.append({
+                "role": "system",
+                "content": (
+                    f"Tu as répété {tolerance_repetition} fois d'affilée exactement la "
+                    f"même action ({_nom_lisible_appel(appel_repete)}) sans y arriver. "
+                    "Rédige maintenant ta réponse en expliquant clairement ce blocage à "
+                    "l'utilisateur, avec ce que tu as quand même réussi à faire jusque-là. "
+                    "Ne retente pas cette même action telle quelle."
+                ),
+            })
+            for event in _generer_conclusion_forcee(client_groq, messages_agent, outils_mcp, modele, kwargs_reasoning, DELAI_MAX_PAR_APPEL):
+                yield event
+            yield _evenement_reprise_agent("repetition_detectee", messages_agent, outils_mcp, table_routage, modele, reasoning_effort, agent_nom)
+            return
+
         messages_agent.append({
             "role": "assistant",
             "content": None,
@@ -2653,42 +2798,26 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
         # pour leur affichage en menu repliable en bas de la reponse.
 
 
-    # MAX_ETAPES_OUTILS epuise sans reponse directe : on force une reponse
-    # finale (sans autoriser de nouvel appel d'outil).
-    completion = client_groq.chat.completions.create(
-        model=modele,
-        messages=messages_agent,
-        max_completion_tokens=None,
-        tools=outils_mcp if outils_mcp else None,
-        stream=True,
-        timeout=DELAI_MAX_PAR_APPEL,
-        **kwargs_reasoning,
-    )
-    # Meme filtre que dans la boucle principale plus haut (voir
-    # _traiter_fragment_texte / _finaliser_fragment_texte) -- corrige le
-    # meme bug ici aussi puisque ce chemin duplique la meme logique de
-    # streaming. Pas de rattrapage ici : le budget MAX_ETAPES_OUTILS est
-    # deja epuise, on affiche directement un message d'erreur si un faux
-    # bloc TOOL_CODE est quand meme detecte, plutot que de relancer encore.
-    etat_filtre = _nouvel_etat_filtre_texte()
-    for chunk in completion:
-        delta = chunk.choices[0].delta
-        raisonnement = getattr(delta, "reasoning", None)
-        if raisonnement:
-            yield {"type": "raisonnement", "texte": raisonnement}
-        token = delta.content or ""
-        if token:
-            for evenement in _traiter_fragment_texte(etat_filtre, token, messages_agent):
-                yield evenement
-    for evenement in _finaliser_fragment_texte(etat_filtre, messages_agent):
-        yield evenement
-    if etat_filtre["tool_code_detecte"]:
-        logging.error(f"Faux appel d'outil (bloc TOOL_CODE) détecté sur {modele} (budget d'étapes épuisé) -- abandon.")
-        yield {
-            "type": "reponse",
-            "texte": "Désolé, je n'ai pas réussi à exécuter l'action demandée. Peux-tu réessayer ou reformuler ta demande ?",
-        }
-    logging.info(f"Réponse via GROQ (avec outil): {modele}")
+    # plafond_absolu atteint sans conclusion (02/09/2026, remplace
+    # l'ancien forcage silencieux) : le modele redige quand meme une
+    # vraie reponse a partir de ce qu'il a deja obtenu, en expliquant
+    # lui-meme qu'il a atteint sa limite -- puis un evenement
+    # limite_outils_atteinte porte l'etat complet pour le bouton
+    # "Continuer" cote frontend (voir _evenement_reprise_agent).
+    messages_agent.append({
+        "role": "system",
+        "content": (
+            f"Tu as atteint la limite de {plafond_absolu} actions pour cette "
+            "réponse. Rédige maintenant ta réponse finale à partir de ce que tu "
+            "as déjà obtenu, en indiquant clairement à l'utilisateur que tu as "
+            "atteint cette limite et qu'il peut te demander de continuer pour "
+            "poursuivre le travail."
+        ),
+    })
+    for event in _generer_conclusion_forcee(client_groq, messages_agent, outils_mcp, modele, kwargs_reasoning, DELAI_MAX_PAR_APPEL):
+        yield event
+    yield _evenement_reprise_agent("limite_outils_atteinte", messages_agent, outils_mcp, table_routage, modele, reasoning_effort, agent_nom)
+    logging.info(f"Réponse via GROQ (avec outil, plafond_absolu={plafond_absolu} atteint): {modele}")
 
 
 def _capturer_reponse(generateur, accumulateur, meta=None):
@@ -2756,6 +2885,20 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
       l'utilisateur (ex: creer une page Notion) attend une confirmation avant de s'executer.
       Contient "nom_lisible", "arguments" (a afficher a l'utilisateur), et "etat_reprise"
       (a repasser tel quel a chat(reprise=...) une fois la decision prise).
+    - {"type": "limite_outils_atteinte", "etat_reprise": {...}}  -> (02/09/2026) le budget
+      dynamique d'aller-retours "outil" a atteint son plafond_absolu (voir parametres_outils()
+      dans mcp_tools.py) sans que le modele ait pu conclure. Une VRAIE reponse texte a quand
+      meme ete generee juste avant cet evenement (le modele explique lui-meme qu'il a atteint
+      sa limite) : le frontend affiche un bouton "Continuer" sous CE message, qui rappelle
+      chat(reprise={"etat_reprise": evenement["etat_reprise"], "type": "continuer_agent"})
+      pour reprendre avec un budget neuf, sans rien reexecuter (messages_agent garde tous les
+      resultats d'outils deja obtenus).
+    - {"type": "repetition_detectee", "etat_reprise": {...}}  -> (02/09/2026) le meme appel
+      d'outil (nom + arguments identiques) a ete tente plusieurs fois d'affilee (voir
+      tolerance_repetition dans parametres_outils()) : signe d'une vraie boucle, l'appel N'A
+      PAS ete execute. Une reponse texte explique le blocage, puis cet evenement porte
+      l'etat pour un bouton "Reessayer" -- meme mecanisme de reprise que limite_outils_atteinte
+      (chat(reprise={"etat_reprise": ..., "type": "continuer_agent"})).
     - {"type": "meta", "message_id_user": ..., "message_id_assistant": ...,
       "created_at_assistant": ...}                -> DERNIER evenement emis, une fois
       l'echange persiste dans historique_conversations (voir _sauvegarder_echange).
@@ -2858,6 +3001,33 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     vision Gemini juste en dessous. A etendre en v2 si le tool-calling
     multi-fournisseurs est prioritaire.
     """
+    if reprise is not None and reprise.get("type") == "continuer_agent":
+        # Reprise apres "limite_outils_atteinte" ou "repetition_detectee"
+        # (02/09/2026) : pas d'appel en attente ici (contrairement a la
+        # reprise apres confirmation juste en dessous) -- on relance
+        # directement _agent_groq avec un budget neuf a partir de l'etat
+        # garde par _evenement_reprise_agent. messages_agent contient deja
+        # tous les resultats d'outils obtenus jusque-la : rien n'est
+        # reexecute, rien n'est perdu.
+        etat = reprise["etat_reprise"]
+        messages_agent = etat["messages_agent"]
+        outils_mcp = etat["outils_mcp"]
+        table_routage = etat["table_routage"]
+        modele_reprise = etat.get("modele", GROQ_PRIMARY)
+        reasoning_effort_reprise = etat.get("reasoning_effort")
+
+        client_groq = Groq(api_key=get_secret("GROQ_API_KEY"), max_retries=0)
+        try:
+            yield from _agent_groq(
+                client_groq, messages_agent, outils_mcp, table_routage,
+                modele=modele_reprise, reasoning_effort=reasoning_effort_reprise,
+                agent_nom=etat.get("agent_nom"),
+            )
+        except Exception as e:
+            logging.error(f"ERREUR GROQ (reprise apres limite/répétition) {modele_reprise}: {e}")
+            yield {"type": "reponse", "texte": MESSAGE_ERREUR}
+        return
+
     if reprise is not None:
         etat = reprise["etat_reprise"]
         approuve = reprise["approuve"]
