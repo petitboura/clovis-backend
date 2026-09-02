@@ -206,6 +206,10 @@ async def copier_depuis_bibliotheque_publique(
         # Même correctif que uploader_document ci-dessus (02/09) : thread
         # dédié pour ne pas bloquer le serveur, détection précise du
         # doublon (contrainte d'unicité par utilisateur sur nom_fichier).
+        # CORRECTIF 02/09/2026 (demande Bourama : distinguer "depuis
+        # public" des autres origines dans la bibliothèque perso) :
+        # avant, une copie retombait sur l'origine par défaut
+        # "bibliotheque", indistinguable d'un ajout direct.
         ligne = await asyncio.to_thread(
             enregistrer_fichier,
             contenu=contenu,
@@ -216,6 +220,7 @@ async def copier_depuis_bibliotheque_publique(
             user_id=utilisateur.id,
             description=description_finale,
             statut_vectorisation="en_attente" if necessite_vectorisation_fichier_privee(entree["type_mime"]) else "pret",
+            origine="publique",
         )
     except APIError as e:
         if getattr(e, "code", None) == "23505":
@@ -367,7 +372,11 @@ def lister(utilisateur=Depends(utilisateur_courant)):
     # (voir migration fichiers_uploades_origine + enregistrer_fichier) --
     # ne remonte QUE ce qui a été ajouté explicitement ici, jamais un
     # fichier envoyé en pièce jointe de conversation.
-    return lister_fichiers("utilisateur", user_id=utilisateur.id, origine="bibliotheque")
+    # CORRECTIF 02/09/2026 (nouvelles origines "publique"/"code_partage"/
+    # "ia_generee") : origine="bibliotheque" -> exclut_origine="chat",
+    # pour que ces fichiers restent visibles ici tant que le découpage en
+    # onglets d'origine n'est pas fait côté frontend.
+    return lister_fichiers("utilisateur", user_id=utilisateur.id, exclut_origine="chat")
 
 
 @router.delete("/{fichier_id}", status_code=204)

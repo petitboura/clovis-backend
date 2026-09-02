@@ -43,6 +43,7 @@ def enregistrer_lien(
     agent_id: str = None,
     user_id: str = None,
     description: str = None,
+    origine: str = "bibliotheque",
 ) -> dict:
     """
     Variante de enregistrer_fichier pour une entrée "lien" (juste une URL,
@@ -70,6 +71,7 @@ def enregistrer_lien(
         "description": description,
         "taille_octets": None,
         "statut_vectorisation": "pret",
+        "origine": origine,
     }).execute()
     return insertion.data[0]
 
@@ -93,12 +95,15 @@ def enregistrer_fichier(
     requis en cohérence avec le niveau (ex. niveau="agent" -> agent_id
     obligatoire) mais ce n'est pas vérifié ici -- c'est à l'appelant
     (route API) de garantir la cohérence selon qui uploade.
-    `origine` (2026-08-01, "chat" ou "bibliotheque", voir migration
-    fichiers_uploades_origine) : distingue un fichier envoyé en pièce
-    jointe de conversation (jamais dans la liste "Mon espace >
-    Bibliothèque", voir lister_fichiers) d'un fichier ajouté
-    explicitement à une bibliothèque -- par défaut "bibliotheque", les 4
-    appels depuis api/uploads.py (chat) passent "chat" explicitement.
+    `origine` (2026-08-01, voir migration fichiers_uploades_origine ;
+    étendu le 02/09/2026, demande Bourama : onglets d'origine dans la
+    bibliothèque perso) : "chat" (pièce jointe de conversation, jamais
+    dans "Mon espace > Bibliothèque", voir lister_fichiers), "publique"
+    (copié depuis la bibliothèque publique), "code_partage" (reçu via un
+    code de partage), "ia_generee" (généré par l'IA -- document, code,
+    image, audio, vidéo, 3D...), ou par défaut "bibliotheque" (ajout
+    direct par l'utilisateur, ou note/lien/fichier ajouté par l'IA via
+    gerer_document_bibliotheque -- pas une génération, juste un ajout).
 
     `statut_vectorisation` (29/08/2026, file d'attente de vectorisation
     en arrière-plan -- voir core/file_attente_vectorisation.py) :
@@ -226,13 +231,20 @@ def chercher_fichiers(recherche: str, agent_id: str = None, user_id: str = None,
     return fichiers
 
 
-def lister_fichiers(niveau: str, agent_id: str = None, user_id: str = None, origine: str = None) -> list:
+def lister_fichiers(
+    niveau: str, agent_id: str = None, user_id: str = None, origine: str = None, exclut_origine: str = None
+) -> list:
     """
     Liste exhaustive (pas une recherche par mot-clé) des fichiers d'un
     niveau précis -- utilisé pour l'écran de gestion du créateur
     ("ma bibliothèque pour cet agent"), pas par l'IA en conversation.
-    `origine` (2026-08-01) : optionnel, filtre "chat" vs "bibliotheque"
-    -- voir enregistrer_fichier.
+    `origine` (2026-08-01) : optionnel, filtre EXACT sur une origine.
+    `exclut_origine` (02/09/2026, demande Bourama : distinguer les
+    origines "publique"/"code_partage"/"ia_generee" de l'ancien
+    fourre-tout "bibliotheque") : optionnel, exclut une origine au lieu
+    d'en filtrer une seule -- utilisé par la vue "Perso" (tout SAUF
+    "chat") pour continuer à voir tous ces fichiers ensemble tant que le
+    découpage en onglets d'origine n'est pas fait côté frontend.
     """
     requete = supabase.table("fichiers_uploades").select("*").eq("niveau", niveau)
     if agent_id:
@@ -241,6 +253,8 @@ def lister_fichiers(niveau: str, agent_id: str = None, user_id: str = None, orig
         requete = requete.eq("user_id", user_id)
     if origine:
         requete = requete.eq("origine", origine)
+    if exclut_origine:
+        requete = requete.neq("origine", exclut_origine)
     return requete.order("created_at", desc=True).execute().data
 
 

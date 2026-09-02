@@ -311,6 +311,10 @@ def _copier_fichier_pour_receveur(fichier_id: str, receveur_id: str, proprietair
         return None
 
     try:
+        # CORRECTIF 02/09/2026 (demande Bourama : distinguer "depuis un
+        # code" des autres origines dans la bibliothèque perso du
+        # receveur) : avant, une propagation retombait sur l'origine par
+        # défaut "bibliotheque", indistinguable d'un ajout direct.
         nouvelle = enregistrer_fichier(
             contenu=contenu,
             nom_fichier=f["nom_fichier"],
@@ -320,6 +324,7 @@ def _copier_fichier_pour_receveur(fichier_id: str, receveur_id: str, proprietair
             user_id=receveur_id,
             description=f.get("description"),
             statut_vectorisation="en_attente" if necessite_vectorisation_fichier_privee(f["type_mime"]) else "pret",
+            origine="code_partage",
         )
     except Exception as e:
         logging.error(f"ERREUR propagation fichier (dossier partagé, {fichier_id} -> {receveur_id}) : {e}")

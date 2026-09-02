@@ -291,7 +291,10 @@ def lister_bibliotheque(ctx: Context, limit: int = 20, offset: int = 0) -> str:
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
     try:
-        fichiers = _lister_fichiers("utilisateur", user_id=user_id, origine="bibliotheque")
+        # CORRECTIF 02/09/2026 : origine="bibliotheque" -> exclut_origine=
+        # "chat", pour que les nouvelles origines "publique"/"code_partage"/
+        # "ia_generee" restent visibles ici (voir bibliotheque_fichiers.py).
+        fichiers = _lister_fichiers("utilisateur", user_id=user_id, exclut_origine="chat")
     except Exception as e:
         logging.error(f"ERREUR outil lister_bibliotheque : {e}")
         return "Erreur : impossible de lister la bibliothèque, réessaie."

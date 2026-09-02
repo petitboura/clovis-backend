@@ -179,8 +179,37 @@ mcp_generation = FastMCP(name="generation")
 _TAILLE_MAX_OCTETS_BIBLIOTHEQUE = 50 * 1024 * 1024  # 50 Mo
 
 
+# 02/09/2026, demande Bourama : tout ce que l'IA génère (document, code,
+# image, audio, vidéo, 3D...) doit atterrir automatiquement dans la
+# bibliothèque personnelle de l'utilisateur, avec une origine dédiée
+# ("ia_generee", nouvel onglet "Généré par l'IA" côté UI) -- avant ce
+# correctif, ces générations n'étaient JAMAIS sauvegardées nulle part,
+# juste affichées comme un lien dans le chat. Best-effort : une erreur
+# ici ne doit jamais faire échouer l'outil de génération lui-même (le
+# lien reste utilisable même si la sauvegarde échoue), juste logguée.
+def _sauvegarder_generation_bibliotheque(ctx: Context, url: str, nom_fichier: str, type_mime: str) -> None:
+    try:
+        user_id = ctx.request_context.request.query_params.get("user_id")
+        if not user_id:
+            return
+        reponse = requests.get(url, timeout=30)
+        reponse.raise_for_status()
+        _enregistrer_fichier(
+            contenu=reponse.content,
+            nom_fichier=nom_fichier,
+            type_mime=type_mime,
+            niveau="utilisateur",
+            uploade_par=user_id,
+            user_id=user_id,
+            description=nom_fichier,
+            origine="ia_generee",
+        )
+    except Exception as e:
+        logging.error(f"ERREUR sauvegarde bibliotheque (generation IA, {nom_fichier}) : {e}")
+
+
 @mcp_generation.tool()
-def generer_document(titre: str, contenu_markdown: str) -> str:
+def generer_document(titre: str, contenu_markdown: str, ctx: Context) -> str:
     """
     Génère un document PDF à partir d'un titre et d'un contenu au format
     markdown (titres, listes, tableaux, blocs de code supportés).
@@ -188,7 +217,9 @@ def generer_document(titre: str, contenu_markdown: str) -> str:
     l'étudiant.
     """
     try:
-        return generer_pdf_depuis_markdown(titre, contenu_markdown)
+        url = generer_pdf_depuis_markdown(titre, contenu_markdown)
+        _sauvegarder_generation_bibliotheque(ctx, url, f"{titre}.pdf", "application/pdf")
+        return url
     except Exception as e:
         logging.error(f"ERREUR outil generation : {e}")
         return "Erreur : la génération du document a échoué, réessaie."
@@ -207,7 +238,7 @@ def _formater_resultat_document(resultat: dict) -> str:
 
 
 @mcp_generation.tool()
-def generer_document_word(titre: str, contenu_markdown: str) -> str:
+def generer_document_word(titre: str, contenu_markdown: str, ctx: Context) -> str:
     """
     Génère un document Word (.docx) à partir d'un titre et d'un contenu
     markdown (titres #/##/### et paragraphes supportés, pas de mise en
@@ -215,14 +246,19 @@ def generer_document_word(titre: str, contenu_markdown: str) -> str:
     aperçu PDF prêt à afficher directement dans le chat.
     """
     try:
-        return _formater_resultat_document(_generer_docx(titre, contenu_markdown))
+        resultat = _generer_docx(titre, contenu_markdown)
+        _sauvegarder_generation_bibliotheque(
+            ctx, resultat["url"], f"{titre}.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        return _formater_resultat_document(resultat)
     except Exception as e:
         logging.error(f"ERREUR outil generation : {e}")
         return "Erreur : la génération du document Word a échoué, réessaie."
 
 
 @mcp_generation.tool()
-def generer_document_excel(titre: str, en_tetes: list, lignes: list) -> str:
+def generer_document_excel(titre: str, en_tetes: list, lignes: list, ctx: Context) -> str:
     """
     Génère un classeur Excel (.xlsx) à une feuille. `en_tetes` : liste
     de noms de colonnes, ex. ["Nom", "Note"]. `lignes` : liste de
@@ -232,14 +268,19 @@ def generer_document_excel(titre: str, en_tetes: list, lignes: list) -> str:
     chat.
     """
     try:
-        return _formater_resultat_document(_generer_xlsx(titre, en_tetes, lignes))
+        resultat = _generer_xlsx(titre, en_tetes, lignes)
+        _sauvegarder_generation_bibliotheque(
+            ctx, resultat["url"], f"{titre}.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        return _formater_resultat_document(resultat)
     except Exception as e:
         logging.error(f"ERREUR outil generation : {e}")
         return "Erreur : la génération du classeur Excel a échoué, réessaie."
 
 
 @mcp_generation.tool()
-def generer_document_powerpoint(titre: str, diapositives: list) -> str:
+def generer_document_powerpoint(titre: str, diapositives: list, ctx: Context) -> str:
     """
     Génère une présentation PowerPoint (.pptx). `diapositives` : liste
     de dicts {"titre": ..., "contenu": ...}, une diapositive titre+texte
@@ -249,14 +290,19 @@ def generer_document_powerpoint(titre: str, diapositives: list) -> str:
     dans le chat.
     """
     try:
-        return _formater_resultat_document(_generer_pptx(titre, diapositives))
+        resultat = _generer_pptx(titre, diapositives)
+        _sauvegarder_generation_bibliotheque(
+            ctx, resultat["url"], f"{titre}.pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        )
+        return _formater_resultat_document(resultat)
     except Exception as e:
         logging.error(f"ERREUR outil generation : {e}")
         return "Erreur : la génération de la présentation PowerPoint a échoué, réessaie."
 
 
 @mcp_generation.tool()
-def generer_code(nom_projet: str, fichiers: dict) -> str:
+def generer_code(nom_projet: str, fichiers: dict, ctx: Context) -> str:
     """
     Génère un fichier de code téléchargeable à partir d'un ou plusieurs
     fichiers. `fichiers` est un dictionnaire {chemin: contenu}, ex.
@@ -265,14 +311,20 @@ def generer_code(nom_projet: str, fichiers: dict) -> str:
     l'URL publique du fichier ou de l'archive.
     """
     try:
-        return generer_zip_depuis_fichiers(nom_projet, fichiers)
+        url = generer_zip_depuis_fichiers(nom_projet, fichiers)
+        # Nom réel déduit de l'URL (single file -> son propre nom, sinon
+        # -> archive .zip du projet) plutôt que deviné ici.
+        nom_reel = url.rsplit("/", 1)[-1].split("?", 1)[0]
+        type_mime = "application/zip" if len(fichiers) > 1 else "text/plain"
+        _sauvegarder_generation_bibliotheque(ctx, url, nom_reel, type_mime)
+        return url
     except Exception as e:
         logging.error(f"ERREUR outil generation : {e}")
         return "Erreur : la génération du fichier a échoué, réessaie."
 
 
 @mcp_generation.tool()
-def generer_document_latex(titre: str, contenu_latex: str) -> str:
+def generer_document_latex(titre: str, contenu_latex: str, ctx: Context) -> str:
     """
     Génère un fichier LaTeX (.tex) téléchargeable -- distinct de
     l'affichage à l'écran (les formules $...$/$$...$$ rendues en KaTeX
@@ -284,7 +336,9 @@ def generer_document_latex(titre: str, contenu_latex: str) -> str:
     automatiquement). Renvoie l'URL publique du fichier .tex.
     """
     try:
-        return f"Fichier LaTeX généré : {_generer_fichier_latex(titre, contenu_latex)}"
+        url = _generer_fichier_latex(titre, contenu_latex)
+        _sauvegarder_generation_bibliotheque(ctx, url, f"{titre}.tex", "application/x-tex")
+        return f"Fichier LaTeX généré : {url}"
     except Exception as e:
         logging.error(f"ERREUR outil generation : {e}")
         return "Erreur : la génération du fichier LaTeX a échoué, réessaie."
@@ -554,7 +608,10 @@ def gerer_document_bibliotheque(
 
     if action == "lister":
         try:
-            fichiers = _lister_fichiers("utilisateur", user_id=user_id, origine="bibliotheque")
+            # CORRECTIF 02/09/2026 : origine="bibliotheque" -> exclut_origine=
+            # "chat", pour que les nouvelles origines "publique"/"code_partage"/
+            # "ia_generee" restent visibles ici (voir bibliotheque_fichiers.py).
+            fichiers = _lister_fichiers("utilisateur", user_id=user_id, exclut_origine="chat")
         except Exception as e:
             logging.error(f"ERREUR gerer_document_bibliotheque (lister) : {e}")
             return "Erreur : impossible de lister la bibliothèque, réessaie."
@@ -1474,7 +1531,7 @@ def consulter_matiere_active(message_utilisateur: str, ctx: Context) -> str:
 
 
 @mcp_generation.tool()
-def generer_site_zip(nom_projet: str, fichiers: dict) -> str:
+def generer_site_zip(nom_projet: str, fichiers: dict, ctx: Context) -> str:
     """
     Génère une archive .zip téléchargeable d'un site web statique
     (HTML/CSS/JS). `fichiers` est un dictionnaire {chemin: contenu}, ex.
@@ -1485,14 +1542,18 @@ def generer_site_zip(nom_projet: str, fichiers: dict) -> str:
     zip) ; plusieurs -> archive .zip. Renvoie l'URL publique.
     """
     try:
-        return generer_zip_depuis_fichiers(nom_projet, fichiers)
+        url = generer_zip_depuis_fichiers(nom_projet, fichiers)
+        nom_reel = url.rsplit("/", 1)[-1].split("?", 1)[0]
+        type_mime = "application/zip" if len(fichiers) > 1 else "text/plain"
+        _sauvegarder_generation_bibliotheque(ctx, url, nom_reel, type_mime)
+        return url
     except Exception as e:
         logging.error(f"ERREUR outil generation : {e}")
         return "Erreur : la génération du site (zip) a échoué, réessaie."
 
 
 @mcp_generation.tool()
-def generer_bundle(nom_projet: str, elements: list) -> str:
+def generer_bundle(nom_projet: str, elements: list, ctx: Context) -> str:
     """
     Regroupe plusieurs fichiers hétérogènes (déjà générés ailleurs, ou
     fournis en brut) en une seule archive .zip téléchargeable.
@@ -1505,21 +1566,27 @@ def generer_bundle(nom_projet: str, elements: list) -> str:
     Renvoie l'URL publique du .zip.
     """
     try:
-        return _generer_bundle(nom_projet, elements)
+        url = _generer_bundle(nom_projet, elements)
+        _sauvegarder_generation_bibliotheque(ctx, url, f"{nom_projet}.zip", "application/zip")
+        return url
     except Exception as e:
         logging.error(f"ERREUR outil generation : {e}")
         return "Erreur : la génération du bundle a échoué, réessaie."
 
 
 @mcp_generation.tool()
-def exporter_donnees(nom: str, donnees: dict, format: str = "json") -> str:
+def exporter_donnees(nom: str, donnees: dict, format: str = "json", ctx: Context = None) -> str:
     """
     Exporte des données structurées (un dictionnaire, potentiellement
     imbriqué) vers un fichier JSON ou XML téléchargeable. `format` doit
     valoir "json" ou "xml". Renvoie l'URL publique du fichier généré.
     """
     try:
-        return _exporter_donnees(nom, donnees, format)
+        url = _exporter_donnees(nom, donnees, format)
+        _sauvegarder_generation_bibliotheque(
+            ctx, url, f"{nom}.{format}", "application/json" if format == "json" else "application/xml"
+        )
+        return url
     except Exception as e:
         logging.error(f"ERREUR outil generation : {e}")
         return "Erreur : l'export des données a échoué, réessaie."
@@ -1582,7 +1649,7 @@ if video_disponible():
 # mis explicitement par Bourama).
 if audio_disponible():
     @mcp_generation.tool()
-    def generer_audio(texte: str, voix: str = "austin") -> str:
+    def generer_audio(texte: str, voix: str = "austin", ctx: Context = None) -> str:
         """
         Convertit du texte en audio parlé (voix naturelle). Le texte
         peut inclure des indications vocales entre crochets, ex.
@@ -1590,7 +1657,11 @@ if audio_disponible():
         audio généré.
         """
         try:
-            return _generer_audio(texte, voix)
+            url = _generer_audio(texte, voix)
+            extension = url.rsplit(".", 1)[-1].split("?", 1)[0] if "." in url.rsplit("/", 1)[-1] else "mp3"
+            nom = (texte[:40].strip() or "Audio") + f".{extension}"
+            _sauvegarder_generation_bibliotheque(ctx, url, nom, f"audio/{extension}")
+            return url
         except Exception as e:
             logging.error(f"ERREUR outil generation : {e}")
             return "Erreur : la génération audio a échoué, réessaie."
@@ -1622,7 +1693,7 @@ if signature_disponible():
 
 if modele_3d_disponible() or signature_disponible():
     @mcp_generation.tool()
-    def consulter_statut_generation(type: str, request_id: str) -> str:
+    def consulter_statut_generation(type: str, request_id: str, ctx: Context = None) -> str:
         """
         Consulte l'état d'une génération asynchrone déjà lancée
         (modèle 3D, vidéo ou demande de signature), consolidé le 26/08,
@@ -1650,6 +1721,7 @@ if modele_3d_disponible() or signature_disponible():
             try:
                 resultat = _statut_modele_3d(request_id)
                 if resultat["statut"] == "COMPLETED":
+                    _sauvegarder_generation_bibliotheque(ctx, resultat["url"], f"Modele_3D_{request_id}.glb", "model/gltf-binary")
                     return f"Modèle 3D prêt : {resultat['url']}"
                 return f"Toujours en cours (statut : {resultat['statut']}), redemande un peu plus tard."
             except Exception as e:
@@ -1662,6 +1734,7 @@ if modele_3d_disponible() or signature_disponible():
             try:
                 resultat = _statut_video(request_id)
                 if resultat["statut"] == "COMPLETED":
+                    _sauvegarder_generation_bibliotheque(ctx, resultat["url"], f"Video_{request_id}.mp4", "video/mp4")
                     return f"Vidéo prête : {resultat['url']}"
                 return f"Toujours en cours (statut : {resultat['statut']}), redemande dans une minute."
             except Exception as e:
@@ -1688,13 +1761,17 @@ if modele_3d_disponible() or signature_disponible():
 # condition ici, contrairement à la signature/audio/vidéo/3D qui, eux,
 # n'ont pas d'équivalent gratuit connu.
 @mcp_generation.tool()
-def generer_image(prompt: str) -> str:
+def generer_image(prompt: str, ctx: Context = None) -> str:
     """
     Génère une image à partir d'une description textuelle. Renvoie
     l'URL publique de l'image générée.
     """
     try:
-        return _generer_image(prompt)
+        url = _generer_image(prompt)
+        extension = url.rsplit(".", 1)[-1].split("?", 1)[0] if "." in url.rsplit("/", 1)[-1] else "png"
+        nom = (prompt[:40].strip() or "Image") + f".{extension}"
+        _sauvegarder_generation_bibliotheque(ctx, url, nom, f"image/{extension}")
+        return url
     except Exception as e:
         logging.error(f"ERREUR outil generation : {e}")
         return "Erreur : la génération de l'image a échoué, réessaie."
@@ -1704,6 +1781,11 @@ def generer_image(prompt: str) -> str:
 # generation_site.py). generer_site_zip (juste au-dessus, non
 # conditionnel) reste toujours disponible pour le cas "code seul" :
 # seul ce second outil, le déploiement en ligne, dépend de la clé.
+# 02/09/2026, demande Bourama (auto-sauvegarde bibliothèque de tout ce
+# que l'IA génère) : volontairement NON branché ici -- un déploiement
+# Vercel est un site en ligne, pas un fichier téléchargeable, il n'y a
+# rien de concret à ranger dans la bibliothèque (contrairement à
+# generer_site_zip juste au-dessus, qui lui produit une vraie archive).
 if site_deploiement_disponible():
     @mcp_generation.tool()
     def deployer_site(nom_projet: str, fichiers: dict) -> str:
