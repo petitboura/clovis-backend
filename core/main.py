@@ -1155,12 +1155,7 @@ gerer_base_connaissance regroupe un seul mécanisme en plusieurs étapes (action
 Ceci s'applique à TOUTE question sur Clovis ou sur l'application en général, même formulée normalement, sans jamais mentionner "base de connaissance" ou un format de fichier, mets-toi à la place d'un utilisateur qui ignore que ce mécanisme existe : il demande juste comment faire quelque chose, pourquoi ça bug, ou ce que fait une fonctionnalité. Exception : si tu as déjà cherché sur ce sujet précis plus tôt dans cette même conversation sans rien trouver de pertinent, ne réinsiste pas indéfiniment, réponds avec ce que tu sais déjà ou dis clairement que tu ne trouves pas l'information.
 </base_connaissances_clovis>
 
-<citations_sources>
-Tout outil qui te renvoie des numéros à citer (ex : "numérote tes citations avec [[n]] pour ces 3 sources de 4 à 6") -- bibliothèque, recherche web, GitHub, ou tout autre outil sourcé.
-Insère [[n]] juste après chaque passage utilisant cette source. Format EXACT, obligatoire, sans exception : double crochet ouvrant, le numéro, double crochet fermant.
-N'écris jamais le chiffre seul. N'écris jamais le chiffre entre parenthèses. Ne réécris jamais l'URL ni le nom de la source en clair.
-Exemple : "...produit l'ATP [[5]]...".
-</citations_sources>"""
+"""
 
 INSTRUCTIONS_ARBITRAGE_CALCUL = """
 
@@ -2239,23 +2234,16 @@ def _traiter_appels(appels, messages_agent, table_routage, compteur_sources=None
                     for n, s in zip(range(debut_numero, compteur_sources[0] + 1), sources):
                         s["numero"] = n
                     yield {"type": "sources", "sources": sources}
-                    # Le modele voit le RESULTAT BRUT (pas l'evenement SSE,
-                    # qui va direct au frontend) -- il a donc besoin qu'on
-                    # lui dise explicitement quels numeros utiliser pour
-                    # [[n]], voir <citations_sources> du system prompt.
+                    # 2026-09-02 (demande Bourama) : citation inline [[n]]
+                    # au fil du texte desactivee -- on ne dit plus au
+                    # modele d'inserer de marqueur. La liste de sources en
+                    # bas (evenement SSE "sources" ci-dessus, avec le
+                    # `numero` deja attache a chaque source) reste
+                    # inchangee et continue de s'afficher normalement.
                     # Vaut pour TOUT outil sourcé (bibliotheque,
                     # tavily_*/notion-search via _sources_depuis_json_generique,
                     # gerer_depot_github via _sources_github_depuis_arguments,
                     # et tout futur outil sourcé sans changement ici).
-                    lignes_sources = "\n".join(
-                        f"{n}: {s['titre']}" + (f", {s['reperage']}" if s.get("reperage") else "")
-                        for n, s in zip(range(debut_numero, compteur_sources[0] + 1), sources)
-                    )
-                    contenu_pour_modele = (
-                        f"{resultat}\n\n[Utilise le marqueur [[n]] "
-                        f"pour ces {len(sources)} source(s), dans cet ordre :\n"
-                        f"{lignes_sources}\n]"
-                    )
                 messages_agent.append({
                     "role": "tool",
                     "tool_call_id": appel["id"],
