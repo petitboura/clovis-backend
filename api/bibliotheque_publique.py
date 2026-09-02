@@ -37,6 +37,7 @@ from api.auth import utilisateur_courant
 from core.erreurs import erreur_api
 from core.file_attente_vectorisation import necessite_vectorisation_fichier_publique, necessite_vectorisation_note
 from core.dossiers_catalogue_public import ranger_fichier as _ranger_fichier_dossier, peut_ajouter_contenu as _peut_ajouter_contenu_dossier, _dossier as _dossier_catalogue_public
+from core.dossiers_publics_attaches import propager_fichier_public_range_dossier as _propager_fichier_public_range_dossier
 
 router = APIRouter(prefix="/api/bibliotheque-publique", tags=["bibliotheque_publique"])
 
@@ -47,6 +48,7 @@ def _classer_si_autorise(fichier_id: str, dossier_id: str, utilisateur_id: str) 
     try:
         if _dossier_catalogue_public(dossier_id) and _peut_ajouter_contenu_dossier(dossier_id, utilisateur_id):
             _ranger_fichier_dossier(fichier_id, dossier_id)
+            _propager_fichier_public_range_dossier(fichier_id, dossier_id)
     except Exception as e:
         logging.error(f"ERREUR classement dossier catalogue public (fichier_id={fichier_id}, dossier_id={dossier_id}) : {e}")
 
@@ -165,7 +167,7 @@ async def ajouter_a_bibliotheque_publique(
         raise erreur_api(500, "ECHEC_DU_STOCKAGE_REESSAIE")
 
     entree = ligne.data[0]
-    _classer_si_autorise(entree["id"], dossier_id, utilisateur.id)
+    await asyncio.to_thread(_classer_si_autorise, entree["id"], dossier_id, utilisateur.id)
     return entree
 
 

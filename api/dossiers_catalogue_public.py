@@ -11,11 +11,8 @@ from api.auth import utilisateur_courant
 from core.erreurs import erreur_api
 from core.dossiers_catalogue_public import (
     _dossier,
-    attacher_dossier,
     creer_dossier,
-    detacher_dossier,
     lister_dossiers,
-    lister_dossiers_attaches,
     lister_fichiers_ids_dossier,
     peut_ajouter_contenu,
     peut_retirer_contenu,
@@ -23,6 +20,12 @@ from core.dossiers_catalogue_public import (
     renommer_dossier,
     retirer_fichier,
     supprimer_dossier,
+)
+from core.dossiers_publics_attaches import (
+    attacher_dossier as _attacher_dossier_public,
+    detacher_dossier as _detacher_dossier_public,
+    lister_dossiers_attaches,
+    propager_fichier_public_range_dossier,
 )
 
 router = APIRouter(prefix="/api/bibliotheque-publique/dossiers", tags=["dossiers-catalogue-public"])
@@ -88,6 +91,7 @@ def ranger(dossier_id: str, payload: RangerFichierPayload, utilisateur=Depends(u
     if not peut_ajouter_contenu(dossier_id, utilisateur.id):
         raise erreur_api(403, "CE_DOSSIER_EST_PRIVE_A_SON_CREATEUR")
     ranger_fichier(payload.fichier_id, dossier_id)
+    propager_fichier_public_range_dossier(payload.fichier_id, dossier_id)
     return {"dossier_id": dossier_id, "fichier_id": payload.fichier_id}
 
 
@@ -104,8 +108,10 @@ def retirer(dossier_id: str, fichier_id: str, utilisateur=Depends(utilisateur_co
 
 
 # --- Attachement à la bibliothèque perso (02/09/2026, demande Bourama) -
+# Copie réelle dans la bibliothèque perso (dossier miroir), synchronisée
+# en continu -- voir docstring de core/dossiers_publics_attaches.py.
 # Attacher est libre pour n'importe quel dossier public quel que soit
-# son statut -- voir docstring de core/dossiers_catalogue_public.py.
+# son statut.
 
 
 @router.get("/attaches")
@@ -115,12 +121,12 @@ def lister_attaches(utilisateur=Depends(utilisateur_courant)):
 
 @router.post("/{dossier_id}/attacher", status_code=201)
 def attacher(dossier_id: str, utilisateur=Depends(utilisateur_courant)):
-    if not _dossier(dossier_id):
+    dossier = _attacher_dossier_public(dossier_id, utilisateur.id)
+    if not dossier:
         raise erreur_api(404, "DOSSIER_INTROUVABLE")
-    attacher_dossier(utilisateur.id, dossier_id)
-    return {"dossier_id": dossier_id}
+    return dossier
 
 
 @router.delete("/{dossier_id}/attacher", status_code=204)
 def detacher(dossier_id: str, utilisateur=Depends(utilisateur_courant)):
-    detacher_dossier(utilisateur.id, dossier_id)
+    _detacher_dossier_public(dossier_id, utilisateur.id)
