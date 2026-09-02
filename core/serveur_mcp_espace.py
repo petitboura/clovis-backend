@@ -111,8 +111,6 @@ from core.description_multimedia import (
 )
 from core.generation_images import generer_image as _generer_image
 from core.codes_partage import (
-    propager_fichier_bibliotheque as _propager_fichier_bibliotheque,
-    propager_lien_bibliotheque as _propager_lien_bibliotheque,
     obtenir_comportement_skill_recu as _obtenir_comportement_skill_recu,
 )
 from core.comportements_etudiants import (
@@ -351,10 +349,6 @@ def ajouter_lien_bibliotheque(url: str, titre: str, ctx: Context) -> str:
     except Exception as e:
         logging.error(f"ERREUR outil ajouter_lien_bibliotheque : {e}")
         return "Erreur : impossible d'enregistrer ce lien, réessaie."
-    try:
-        _propager_lien_bibliotheque(user_id, url, titre_final, titre_final)
-    except Exception as e:
-        logging.error(f"ERREUR propagation ajouter_lien_bibliotheque : {e}")
     return f"Lien ajouté (id {ligne['id']})."
 
 
@@ -395,10 +389,6 @@ def ajouter_texte_bibliotheque(contenu: str, titre: str, ctx: Context) -> str:
         _indexer_texte_bibliotheque(contenu, fichier_id=ligne["id"], user_id=user_id)
     except Exception as e:
         logging.error(f"ERREUR vectorisation ajouter_texte_bibliotheque : {e}")
-    try:
-        _propager_fichier_bibliotheque(user_id, contenu.encode("utf-8"), nom_fichier, "text/plain", titre or None)
-    except Exception as e:
-        logging.error(f"ERREUR propagation ajouter_texte_bibliotheque : {e}")
     return f"Note ajoutée (id {ligne['id']})."
 
 
@@ -545,11 +535,6 @@ def ajouter_document_bibliotheque(
                 _indexer_transcription_bibliotheque(segments_audio, fichier_id=ligne["id"], user_id=user_id)
         except Exception as e:
             logging.error(f"ERREUR vectorisation audio ajouter_document_bibliotheque (fichier_id={ligne['id']}) : {e}")
-
-    try:
-        _propager_fichier_bibliotheque(user_id, contenu, nom_original, type_mime, description_finale)
-    except Exception as e:
-        logging.error(f"ERREUR propagation ajouter_document_bibliotheque : {e}")
 
     message = f"Fichier ajouté (id {ligne['id']})."
     # Classement dans le programme désactivé le 29/08/2026 (demande Bourama,

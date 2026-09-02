@@ -93,8 +93,6 @@ from core.comportements_etudiants import (
 #       supprimer_examen, annuler_derniere_modification
 from core.codes_partage import (
     obtenir_comportement_skill_recu as _obtenir_comportement_skill_recu,
-    propager_fichier_bibliotheque as _propager_fichier_bibliotheque,
-    propager_lien_bibliotheque as _propager_lien_bibliotheque,
 )
 from core.generation_site import (
     deployer_site as _deployer_site,
@@ -592,10 +590,6 @@ def gerer_document_bibliotheque(
         except Exception as e:
             logging.error(f"ERREUR gerer_document_bibliotheque (ajouter_lien) : {e}")
             return "Erreur : impossible d'enregistrer ce lien, réessaie."
-        try:
-            _propager_lien_bibliotheque(user_id, url_val, titre_final, titre_final)
-        except Exception as e:
-            logging.error(f"ERREUR propagation gerer_document_bibliotheque (ajouter_lien) : {e}")
         return f"Lien ajouté (id {ligne['id']})."
 
     if action == "ajouter_texte":
@@ -622,10 +616,6 @@ def gerer_document_bibliotheque(
             _indexer_texte_bibliotheque(contenu_val, fichier_id=ligne["id"], user_id=user_id)
         except Exception as e:
             logging.error(f"ERREUR vectorisation gerer_document_bibliotheque (ajouter_texte) : {e}")
-        try:
-            _propager_fichier_bibliotheque(user_id, contenu_val.encode("utf-8"), nom_fichier_note, "text/plain", titre_val or None)
-        except Exception as e:
-            logging.error(f"ERREUR propagation gerer_document_bibliotheque (ajouter_texte) : {e}")
         return f"Note ajoutée (id {ligne['id']})."
 
     if action == "ajouter_fichier":
@@ -702,10 +692,6 @@ def gerer_document_bibliotheque(
                     _indexer_transcription_bibliotheque(segments_audio, fichier_id=ligne["id"], user_id=user_id)
             except Exception as e:
                 logging.error(f"ERREUR vectorisation audio gerer_document_bibliotheque (ajouter_fichier, fichier_id={ligne['id']}) : {e}")
-        try:
-            _propager_fichier_bibliotheque(user_id, contenu_fichier, nom_original, type_mime_val, description_finale)
-        except Exception as e:
-            logging.error(f"ERREUR propagation gerer_document_bibliotheque (ajouter_fichier) : {e}")
         message = f"Fichier ajouté (id {ligne['id']})."
         # Classement dans le programme désactivé le 29/08/2026 (demande
         # Bourama, voir _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md).

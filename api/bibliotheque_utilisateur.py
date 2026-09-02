@@ -34,7 +34,6 @@ from core.erreurs import erreur_api
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "core"))
 from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien, lister_fichiers, supprimer_fichier  # noqa: E402
 from file_attente_vectorisation import necessite_vectorisation_fichier_privee, necessite_vectorisation_note  # noqa: E402
-from codes_partage import propager_fichier_bibliotheque, propager_lien_bibliotheque  # noqa: E402
 
 router = APIRouter(prefix="/api/bibliotheque", tags=["bibliotheque-utilisateur"])
 
@@ -42,15 +41,15 @@ TAILLE_MAX_OCTETS = 50 * 1024 * 1024  # 50 Mo, même limite que la bibliothèque
 BUCKET_BIBLIOTHEQUE_PUBLIQUE = "bibliotheque"  # même bucket que core/bibliotheque_fichiers.py, sous-dossier "publique/"
 
 
-def _journaliser_et_propager(contenu, type_mime, nom_fichier, description, ligne, utilisateur, request):
+def _journaliser_ajout(contenu, type_mime, nom_fichier, description, ligne, utilisateur, request):
     """
     Factorisé le 25/08 (Bourama : "rendre les fichiers de la bibliothèque
     publique copiables vers sa bibliothèque privée") entre un upload
     classique (uploader_document ci-dessous) et une copie depuis la
     bibliothèque publique (copier_depuis_bibliotheque_publique plus bas) :
-    journal + propagation aux codes de partage -- identique dans les
-    deux cas, seule la source du contenu diffère (upload direct vs
-    téléchargement depuis le storage de la bibliothèque publique).
+    journal -- identique dans les deux cas, seule la source du contenu
+    diffère (upload direct vs téléchargement depuis le storage de la
+    bibliothèque publique).
 
     RENOMMÉ le 29/08/2026 (file d'attente de vectorisation en arrière-
     plan, demande Bourama : upload en masse ou fichier long bloquait
@@ -59,6 +58,13 @@ def _journaliser_et_propager(contenu, type_mime, nom_fichier, description, ligne
     juste avant celle-ci) a déjà mis le fichier en statut_vectorisation=
     "en_attente" si besoin (voir necessite_vectorisation_fichier_privee),
     et core/file_attente_vectorisation.py s'en charge en arrière-plan.
+
+    RENOMMÉ à nouveau le 02/09/2026 (demande Bourama : le partage par
+    code n'est plus déclenché à l'AJOUT en bibliothèque, mais uniquement
+    quand un fichier est RANGÉ dans un dossier que ce code partage --
+    voir api/dossiers_bibliotheque.py::ranger et
+    core/codes_partage.py::propager_fichier_range_dossier. Cette fonction
+    ne fait donc plus que journaliser, la propagation est retirée d'ici.
     """
     journaliser(
         action="bibliotheque_perso.ajoute",
@@ -68,15 +74,6 @@ def _journaliser_et_propager(contenu, type_mime, nom_fichier, description, ligne
         details={"description": description, "type_mime": type_mime},
         request=request,
     )
-
-    # Propagation (14/08, système de codes de partage) : non bloquant, ne
-    # doit jamais faire échouer l'ajout original -- voir sa propre
-    # gestion d'erreur interne dans core/codes_partage.py.
-    try:
-        propager_fichier_bibliotheque(utilisateur.id, contenu, nom_fichier, type_mime, description)
-    except Exception as e:
-        logging.error(f"ERREUR propagation bibliothèque (fichier, {utilisateur.id}) : {e}")
-
     return ligne
 
 
@@ -158,7 +155,7 @@ async def uploader_document(
     except Exception:
         raise erreur_api(500, "ECHEC_DU_STOCKAGE_REESSAIE")
 
-    return _journaliser_et_propager(contenu, fichier.content_type, nom_original, description_finale, ligne, utilisateur, request)
+    return _journaliser_ajout(contenu, fichier.content_type, nom_original, description_finale, ligne, utilisateur, request)
 
 
 @router.post("/copier-depuis-publique/{entree_id}", status_code=201)
@@ -227,7 +224,7 @@ async def copier_depuis_bibliotheque_publique(
     except Exception:
         raise erreur_api(500, "ECHEC_DU_STOCKAGE_REESSAIE")
 
-    return _journaliser_et_propager(
+    return _journaliser_ajout(
         contenu, entree["type_mime"], nom_original, description_finale, ligne, utilisateur, request
     )
 
@@ -283,11 +280,6 @@ def ajouter_lien(
         details={"description": description_finale, "type_mime": "text/uri-list"},
         request=request,
     )
-
-    try:
-        propager_lien_bibliotheque(utilisateur.id, payload.url.strip(), (payload.titre or payload.url).strip(), description_finale)
-    except Exception as e:
-        logging.error(f"ERREUR propagation bibliothèque (lien, {utilisateur.id}) : {e}")
 
     return ligne
 
@@ -363,11 +355,6 @@ def ajouter_texte(
         details={"description": titre, "type_mime": "text/plain"},
         request=request,
     )
-
-    try:
-        propager_fichier_bibliotheque(utilisateur.id, contenu.encode("utf-8"), nom_fichier, "text/plain", titre or None)
-    except Exception as e:
-        logging.error(f"ERREUR propagation bibliothèque (texte, {utilisateur.id}) : {e}")
 
     return ligne
 

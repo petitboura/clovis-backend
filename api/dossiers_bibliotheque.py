@@ -33,6 +33,7 @@ from core.dossiers_bibliotheque import (
     retirer_fichier,
     supprimer_dossier,
 )
+from core.codes_partage import propager_fichier_range_dossier
 
 logging.basicConfig(level=logging.INFO)
 
@@ -150,6 +151,17 @@ def ranger(dossier_id: str, payload: RangerFichierPayload, utilisateur=Depends(u
         raise erreur_api(403, "CE_FICHIER_NE_T_APPARTIENT_PAS")
 
     ranger_fichier(payload.fichier_id, dossier_id)
+
+    # 02/09/2026, demande Bourama : si ce dossier (ou un de ses ancêtres)
+    # est partagé via un code actif, propager ce fichier vers chaque
+    # receveur, rangé dans le dossier miroir correspondant. Non bloquant :
+    # une erreur de propagation ne doit jamais faire échouer le rangement
+    # lui-même (déjà réussi).
+    try:
+        propager_fichier_range_dossier(payload.fichier_id, dossier_id, utilisateur.id)
+    except Exception as e:
+        logging.error(f"ERREUR propagation dossier partagé (fichier {payload.fichier_id}, dossier {dossier_id}) : {e}")
+
     return {"dossier_id": dossier_id, "fichier_id": payload.fichier_id}
 
 

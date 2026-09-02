@@ -15,9 +15,15 @@ et combinables librement :
 - un programme (référence vers un programme DÉJÀ créé par le
   propriétaire dans "Programme" -- pas une copie, la structure reste
   gérée à un seul endroit)
-- un partage de bibliothèque (voir propager_ajout_bibliotheque : chaque
-  nouveau document/lien/note ajouté à la bibliothèque perso du
-  propriétaire est automatiquement copié dans celle de chaque receveur)
+- un ou plusieurs dossiers de bibliothèque (02/09/2026, demande Bourama :
+  remplace l'ancien partage "toute la bibliothèque" (booléen
+  partage_bibliotheque) -- désormais un choix précis parmi les dossiers
+  déjà créés dans la bibliothèque perso du propriétaire, plusieurs à la
+  fois possibles. Partager un dossier partage aussi tout son contenu
+  ACTUEL (rétroactif, confirmé par Bourama) et tous ses sous-dossiers.
+  Chaque fichier reçu est rangé chez le receveur dans un dossier
+  "miroir" du même nom, avec la même hiérarchie -- voir
+  propager_dossier_vers_receveur / propager_fichier_range_dossier)
 - un texte libre (annonce simple, affichée dans une sous-section dédiée
   "Reçu de ..." côté receveur)
 
@@ -25,11 +31,12 @@ Toute personne qui a le code reçoit TOUT ce que porte ce code -- pas de
 sélection destinataire par destinataire (c'est le sens même du code).
 Modifiable après coup (Bourama, 14/08) : comportements (référence vivante,
 voir plus haut)/texte_libre sont lus en direct à chaque fois, le
-programme est une référence (donc toujours à jour), la bibliothèque se
-met à jour au fil des ajouts -- rien n'est jamais figé en copie au
-moment de l'entrée du code, SAUF les fichiers de bibliothèque eux-mêmes
-(voir propager_ajout_bibliotheque : ceux-ci sont bien copiés
-physiquement chez chaque receveur, comme demandé par Bourama).
+programme est une référence (donc toujours à jour), les dossiers
+partagés se synchronisent au fil des ajouts -- rien n'est jamais figé
+en copie au moment de l'entrée du code, SAUF les fichiers eux-mêmes
+(ceux-ci sont bien copiés physiquement chez chaque receveur, comme
+demandé par Bourama, à la fois rétroactivement à la liaison/l'entrée du
+code et pour chaque nouvel ajout ensuite).
 
 Voir l'injection dans core/main.py::chat() (comportements/programmes
 reçus fusionnés avec les siens propres) et les endpoints dans
@@ -41,13 +48,13 @@ import os
 import secrets
 import string
 import sys
-import tempfile
 
 from supabase import create_client
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien  # noqa: E402
-from bibliotheque_rag import indexer_pdf_bibliotheque, indexer_texte_bibliotheque  # noqa: E402
+from dossiers_bibliotheque import creer_dossier, lister_dossiers, lister_fichiers_ids_dossier, ranger_fichier  # noqa: E402
+from file_attente_vectorisation import necessite_vectorisation_fichier_privee  # noqa: E402
 
 
 def get_secret(key):
@@ -81,7 +88,7 @@ def _generer_code_unique() -> str:
     raise RuntimeError("Impossible de générer un code unique après plusieurs tentatives")
 
 
-_COLONNES_CODE = "id, code, nom, programme_id, partage_bibliotheque, texte_libre, actif, created_at, updated_at"
+_COLONNES_CODE = "id, code, nom, programme_id, texte_libre, actif, created_at, updated_at"
 
 
 def _comportements_par_code(code_ids: list[str]) -> dict[str, list[dict]]:
@@ -111,6 +118,31 @@ def _comportements_par_code(code_ids: list[str]) -> dict[str, list[dict]]:
     return resultat
 
 
+def _dossiers_par_code(code_ids: list[str]) -> dict[str, list[dict]]:
+    """{code_id: [{id, nom}, ...]} pour l'ensemble des code_ids donnés --
+    même principe que _comportements_par_code ci-dessus, table de liaison
+    codes_partage_dossiers (02/09/2026)."""
+    if not code_ids:
+        return {}
+    try:
+        liaisons = (
+            supabase.table("codes_partage_dossiers")
+            .select("code_id, dossier_id, dossiers_bibliotheque(id, nom)")
+            .in_("code_id", code_ids)
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture dossiers liés aux codes {code_ids}) : {e}")
+        return {}
+    resultat: dict[str, list[dict]] = {}
+    for l in (liaisons.data or []):
+        dossier = l.get("dossiers_bibliotheque")
+        if not dossier:
+            continue  # dossier supprimé entre-temps -- liaison orpheline ignorée à l'affichage
+        resultat.setdefault(l["code_id"], []).append({"id": dossier["id"], "nom": dossier.get("nom") or ""})
+    return resultat
+
+
 def lister_mes_codes(proprietaire_id: str) -> list[dict]:
     try:
         res = (
@@ -125,8 +157,10 @@ def lister_mes_codes(proprietaire_id: str) -> list[dict]:
         return []
     codes = res.data or []
     comportements_par_code = _comportements_par_code([c["id"] for c in codes])
+    dossiers_par_code = _dossiers_par_code([c["id"] for c in codes])
     for c in codes:
         c["comportements"] = comportements_par_code.get(c["id"], [])
+        c["dossiers"] = dossiers_par_code.get(c["id"], [])
     return codes
 
 
@@ -162,12 +196,285 @@ def _remplacer_comportements_du_code(code_id: str, proprietaire_id: str, comport
         logging.error(f"ERREUR SUPABASE (liaison comportements <-> code {code_id}) : {e}")
 
 
+# --- Propagation des dossiers partagés (02/09/2026) -----------------------
+# Un dossier partagé via un code propage : son contenu ACTUEL au moment
+# de la liaison/de l'entrée du code (rétroactif, demande Bourama) ET
+# tout nouvel ajout ensuite (voir propager_fichier_range_dossier, appelé
+# depuis api/dossiers_bibliotheque.py::ranger). Partager un dossier
+# partage aussi tous ses sous-dossiers. Chaque fichier reçu est rangé
+# chez le receveur dans un dossier "miroir" du même nom, avec la même
+# hiérarchie (table miroirs_dossiers_partages, un miroir par (dossier
+# source, receveur), jamais recréé une fois posé).
+
+def _sous_arbre_dossiers(dossier_racine_id: str, tous_dossiers: list[dict]) -> list[str]:
+    """dossier_racine_id + tous ses descendants, récursivement (liste d'ids)."""
+    ids = {dossier_racine_id}
+    changement = True
+    while changement:
+        changement = False
+        for d in tous_dossiers:
+            if d.get("dossier_parent_id") in ids and d["id"] not in ids:
+                ids.add(d["id"])
+                changement = True
+    return list(ids)
+
+
+def _obtenir_ou_creer_miroir(dossier_source_id: str, receveur_id: str, nom: str, parent_miroir_id: str | None) -> str:
+    try:
+        existant = (
+            supabase.table("miroirs_dossiers_partages")
+            .select("dossier_miroir_id")
+            .eq("dossier_source_id", dossier_source_id)
+            .eq("receveur_id", receveur_id)
+            .maybe_single()
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture miroir dossier {dossier_source_id} / {receveur_id}) : {e}")
+        existant = None
+    if existant and existant.data:
+        return existant.data["dossier_miroir_id"]
+
+    nouveau = creer_dossier(receveur_id, nom, parent_miroir_id)
+    try:
+        supabase.table("miroirs_dossiers_partages").insert({
+            "dossier_source_id": dossier_source_id,
+            "receveur_id": receveur_id,
+            "dossier_miroir_id": nouveau["id"],
+        }).execute()
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (enregistrement miroir dossier {dossier_source_id} / {receveur_id}) : {e}")
+    return nouveau["id"]
+
+
+def _chemin_miroir(dossier_id: str, dossier_racine_id: str, par_id: dict, receveur_id: str) -> str:
+    """Reconstruit (ou réutilise) chez receveur_id toute la chaîne de
+    dossiers miroirs depuis dossier_racine_id jusqu'à dossier_id inclus,
+    renvoie l'id du dossier miroir final (celui où ranger le fichier)."""
+    chaine = []
+    courant = dossier_id
+    while courant and courant != dossier_racine_id:
+        chaine.append(par_id[courant])
+        courant = par_id[courant].get("dossier_parent_id")
+    chaine.append(par_id[dossier_racine_id])
+    chaine.reverse()  # [racine, ..., dossier_id]
+
+    parent_miroir_id = None
+    dossier_miroir_id = None
+    for d in chaine:
+        dossier_miroir_id = _obtenir_ou_creer_miroir(d["id"], receveur_id, d["nom"], parent_miroir_id)
+        parent_miroir_id = dossier_miroir_id
+    return dossier_miroir_id
+
+
+def _copier_fichier_pour_receveur(fichier_id: str, receveur_id: str, proprietaire_id: str) -> str | None:
+    """Copie fichier_id (bibliothèque de proprietaire_id) chez
+    receveur_id -- lien (enregistrer_lien) ou fichier réel
+    (enregistrer_fichier, avec la même file d'attente de vectorisation
+    qu'un upload normal, pour couvrir aussi images/audio, pas seulement
+    pdf/texte comme l'ancien système -- bug corrigé au passage, demande
+    Bourama). Renvoie le nouvel id chez le receveur, ou None si erreur."""
+    try:
+        ligne = (
+            supabase.table("fichiers_uploades")
+            .select("nom_fichier, type_mime, chemin_stockage, description")
+            .eq("id", fichier_id)
+            .maybe_single()
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture fichier {fichier_id} avant copie dossier partagé) : {e}")
+        return None
+    if not ligne or not ligne.data:
+        return None
+    f = ligne.data
+
+    if f["type_mime"] == "text/uri-list":
+        try:
+            nouvelle = enregistrer_lien(
+                url=f["chemin_stockage"],
+                nom_fichier=f["nom_fichier"],
+                niveau="utilisateur",
+                uploade_par=proprietaire_id,
+                user_id=receveur_id,
+                description=f.get("description"),
+            )
+        except Exception as e:
+            logging.error(f"ERREUR propagation lien (dossier partagé, {fichier_id} -> {receveur_id}) : {e}")
+            return None
+        return nouvelle["id"]
+
+    try:
+        contenu = supabase.storage.from_("bibliotheque").download(f["chemin_stockage"])
+    except Exception as e:
+        logging.error(f"ERREUR téléchargement fichier {fichier_id} (propagation dossier partagé) : {e}")
+        return None
+
+    try:
+        nouvelle = enregistrer_fichier(
+            contenu=contenu,
+            nom_fichier=f["nom_fichier"],
+            type_mime=f["type_mime"],
+            niveau="utilisateur",
+            uploade_par=proprietaire_id,
+            user_id=receveur_id,
+            description=f.get("description"),
+            statut_vectorisation="en_attente" if necessite_vectorisation_fichier_privee(f["type_mime"]) else "pret",
+        )
+    except Exception as e:
+        logging.error(f"ERREUR propagation fichier (dossier partagé, {fichier_id} -> {receveur_id}) : {e}")
+        return None
+    return nouvelle["id"]
+
+
+def propager_dossier_vers_receveur(dossier_racine_id: str, receveur_id: str, proprietaire_id: str) -> None:
+    """Copie TOUT le contenu actuel de dossier_racine_id et de ses
+    sous-dossiers vers receveur_id (rétroactif -- appelé quand un
+    dossier est nouvellement lié à un code, ou quand un receveur entre
+    un code qui partage déjà des dossiers). Non bloquant, chaque erreur
+    individuelle est juste loguée, jamais de blocage sur un fichier
+    cassé."""
+    tous_dossiers = lister_dossiers(proprietaire_id)
+    par_id = {d["id"]: d for d in tous_dossiers}
+    if dossier_racine_id not in par_id:
+        return
+    for dossier_id in _sous_arbre_dossiers(dossier_racine_id, tous_dossiers):
+        try:
+            dossier_miroir_id = _chemin_miroir(dossier_id, dossier_racine_id, par_id, receveur_id)
+        except Exception as e:
+            logging.error(f"ERREUR SUPABASE (construction miroir dossier {dossier_id} / {receveur_id}) : {e}")
+            continue
+        for fichier_id in lister_fichiers_ids_dossier(dossier_id):
+            nouvel_id = _copier_fichier_pour_receveur(fichier_id, receveur_id, proprietaire_id)
+            if nouvel_id:
+                ranger_fichier(nouvel_id, dossier_miroir_id)
+
+
+def _ancetres_partages(dossier_id: str, proprietaire_id: str) -> list[tuple[str, str]]:
+    """[(code_id, dossier_racine_id), ...] pour tout code ACTIF du
+    propriétaire qui partage dossier_id lui-même ou un de ses ancêtres."""
+    tous_dossiers = lister_dossiers(proprietaire_id)
+    par_id = {d["id"]: d for d in tous_dossiers}
+    if dossier_id not in par_id:
+        return []
+    chaine = []
+    courant = dossier_id
+    while courant:
+        chaine.append(courant)
+        courant = par_id.get(courant, {}).get("dossier_parent_id")
+
+    try:
+        liaisons = (
+            supabase.table("codes_partage_dossiers")
+            .select("code_id, dossier_id")
+            .in_("dossier_id", chaine)
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture codes partageant un ancêtre de {dossier_id}) : {e}")
+        return []
+    if not liaisons.data:
+        return []
+
+    code_ids = list({l["code_id"] for l in liaisons.data})
+    try:
+        codes_actifs = supabase.table("codes_partage").select("id").in_("id", code_ids).eq("actif", True).execute()
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (vérification codes actifs {code_ids}) : {e}")
+        return []
+    actifs = {c["id"] for c in (codes_actifs.data or [])}
+    return [(l["code_id"], l["dossier_id"]) for l in liaisons.data if l["code_id"] in actifs]
+
+
+def propager_fichier_range_dossier(fichier_id: str, dossier_id: str, proprietaire_id: str) -> None:
+    """Appelée depuis api/dossiers_bibliotheque.py::ranger à chaque
+    fichier rangé dans un dossier. Si dossier_id (ou un de ses ancêtres)
+    est partagé via un ou plusieurs codes actifs, copie ce fichier chez
+    chaque receveur de ces codes, rangé dans le dossier miroir
+    correspondant. Non bloquant."""
+    for code_id, dossier_racine_id in _ancetres_partages(dossier_id, proprietaire_id):
+        try:
+            receveurs = supabase.table("rattachements_codes").select("receveur_id").eq("code_id", code_id).execute()
+        except Exception as e:
+            logging.error(f"ERREUR SUPABASE (lecture receveurs du code {code_id}) : {e}")
+            continue
+        tous_dossiers = lister_dossiers(proprietaire_id)
+        par_id = {d["id"]: d for d in tous_dossiers}
+        for r in (receveurs.data or []):
+            receveur_id = r["receveur_id"]
+            try:
+                dossier_miroir_id = _chemin_miroir(dossier_id, dossier_racine_id, par_id, receveur_id)
+            except Exception as e:
+                logging.error(f"ERREUR SUPABASE (construction miroir dossier {dossier_id} / {receveur_id}) : {e}")
+                continue
+            nouvel_id = _copier_fichier_pour_receveur(fichier_id, receveur_id, proprietaire_id)
+            if nouvel_id:
+                ranger_fichier(nouvel_id, dossier_miroir_id)
+
+
+def _remplacer_dossiers_du_code(code_id: str, proprietaire_id: str, dossier_ids: list[str]) -> None:
+    """Remplace entièrement l'ensemble des dossiers attachés à ce code
+    par dossier_ids (vide -> plus aucun) -- même principe que
+    _remplacer_comportements_du_code. Tout dossier NOUVELLEMENT lié
+    (absent de l'ancienne liste) déclenche une propagation rétroactive
+    de son contenu actuel vers chaque receveur déjà rattaché à ce code
+    (demande Bourama, 02/09/2026)."""
+    dossier_ids = list(dict.fromkeys(i for i in (dossier_ids or []) if i))  # dédupliqué, ordre gardé
+    if dossier_ids:
+        try:
+            valides = (
+                supabase.table("dossiers_bibliotheque")
+                .select("id")
+                .in_("id", dossier_ids)
+                .eq("user_id", proprietaire_id)
+                .execute()
+            )
+        except Exception as e:
+            logging.error(f"ERREUR SUPABASE (vérification propriété dossiers {dossier_ids}) : {e}")
+            valides = None
+        ids_valides = {l["id"] for l in (valides.data or [])} if valides else set()
+        dossier_ids = [i for i in dossier_ids if i in ids_valides]
+
+    try:
+        existants = supabase.table("codes_partage_dossiers").select("dossier_id").eq("code_id", code_id).execute()
+        anciens = {l["dossier_id"] for l in (existants.data or [])}
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture dossiers déjà liés au code {code_id}) : {e}")
+        anciens = set()
+    nouveaux = [d for d in dossier_ids if d not in anciens]
+
+    try:
+        supabase.table("codes_partage_dossiers").delete().eq("code_id", code_id).execute()
+        if dossier_ids:
+            supabase.table("codes_partage_dossiers").insert(
+                [{"code_id": code_id, "dossier_id": d} for d in dossier_ids]
+            ).execute()
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (liaison dossiers <-> code {code_id}) : {e}")
+        return
+
+    if not nouveaux:
+        return
+    try:
+        receveurs = supabase.table("rattachements_codes").select("receveur_id").eq("code_id", code_id).execute()
+        receveurs_ids = [r["receveur_id"] for r in (receveurs.data or [])]
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture receveurs du code {code_id} pour rétroactif) : {e}")
+        receveurs_ids = []
+    for dossier_id in nouveaux:
+        for receveur_id in receveurs_ids:
+            try:
+                propager_dossier_vers_receveur(dossier_id, receveur_id, proprietaire_id)
+            except Exception as e:
+                logging.error(f"ERREUR propagation rétroactive dossier {dossier_id} -> {receveur_id} : {e}")
+
+
 def creer_code(
     proprietaire_id: str,
     nom: str | None = None,
     comportement_ids: list[str] | None = None,
     programme_id: str | None = None,
-    partage_bibliotheque: bool = False,
+    dossier_ids: list[str] | None = None,
     texte_libre: str | None = None,
 ) -> dict:
     ligne = {
@@ -175,14 +482,16 @@ def creer_code(
         "code": _generer_code_unique(),
         "nom": (nom or "").strip() or None,
         "programme_id": programme_id or None,
-        "partage_bibliotheque": bool(partage_bibliotheque),
         "texte_libre": (texte_libre or "").strip() or None,
     }
     res = supabase.table("codes_partage").insert(ligne).execute()
     code = res.data[0]
     if comportement_ids:
         _remplacer_comportements_du_code(code["id"], proprietaire_id, comportement_ids)
+    if dossier_ids:
+        _remplacer_dossiers_du_code(code["id"], proprietaire_id, dossier_ids)
     code["comportements"] = _comportements_par_code([code["id"]]).get(code["id"], [])
+    code["dossiers"] = _dossiers_par_code([code["id"]]).get(code["id"], [])
     return code
 
 
@@ -192,7 +501,7 @@ def modifier_code(
     nom: str | None = None,
     comportement_ids: list[str] | None = None,
     programme_id: str | None = None,
-    partage_bibliotheque: bool | None = None,
+    dossier_ids: list[str] | None = None,
     texte_libre: str | None = None,
 ) -> dict | None:
     """Modification partielle : seuls les champs explicitement fournis
@@ -200,16 +509,14 @@ def modifier_code(
     le comportement sans toucher au reste, par exemple. Pour vider un
     champ texte, l'appelant doit passer une chaîne vide, pas None.
 
-    comportement_ids (18/08/2026) : None -> pas touché ; liste (même
-    vide) -> remplace ENTIÈREMENT l'ensemble des comportements attachés
-    (liste vide = tout détacher)."""
+    comportement_ids/dossier_ids : None -> pas touché ; liste (même
+    vide) -> remplace ENTIÈREMENT l'ensemble attaché (liste vide = tout
+    détacher)."""
     patch: dict = {}
     if nom is not None:
         patch["nom"] = nom.strip() or None
     if programme_id is not None:
         patch["programme_id"] = programme_id or None
-    if partage_bibliotheque is not None:
-        patch["partage_bibliotheque"] = bool(partage_bibliotheque)
     if texte_libre is not None:
         patch["texte_libre"] = texte_libre.strip() or None
 
@@ -292,7 +599,20 @@ def entrer_code(code: str, receveur_id: str) -> dict | None:
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (rattachement code {code_id} / {receveur_id}) : {e}")
         return None
-    return res.data[0] if res.data else None
+    if not res.data:
+        return None
+
+    # Rétroactif (02/09/2026, demande Bourama) : à l'entrée du code,
+    # synchroniser tout de suite le contenu déjà présent des dossiers
+    # que ce code partage -- pas seulement les ajouts futurs.
+    try:
+        dossiers_code = supabase.table("codes_partage_dossiers").select("dossier_id").eq("code_id", code_id).execute()
+        for d in (dossiers_code.data or []):
+            propager_dossier_vers_receveur(d["dossier_id"], receveur_id, ligne_code.data["proprietaire_id"])
+    except Exception as e:
+        logging.error(f"ERREUR propagation rétroactive dossiers à l'entrée du code {code_id} pour {receveur_id} : {e}")
+
+    return res.data[0]
 
 
 def lister_mes_rattachements(receveur_id: str) -> list[dict]:
@@ -304,7 +624,7 @@ def lister_mes_rattachements(receveur_id: str) -> list[dict]:
     try:
         res = (
             supabase.table("rattachements_codes")
-            .select("id, created_at, codes_partage!inner(id, code, nom, programme_id, partage_bibliotheque, texte_libre, actif, proprietaire_id)")
+            .select("id, created_at, codes_partage!inner(id, code, nom, programme_id, texte_libre, actif, proprietaire_id)")
             .eq("receveur_id", receveur_id)
             .eq("codes_partage.actif", True)
             .order("created_at")
@@ -317,6 +637,7 @@ def lister_mes_rattachements(receveur_id: str) -> list[dict]:
     lignes = res.data or []
     code_ids = [l["codes_partage"]["id"] for l in lignes if l.get("codes_partage")]
     comportements_par_code = _comportements_par_code(code_ids)
+    dossiers_par_code = _dossiers_par_code(code_ids)
     proprietaires_ids = list({l["codes_partage"]["proprietaire_id"] for l in lignes if l.get("codes_partage")})
     noms_proprietaires: dict[str, str] = {}
     if proprietaires_ids:
@@ -346,6 +667,7 @@ def lister_mes_rattachements(receveur_id: str) -> list[dict]:
         if not cp:
             continue
         comportements = comportements_par_code.get(cp["id"], [])
+        dossiers = dossiers_par_code.get(cp["id"], [])
         resultat.append({
             "rattachement_id": l["id"],
             "code_id": cp["id"],
@@ -358,7 +680,8 @@ def lister_mes_rattachements(receveur_id: str) -> list[dict]:
             "a_programme": bool(cp.get("programme_id")),
             "programme_id": cp.get("programme_id"),
             "programme_nom": noms_programmes.get(cp.get("programme_id")),
-            "partage_bibliotheque": bool(cp.get("partage_bibliotheque")),
+            "a_dossier": bool(dossiers),
+            "dossiers": dossiers,  # [{id, nom}, ...]
             "texte_libre": cp.get("texte_libre"),
         })
     return resultat
@@ -492,87 +815,3 @@ def peut_acceder_programme_recu(receveur_id: str, programme_id: str) -> bool:
     rattachements = lister_mes_rattachements(receveur_id)
     return any(r["a_programme"] and r["programme_id"] == programme_id for r in rattachements)
 
-
-# --- Propagation bibliothèque (copie à chaque ajout) -----------------------
-
-def _receveurs_bibliotheque_de(proprietaire_id: str) -> list[str]:
-    """Receveurs de TOUS les codes actifs du propriétaire ayant
-    partage_bibliotheque=true (dédupliqués -- si un receveur a entré
-    deux codes du même propriétaire avec le partage activé, il ne reçoit
-    le fichier qu'une fois)."""
-    try:
-        codes = (
-            supabase.table("codes_partage")
-            .select("id")
-            .eq("proprietaire_id", proprietaire_id)
-            .eq("actif", True)
-            .eq("partage_bibliotheque", True)
-            .execute()
-        )
-    except Exception as e:
-        logging.error(f"ERREUR SUPABASE (lecture codes bibliothèque de {proprietaire_id}) : {e}")
-        return []
-    codes_ids = [c["id"] for c in (codes.data or [])]
-    if not codes_ids:
-        return []
-    try:
-        rattachements = (
-            supabase.table("rattachements_codes")
-            .select("receveur_id")
-            .in_("code_id", codes_ids)
-            .execute()
-        )
-    except Exception as e:
-        logging.error(f"ERREUR SUPABASE (lecture receveurs bibliothèque de {proprietaire_id}) : {e}")
-        return []
-    return list({r["receveur_id"] for r in (rattachements.data or [])})
-
-
-def propager_fichier_bibliotheque(proprietaire_id: str, contenu: bytes, nom_fichier: str, type_mime: str, description: str | None) -> None:
-    """Copie ce fichier (déjà ajouté à la bibliothèque perso de
-    proprietaire_id) dans la bibliothèque perso de chaque receveur d'un
-    code actif à bibliothèque partagée. Non bloquant : une erreur ici ne
-    doit jamais faire échouer l'ajout original (déjà réussi), juste être
-    loguée -- même philosophie que la vectorisation PDF ailleurs dans le
-    code."""
-    receveurs = _receveurs_bibliotheque_de(proprietaire_id)
-    for receveur_id in receveurs:
-        try:
-            ligne = enregistrer_fichier(
-                contenu=contenu, nom_fichier=nom_fichier, type_mime=type_mime,
-                niveau="utilisateur", uploade_par=proprietaire_id, user_id=receveur_id,
-                description=description,
-            )
-        except Exception as e:
-            logging.error(f"ERREUR propagation fichier bibliothèque ({proprietaire_id} -> {receveur_id}) : {e}")
-            continue
-        if type_mime == "application/pdf":
-            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-                tmp.write(contenu)
-                chemin_temp = tmp.name
-            try:
-                indexer_pdf_bibliotheque(chemin_temp, fichier_id=ligne["id"], user_id=receveur_id)
-            except Exception as e:
-                logging.error(f"ERREUR vectorisation PDF propagation ({proprietaire_id} -> {receveur_id}) : {e}")
-            finally:
-                try:
-                    os.remove(chemin_temp)
-                except OSError:
-                    pass
-        elif type_mime == "text/plain":
-            try:
-                indexer_texte_bibliotheque(contenu.decode("utf-8"), fichier_id=ligne["id"], user_id=receveur_id)
-            except Exception as e:
-                logging.error(f"ERREUR vectorisation texte propagation ({proprietaire_id} -> {receveur_id}) : {e}")
-
-
-def propager_lien_bibliotheque(proprietaire_id: str, url: str, nom_fichier: str, description: str | None) -> None:
-    receveurs = _receveurs_bibliotheque_de(proprietaire_id)
-    for receveur_id in receveurs:
-        try:
-            enregistrer_lien(
-                url=url, nom_fichier=nom_fichier, niveau="utilisateur",
-                uploade_par=proprietaire_id, user_id=receveur_id, description=description,
-            )
-        except Exception as e:
-            logging.error(f"ERREUR propagation lien bibliothèque ({proprietaire_id} -> {receveur_id}) : {e}")

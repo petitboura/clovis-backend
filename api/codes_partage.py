@@ -33,7 +33,10 @@ class CodePayload(BaseModel):
     # tapé directement ici.
     comportement_ids: list[str] | None = None
     programme_id: str | None = None
-    partage_bibliotheque: bool = False
+    # 02/09/2026, demande Bourama : remplace partage_bibliotheque (booléen
+    # "toute la bibliothèque") par une sélection précise de dossiers déjà
+    # créés dans la bibliothèque perso, plusieurs à la fois possibles.
+    dossier_ids: list[str] | None = None
     texte_libre: str | None = None
 
 
@@ -41,12 +44,12 @@ class CodePatchPayload(BaseModel):
     """Modification partielle -- voir core/codes_partage.py::modifier_code :
     seuls les champs fournis (non None) sont mis à jour. Pour vider un
     champ texte, envoyer une chaîne vide plutôt que de l'omettre.
-    comportement_ids : None -> pas touché, liste (même vide) -> remplace
-    entièrement la sélection."""
+    comportement_ids/dossier_ids : None -> pas touché, liste (même vide)
+    -> remplace entièrement la sélection."""
     nom: str | None = None
     comportement_ids: list[str] | None = None
     programme_id: str | None = None
-    partage_bibliotheque: bool | None = None
+    dossier_ids: list[str] | None = None
     texte_libre: str | None = None
 
 
@@ -62,7 +65,7 @@ def creer(payload: CodePayload, utilisateur=Depends(utilisateur_courant)):
         nom=payload.nom,
         comportement_ids=payload.comportement_ids,
         programme_id=payload.programme_id,
-        partage_bibliotheque=payload.partage_bibliotheque,
+        dossier_ids=payload.dossier_ids,
         texte_libre=payload.texte_libre,
     )
 
@@ -75,7 +78,7 @@ def modifier(code_id: str, payload: CodePatchPayload, utilisateur=Depends(utilis
         nom=payload.nom,
         comportement_ids=payload.comportement_ids,
         programme_id=payload.programme_id,
-        partage_bibliotheque=payload.partage_bibliotheque,
+        dossier_ids=payload.dossier_ids,
         texte_libre=payload.texte_libre,
     )
     if not resultat:
