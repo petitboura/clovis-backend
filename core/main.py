@@ -236,81 +236,6 @@ def _ressemble_a_du_json_casse(texte: str) -> bool:
     return '"name"' in debut and '"arguments"' in debut
 
 
-def _citations_manquantes(reponse_texte: str, messages_agent) -> list:
-    """
-    Filet de securite (26/08, demande Bourama : "il ne donne pas toujours
-    les sources dans le texte, seulement la bulle en bas") -- le modele
-    suit l'instruction <citations_sources> la plupart du temps, mais pas
-    systematiquement (plus frequent avec un modele de secours moins
-    instruction-following, ou une reponse tres courte). Repere les
-    sources de CE TOUR (annotees dans le contenu du message "tool" par
-    _traiter_appels, voir "[Numerote tes citations...]") dont AUCUN
-    marqueur [n](citation:n) n'apparait dans le texte final -- pour
-    qu'on puisse les rajouter nous-memes plutot que de compter sur le
-    modele a chaque fois.
-
-    Generalise (28/08, demande Bourama : etendre a tout outil sourcé,
-    pas seulement la bibliotheque) -- lit directement les lignes "n:
-    titre[, reperage]" que _traiter_appels rajoute dans la note pour
-    CHAQUE outil sourcé, plutot que de reparser le contenu brut de
-    l'outil (qui differe par outil : texte pour la bibliotheque, JSON
-    pour tavily, arborescence pour GitHub...). Fonctionne donc pour
-    n'importe quel outil sourcé sans code specifique par outil.
-
-    Renvoie une liste de (numero, titre) a rajouter, dans l'ordre.
-    """
-    manquantes_par_message = []
-    for message in reversed(messages_agent):
-        if message.get("role") != "tool":
-            break  # les messages "tool" d'un meme tour sont toujours groupes en fin de liste
-        contenu = message.get("content")
-        if not isinstance(contenu, str) or "[Numérote tes citations" not in contenu:
-            continue
-        _, _, note = contenu.partition("[Numérote tes citations")
-        manquantes_ce_message = []
-        for ligne in note.splitlines():
-            m = _RE_LIGNE_CITATION_NOTE.match(ligne.strip())
-            if not m:
-                continue
-            numero, titre = int(m.group(1)), m.group(2)
-            if f"(citation:{numero})" in reponse_texte:
-                continue
-            manquantes_ce_message.append((numero, titre))
-        if manquantes_ce_message:
-            manquantes_par_message.append(manquantes_ce_message)
-
-    # `messages_agent` a ete parcouru du plus RECENT au plus ANCIEN (pour
-    # s'arreter au bon endroit, voir le commentaire plus haut) -- chaque
-    # `manquantes_ce_message` est deja dans le bon ordre CROISSANT en
-    # interne (numerote 1, 2, 3...), seul l'ordre ENTRE les messages doit
-    # etre inverse pour retrouver l'ordre chronologique (le plus ancien
-    # tool call, donc les numeros les plus bas, en premier). Un simple
-    # `manquantes.reverse()` sur la liste APLATIE aurait aussi inverse
-    # l'ordre interne de chaque message -- bug attrape par un test manuel
-    # avant push.
-    manquantes = [item for groupe in reversed(manquantes_par_message) for item in groupe]
-    return manquantes
-
-
-def _completer_citations_manquantes(reponse_accumulee, messages_agent):
-    """
-    A appeler juste apres une reponse finale reussie -- voir _citations_manquantes.
-    Rajoute les marqueurs [n](citation:n) oublies par le modele, sous
-    forme d'un court recapitulatif en fin de reponse (jamais au milieu
-    d'une phrase deja ecrite -- on ne sait pas ou l'inserer avec
-    certitude, donc on se contente de garantir leur PRESENCE quelque
-    part dans le texte reel du message, pas leur position exacte).
-    """
-    texte_actuel = "".join(reponse_accumulee)
-    manquantes = _citations_manquantes(texte_actuel, messages_agent)
-    if not manquantes:
-        return None
-    liste = ", ".join(f"[{nom}](citation:{numero})" for numero, nom in manquantes)
-    ajout = f"\n\nSources : {liste}"
-    reponse_accumulee.append(ajout)
-    return {"type": "reponse", "texte": ajout}
-
-
 def _ressemble_a_une_simple_url(contenu: str) -> bool:
     """
     Vrai si le resultat d'un outil n'est (essentiellement) qu'un lien nu,
@@ -1231,10 +1156,10 @@ Ceci s'applique à TOUTE question sur Clovis ou sur l'application en général, 
 </base_connaissances_clovis>
 
 <citations_sources>
-Tout outil qui te renvoie des numéros à citer (ex : "numérote tes citations [n](citation:n) pour ces 3 sources de 4 à 6") -- bibliothèque, recherche web, GitHub, ou tout autre outil sourcé.
-Insère [n](citation:n) juste après chaque passage utilisant cette source. Format EXACT, obligatoire, sans exception : crochets + "(citation:n)".
+Tout outil qui te renvoie des numéros à citer (ex : "numérote tes citations avec [[n]] pour ces 3 sources de 4 à 6") -- bibliothèque, recherche web, GitHub, ou tout autre outil sourcé.
+Insère [[n]] juste après chaque passage utilisant cette source. Format EXACT, obligatoire, sans exception : double crochet ouvrant, le numéro, double crochet fermant.
 N'écris jamais le chiffre seul. N'écris jamais le chiffre entre parenthèses. Ne réécris jamais l'URL ni le nom de la source en clair.
-Exemple : "...produit l'ATP [5](citation:5)...".
+Exemple : "...produit l'ATP [[5]]...".
 </citations_sources>"""
 
 INSTRUCTIONS_ARBITRAGE_CALCUL = """
@@ -2007,10 +1932,6 @@ def _resultat_pour_affichage(resultat_brut, max_chars=3000):
 _RE_SOURCE_BIBLIOTHEQUE_LIGNE = re.compile(r"^\(Source : (.+), (https?://\S+), ([^,()]*)\)$")
 _RE_PAGE_BIBLIOTHEQUE = re.compile(r"^(.*), page (\d+)(?:-\d+)?$")
 _RE_TIMESTAMP_BIBLIOTHEQUE = re.compile(r"^(.*), à (\d{2}):(\d{2})$")
-# Parse les lignes "n: titre[, reperage]" que _traiter_appels rajoute dans
-# la note "[Numerote tes citations...]" pour CHAQUE outil sourcé -- voir
-# _citations_manquantes, generique par outil grace a ce format commun.
-_RE_LIGNE_CITATION_NOTE = re.compile(r"^(\d+):\s*(.+)$")
 
 
 def _sources_bibliotheque_depuis_texte(resultat_brut):
@@ -2309,33 +2230,29 @@ def _traiter_appels(appels, messages_agent, table_routage, compteur_sources=None
                 if sources:
                     debut_numero = compteur_sources[0] + 1
                     compteur_sources[0] += len(sources)
+                    # Chaque source porte desormais son propre `numero`
+                    # (2026-09-02, demande Bourama : le frontend ne doit
+                    # plus RETROUVER une source par sa position dans un
+                    # tableau -- source de bugs de resolution -- mais la
+                    # recevoir avec son numero deja attache, cle fiable
+                    # meme si le frontend deduplique/reordonne ensuite).
+                    for n, s in zip(range(debut_numero, compteur_sources[0] + 1), sources):
+                        s["numero"] = n
                     yield {"type": "sources", "sources": sources}
                     # Le modele voit le RESULTAT BRUT (pas l'evenement SSE,
                     # qui va direct au frontend) -- il a donc besoin qu'on
                     # lui dise explicitement quels numeros utiliser pour
-                    # [n](citation:n), voir <citations_sources> du system
-                    # prompt. Etendu (28/08, demande Bourama) a TOUT outil
-                    # sourcé -- avant, uniquement gerer_document_bibliotheque ;
-                    # desormais des que `sources` est non vide (bibliotheque,
+                    # [[n]], voir <citations_sources> du system prompt.
+                    # Vaut pour TOUT outil sourcé (bibliotheque,
                     # tavily_*/notion-search via _sources_depuis_json_generique,
                     # gerer_depot_github via _sources_github_depuis_arguments,
                     # et tout futur outil sourcé sans changement ici).
-                    #
-                    # Le titre (+ reperage "page N"/"à MM:SS" si connu) de
-                    # chaque source est repete ici, une ligne "n: titre" par
-                    # source -- pas seulement pour le modele, mais aussi
-                    # pour que _citations_manquantes (filet de securite
-                    # plus bas) puisse retrouver ces titres SANS reparser le
-                    # contenu brut de l'outil, qui differe par outil (texte
-                    # bibliotheque, JSON tavily, arborescence GitHub...).
-                    # Rend le filet de securite generique lui aussi, plus
-                    # limite a la bibliotheque.
                     lignes_sources = "\n".join(
                         f"{n}: {s['titre']}" + (f", {s['reperage']}" if s.get("reperage") else "")
                         for n, s in zip(range(debut_numero, compteur_sources[0] + 1), sources)
                     )
                     contenu_pour_modele = (
-                        f"{resultat}\n\n[Numérote tes citations [n](citation:n) "
+                        f"{resultat}\n\n[Utilise le marqueur [[n]] "
                         f"pour ces {len(sources)} source(s), dans cet ordre :\n"
                         f"{lignes_sources}\n]"
                     )
@@ -3577,9 +3494,6 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 reponse_accumulee,
                 meta_assistant,
             )
-            evenement_citation_manquante = _completer_citations_manquantes(reponse_accumulee, messages_agent)
-            if evenement_citation_manquante:
-                yield evenement_citation_manquante
             ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=GROQ_PRIMARY, meta_assistant=meta_assistant)
             if ids_historique:
                 yield {"type": "meta", **ids_historique}
@@ -3616,9 +3530,6 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                     reponse_accumulee,
                     meta_assistant,
                 )
-                evenement_citation_manquante = _completer_citations_manquantes(reponse_accumulee, messages_agent)
-                if evenement_citation_manquante:
-                    yield evenement_citation_manquante
                 ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=model, meta_assistant=meta_assistant)
                 # Signale au frontend quand la reponse vient d'un modele de
                 # qualite reduite (demande Bourama, 26/07) : evite que
