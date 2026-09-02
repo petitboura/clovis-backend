@@ -1116,6 +1116,10 @@ def _mettre_a_jour_profil_utilisateur_si_besoin(user_id, agent_id):
 # qu'aucun outil n'est réellement branché).
 INSTRUCTIONS_FORMATS_AFFICHAGE = """
 
+<paragraphes>
+Sépare tes paragraphes par un saut de ligne dès que tu passes à une nouvelle idée ou un nouveau point, comme à l'écrit normal -- regroupe les phrases qui vont ensemble dans le même paragraphe, sans les fragmenter ni les coller entre elles.
+</paragraphes>
+
 <formats_enrichis>
 Utilise ces blocs seulement quand ils apportent une vraie valeur — jamais pour décorer :
 - ```mermaid``` : diagramme flowchart/séquence/état. Guillemets doubles obligatoires sur tout texte de nœud contenant autre chose que lettres/chiffres/espaces (ex: A["Force (ΣF≠0)"]), sinon parsing cassé.
