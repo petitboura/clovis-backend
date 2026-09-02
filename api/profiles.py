@@ -13,14 +13,18 @@ forme), pas une simple substitution de colonne dans la requête.
 """
 
 import logging
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from api.auth import utilisateur_courant, utilisateur_optionnel, supabase
 from api.agents import supprimer_agent_completement
 from api.journal import journaliser
+from core.limitation_debit import limiteur
 from creation_agent import generer_id_depuis_nom
 from core.erreurs import erreur_api
 
@@ -440,6 +444,87 @@ def mettre_a_jour_mon_profil(
         notifications_proactives_actives=bool(resultat.get("notifications_proactives_actives")),
         premier_agent_id=resultat.get("premier_agent_id"),
         est_createur=bool(resultat.get("est_createur")),
+    )
+
+
+@router.get("/me/export")
+@limiteur.limit("3/minute")
+def exporter_mes_donnees(request: Request, utilisateur=Depends(utilisateur_courant)):
+    """
+    "Exporter mes données" (droit d'accès/portabilité) -- pendant de
+    supprimer_mon_compte juste en dessous, demande de Bourama 2026-09-02 :
+    donner à chaque utilisateur un moyen concret de récupérer une copie
+    de tout ce que Clovis sait sur lui, sans passer par un administrateur.
+
+    Rassemble, pour l'utilisateur connecté uniquement (jamais un autre
+    user_id, même passé en paramètre), toutes ses données personnelles à
+    travers les tables identifiées (voir colonnes user_id/owner_id/
+    proprietaire_id/expediteur_id/etudiant_id du schema, vérifiées le
+    2026-09-02) en un seul JSON téléchargeable. Chaque table est
+    best-effort (log et continue) pour qu'une table en erreur ne bloque
+    pas l'export du reste -- mieux vaut un export à 95% qu'aucun export.
+
+    Limité à 3/minute : lecture large sur de nombreuses tables, pas un
+    usage qu'un utilisateur légitime répète en boucle.
+    """
+    user_id = utilisateur.id
+    export = {"user_id": user_id, "genere_le": datetime.now(ZoneInfo("UTC")).isoformat()}
+
+    tables_par_colonne_simple = (
+        ("profil", "profiles", "user_id"),
+        ("agents_possedes", "agents", "owner_id"),
+        ("conversations", "conversations", "user_id"),
+        ("historique_conversations", "historique_conversations", "user_id"),
+        ("resumes_conversations", "conversation_summaries", "user_id"),
+        ("documents_bibliotheque", "documents_bibliotheque", "user_id"),
+        ("dossiers_bibliotheque", "dossiers_bibliotheque", "user_id"),
+        ("fichiers_uploades", "fichiers_uploades", "user_id"),
+        ("notifications", "notifications", "user_id"),
+        ("publications", "posts", "user_id"),
+        ("commentaires_agents", "agent_comments", "user_id"),
+        ("notes_agents", "agent_ratings", "user_id"),
+        ("codes_partage_crees", "codes_partage", "proprietaire_id"),
+        ("invitations_crees", "invitations_clovis", "proprietaire_id"),
+        ("comportements_etudiant", "comportements_etudiants", "etudiant_id"),
+    )
+    for cle_export, table, colonne in tables_par_colonne_simple:
+        try:
+            res = supabase.table(table).select("*").eq(colonne, user_id).execute()
+            export[cle_export] = res.data or []
+        except Exception as e:
+            logging.error(f"ERREUR SUPABASE (export {table} pour {user_id}) : {e}")
+            export[cle_export] = {"erreur": "recuperation impossible, reessayer plus tard"}
+
+    # follows et messages_directs : deux colonnes possibles chacune (sens
+    # de la relation), donc pas dans la boucle simple ci-dessus.
+    try:
+        abonnements = supabase.table("follows").select("*").eq("follower_id", user_id).execute()
+        abonnes = supabase.table("follows").select("*").eq("creator_id", user_id).execute()
+        export["follows"] = {"je_suis": abonnements.data or [], "mes_abonnes": abonnes.data or []}
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (export follows pour {user_id}) : {e}")
+        export["follows"] = {"erreur": "recuperation impossible, reessayer plus tard"}
+
+    try:
+        envoyes = supabase.table("messages_directs").select("*").eq("expediteur_id", user_id).execute()
+        recus = supabase.table("messages_directs").select("*").eq("destinataire_id", user_id).execute()
+        export["messages_directs"] = {"envoyes": envoyes.data or [], "recus": recus.data or []}
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (export messages_directs pour {user_id}) : {e}")
+        export["messages_directs"] = {"erreur": "recuperation impossible, reessayer plus tard"}
+
+    journaliser(
+        action="compte.export_donnees",
+        user_id=user_id,
+        cible_type="profile",
+        cible_id=user_id,
+        details={},
+        request=request,
+    )
+
+    return JSONResponse(
+        content=export,
+        headers={"Content-Disposition": f"attachment; filename=clovis_mes_donnees_{user_id}.json"},
     )
 
 
