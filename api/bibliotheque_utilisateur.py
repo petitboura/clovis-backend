@@ -18,11 +18,13 @@ consulter_bibliotheque, est disponible pour TOUS les agents sans
 configuration par le créateur (voir core/mcp_tools.py).
 """
 
+import asyncio
 import logging
 import os
 import sys
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from postgrest.exceptions import APIError
 from pydantic import BaseModel
 
 from api.auth import utilisateur_courant, supabase
@@ -127,7 +129,16 @@ async def uploader_document(
     )
 
     try:
-        ligne = enregistrer_fichier(
+        # CORRECTIF 02/09 (bug remonté par Bourama : upload perçu comme
+        # lent) : enregistrer_fichier fait des appels Supabase Storage +
+        # DB synchrones/bloquants -- appelé tel quel dans cette route
+        # async, il bloquait tout le serveur (event loop) pendant toute
+        # la durée de l'upload : plus aucune autre requête, y compris
+        # les autres fichiers d'un envoi multiple, ne pouvait être
+        # traitée en attendant. asyncio.to_thread le déporte sur un
+        # thread pour ne plus bloquer.
+        ligne = await asyncio.to_thread(
+            enregistrer_fichier,
             contenu=contenu,
             nom_fichier=nom_original,
             type_mime=fichier.content_type,
@@ -137,6 +148,13 @@ async def uploader_document(
             description=description_finale,
             statut_vectorisation="en_attente" if necessite_vectorisation_fichier_privee(fichier.content_type) else "pret",
         )
+    except APIError as e:
+        # CORRECTIF 02/09 (bug remonté par Bourama : aucun traitement
+        # d'erreur à l'upload, notamment pour les doublons désormais
+        # refusés par un index unique Supabase -- code Postgres 23505).
+        if getattr(e, "code", None) == "23505":
+            raise erreur_api(409, "NOM_DEJA_UTILISE_BIBLIOTHEQUE_PERSO", nom=nom_original)
+        raise erreur_api(500, "ECHEC_DU_STOCKAGE_REESSAIE")
     except Exception:
         raise erreur_api(500, "ECHEC_DU_STOCKAGE_REESSAIE")
 
@@ -188,7 +206,11 @@ async def copier_depuis_bibliotheque_publique(
     description_finale = (entree["description"] or "").strip() or entree["nom"]
 
     try:
-        ligne = enregistrer_fichier(
+        # Même correctif que uploader_document ci-dessus (02/09) : thread
+        # dédié pour ne pas bloquer le serveur, détection précise du
+        # doublon (contrainte d'unicité par utilisateur sur nom_fichier).
+        ligne = await asyncio.to_thread(
+            enregistrer_fichier,
             contenu=contenu,
             nom_fichier=nom_original,
             type_mime=entree["type_mime"],
@@ -198,6 +220,10 @@ async def copier_depuis_bibliotheque_publique(
             description=description_finale,
             statut_vectorisation="en_attente" if necessite_vectorisation_fichier_privee(entree["type_mime"]) else "pret",
         )
+    except APIError as e:
+        if getattr(e, "code", None) == "23505":
+            raise erreur_api(409, "NOM_DEJA_UTILISE_BIBLIOTHEQUE_PERSO", nom=nom_original)
+        raise erreur_api(500, "ECHEC_DU_STOCKAGE_REESSAIE")
     except Exception:
         raise erreur_api(500, "ECHEC_DU_STOCKAGE_REESSAIE")
 
@@ -242,6 +268,10 @@ def ajouter_lien(
             user_id=utilisateur.id,
             description=description_finale,
         )
+    except APIError as e:
+        if getattr(e, "code", None) == "23505":
+            raise erreur_api(409, "NOM_DEJA_UTILISE_BIBLIOTHEQUE_PERSO", nom=(payload.titre or payload.url).strip())
+        raise erreur_api(500, "ECHEC_DE_L_ENREGISTREMENT_DU_LIEN")
     except Exception:
         raise erreur_api(500, "ECHEC_DE_L_ENREGISTREMENT_DU_LIEN")
 
@@ -290,19 +320,37 @@ def ajouter_texte(
     titre = (payload.titre or "").strip()
     nom_fichier = f"{titre or 'Note'}.txt"
 
-    try:
-        ligne = enregistrer_fichier(
-            contenu=contenu.encode("utf-8"),
-            nom_fichier=nom_fichier,
-            type_mime="text/plain",
-            niveau="utilisateur",
-            uploade_par=utilisateur.id,
-            user_id=utilisateur.id,
-            description=titre or (contenu[:80] + ("…" if len(contenu) > 80 else "")),
-            statut_vectorisation="en_attente" if necessite_vectorisation_note() else "pret",
-        )
-    except Exception:
-        raise erreur_api(500, "ECHEC_DE_L_ENREGISTREMENT_DE_LA_NOTE")
+    # CORRECTIF 02/09 : nouvelle contrainte d'unicité par utilisateur sur
+    # nom_fichier (voir core/bibliotheque_fichiers.py). Sans titre, le nom
+    # par défaut "Note.txt" est identique pour toutes les notes non
+    # titrées d'un même utilisateur -- ce n'est pas un vrai doublon aux
+    # yeux de l'utilisateur (il n'a rien nommé lui-même), donc on
+    # auto-suffixe ("Note (2).txt", etc.) au lieu de le bloquer avec une
+    # erreur. Avec un titre explicite en revanche, un vrai doublon doit
+    # remonter l'erreur normalement.
+    tentative = 1
+    while True:
+        try:
+            ligne = enregistrer_fichier(
+                contenu=contenu.encode("utf-8"),
+                nom_fichier=nom_fichier,
+                type_mime="text/plain",
+                niveau="utilisateur",
+                uploade_par=utilisateur.id,
+                user_id=utilisateur.id,
+                description=titre or (contenu[:80] + ("…" if len(contenu) > 80 else "")),
+                statut_vectorisation="en_attente" if necessite_vectorisation_note() else "pret",
+            )
+            break
+        except APIError as e:
+            if getattr(e, "code", None) != "23505":
+                raise erreur_api(500, "ECHEC_DE_L_ENREGISTREMENT_DE_LA_NOTE")
+            if titre or tentative >= 20:
+                raise erreur_api(409, "NOM_DEJA_UTILISE_BIBLIOTHEQUE_PERSO", nom=nom_fichier)
+            tentative += 1
+            nom_fichier = f"Note ({tentative}).txt"
+        except Exception:
+            raise erreur_api(500, "ECHEC_DE_L_ENREGISTREMENT_DE_LA_NOTE")
 
     # Vectorisation en arrière-plan (29/08, voir core/file_attente_vectorisation.py) --
     # avant, indexer_texte_bibliotheque était appelé directement ici.

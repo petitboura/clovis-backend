@@ -207,6 +207,13 @@ MESSAGES_FR: dict[str, str] = {
     "ACTION_INVALIDE": "Action invalide.",
     "SIGNALEMENT_INTROUVABLE": "Signalement introuvable.",
     "SIGNALEMENT_DEJA_TRAITE": "Ce signalement a déjà été traité.",
+    # 02/09, bug remonté par Bourama : aucun traitement d'erreur à
+    # l'upload biblothèque (perso + publique), notamment pour les
+    # doublons refusés par un index unique côté Supabase (code Postgres
+    # 23505) -- voir api/bibliotheque_utilisateur.py et
+    # api/bibliotheque_publique.py.
+    "NOM_DEJA_UTILISE_BIBLIOTHEQUE_PERSO": "Tu as déjà un fichier nommé « {nom} » dans ta bibliothèque. Renomme-le ou remplace l'existant.",
+    "NOM_DEJA_UTILISE_BIBLIOTHEQUE_PUBLIQUE": "Un document nommé « {nom} » existe déjà dans la bibliothèque publique. Choisis un autre nom.",
 }
 
 

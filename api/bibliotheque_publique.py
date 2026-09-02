@@ -23,11 +23,13 @@ d'ajout pour classer directement à l'ajout (voir api/dossiers_
 catalogue_public.py).
 """
 
+import asyncio
 import logging
 import os
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
+from postgrest.exceptions import APIError
 from pydantic import BaseModel
 from supabase import create_client
 
@@ -115,18 +117,18 @@ async def ajouter_a_bibliotheque_publique(
     extension = nom_original.rsplit(".", 1)[-1] if "." in nom_original else "bin"
     chemin_stockage = f"publique/{uuid.uuid4()}.{extension}"
 
-    try:
+    def _stocker_et_inserer():
+        # Factorisé le 02/09 (bug remonté par Bourama : upload perçu
+        # comme lent) pour pouvoir déporter l'ENSEMBLE storage+DB sur un
+        # thread via asyncio.to_thread -- ces appels Supabase sont
+        # synchrones/bloquants, et appelés tels quels dans cette route
+        # async, ils bloquaient tout le serveur (event loop) pendant
+        # toute la durée de l'upload.
         supabase.storage.from_(BUCKET).upload(
             chemin_stockage, contenu, {"content-type": fichier.content_type or "application/octet-stream"}
         )
-    except Exception as e:
-        logging.error(f"ERREUR SUPABASE STORAGE (upload bibliothèque publique {chemin_stockage}) : {e}")
-        raise erreur_api(500, "ECHEC_DU_STOCKAGE_REESSAIE")
-
-    url_publique = supabase.storage.from_(BUCKET).get_public_url(chemin_stockage)
-
-    try:
-        ligne = (
+        url_publique = supabase.storage.from_(BUCKET).get_public_url(chemin_stockage)
+        return (
             supabase.table("bibliotheque_publique")
             .insert({
                 "ajoute_par": utilisateur.id,
@@ -147,9 +149,20 @@ async def ajouter_a_bibliotheque_publique(
             })
             .execute()
         )
+
+    try:
+        ligne = await asyncio.to_thread(_stocker_et_inserer)
+    except APIError as e:
+        # CORRECTIF 02/09 (bug remonté par Bourama : aucun traitement
+        # d'erreur à l'upload, notamment pour les doublons désormais
+        # refusés par un index unique Supabase -- code Postgres 23505).
+        if getattr(e, "code", None) == "23505":
+            raise erreur_api(409, "NOM_DEJA_UTILISE_BIBLIOTHEQUE_PUBLIQUE", nom=nom_original)
+        logging.error(f"ERREUR SUPABASE (upload bibliothèque publique {chemin_stockage}) : {e}")
+        raise erreur_api(500, "ECHEC_DU_STOCKAGE_REESSAIE")
     except Exception as e:
-        logging.error(f"ERREUR ECRITURE bibliotheque_publique ({chemin_stockage}) : {e}")
-        raise erreur_api(500, "ERREUR_INCONNUE")
+        logging.error(f"ERREUR SUPABASE (upload bibliothèque publique {chemin_stockage}) : {e}")
+        raise erreur_api(500, "ECHEC_DU_STOCKAGE_REESSAIE")
 
     entree = ligne.data[0]
     _classer_si_autorise(entree["id"], dossier_id, utilisateur.id)
@@ -184,6 +197,11 @@ def ajouter_lien_bibliotheque_publique(payload: AjouterLienPayload, utilisateur=
             })
             .execute()
         )
+    except APIError as e:
+        if getattr(e, "code", None) == "23505":
+            raise erreur_api(409, "NOM_DEJA_UTILISE_BIBLIOTHEQUE_PUBLIQUE", nom=nom_final)
+        logging.error(f"ERREUR ECRITURE bibliotheque_publique (lien) : {e}")
+        raise erreur_api(500, "ERREUR_INCONNUE")
     except Exception as e:
         logging.error(f"ERREUR ECRITURE bibliotheque_publique (lien) : {e}")
         raise erreur_api(500, "ERREUR_INCONNUE")
@@ -234,6 +252,11 @@ def ajouter_texte_bibliotheque_publique(payload: AjouterTextePayload, utilisateu
             })
             .execute()
         )
+    except APIError as e:
+        if getattr(e, "code", None) == "23505":
+            raise erreur_api(409, "NOM_DEJA_UTILISE_BIBLIOTHEQUE_PUBLIQUE", nom=nom_fichier)
+        logging.error(f"ERREUR ECRITURE bibliotheque_publique (texte) : {e}")
+        raise erreur_api(500, "ERREUR_INCONNUE")
     except Exception as e:
         logging.error(f"ERREUR ECRITURE bibliotheque_publique (texte) : {e}")
         raise erreur_api(500, "ERREUR_INCONNUE")
