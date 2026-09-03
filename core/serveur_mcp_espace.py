@@ -1594,7 +1594,7 @@ def confirmer_action_clovis(id_confirmation: str, approuve: bool, ctx: Context) 
     annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
     structured_output=False,
 )
-def generer_image(prompt: str) -> list[Image | str] | str:
+def generer_image(prompt: str, ctx: Context) -> list[Image | str] | str:
     """
     Génère une image à partir d'une description textuelle. Renvoie
     l'image elle-même (vraie pièce jointe affichée directement) ET
@@ -1624,9 +1624,41 @@ def generer_image(prompt: str) -> list[Image | str] | str:
     # téléchargement forcé.
     url_telechargement = f"{url}?download=image_clovis.png"
 
+    # 02/09/2026, demande Bourama : ici aussi "généré par l'IA" (même
+    # origine que côté agent interne, voir serveur_mcp_generation.py),
+    # AVEC une étiquette de quel client MCP externe l'a demandé (ex.
+    # "Claude Desktop") -- ctx.session.client_params.clientInfo.name
+    # vient du handshake "initialize" du protocole MCP, jamais fourni
+    # par l'appelant lui-même donc fiable. Repli sur "Outil externe" si
+    # absent (certains clients ne l'envoient pas).
+    try:
+        nom_client = ctx.session.client_params.clientInfo.name
+    except Exception:
+        nom_client = None
+    etiquette = f"Généré via {nom_client}" if nom_client else "Généré via un outil externe"
+
+    def _sauvegarder(contenu_image: bytes) -> None:
+        try:
+            user_id = _user_id_authentifie(ctx)
+            if not user_id:
+                return
+            _enregistrer_fichier(
+                contenu=contenu_image,
+                nom_fichier=(prompt[:40].strip() or "Image") + ".png",
+                type_mime="image/png",
+                niveau="utilisateur",
+                uploade_par=user_id,
+                user_id=user_id,
+                description=etiquette,
+                origine="ia_generee",
+            )
+        except Exception as e:
+            logging.error(f"ERREUR sauvegarde bibliotheque (generer_image mcp_espace) : {e}")
+
     try:
         reponse = requests.get(url, timeout=30)
         reponse.raise_for_status()
+        _sauvegarder(reponse.content)
         return [Image(data=reponse.content, format="png"), url_telechargement]
     except Exception as e:
         # L'image a bien été générée et uploadée (on a l'URL), seul le

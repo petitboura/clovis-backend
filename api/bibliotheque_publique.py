@@ -38,6 +38,7 @@ from core.erreurs import erreur_api
 from core.file_attente_vectorisation import necessite_vectorisation_fichier_publique, necessite_vectorisation_note
 from core.dossiers_catalogue_public import ranger_fichier as _ranger_fichier_dossier, peut_ajouter_contenu as _peut_ajouter_contenu_dossier, _dossier as _dossier_catalogue_public
 from core.dossiers_publics_attaches import propager_fichier_public_range_dossier as _propager_fichier_public_range_dossier
+from core.listes_bibliotheque_publique import lister_valeurs, normaliser_et_enregistrer
 
 router = APIRouter(prefix="/api/bibliotheque-publique", tags=["bibliotheque_publique"])
 
@@ -77,21 +78,44 @@ class EntreeBibliothequePublique(BaseModel):
     # core/file_attente_vectorisation.py) : "en_attente" / "en_cours" /
     # "pret" / "echec" -- sert au frontend pour le badge par fichier.
     statut_vectorisation: str = "pret"
+    # 02/09/2026, demande Bourama : 3 filtres cochables à la publication
+    # (voir core/listes_bibliotheque_publique.py), optionnels.
+    pays: str | None = None
+    classe: str | None = None
+    categorie: str | None = None
+
+
+@router.get("/listes")
+def lister_listes_filtres():
+    """Valeurs déjà connues pour pays/classe/catégorie, pour peupler les menus du formulaire de publication ET les filtres de recherche côté frontend."""
+    return {
+        "pays": lister_valeurs("pays"),
+        "classes": lister_valeurs("classe"),
+        "categories": lister_valeurs("categorie"),
+    }
 
 
 @router.get("", response_model=list[EntreeBibliothequePublique])
-def lister_bibliotheque_publique(q: str | None = None):
+def lister_bibliotheque_publique(q: str | None = None, pays: str | None = None, classe: str | None = None, categorie: str | None = None):
     # Filtre statut="publie" (22/08, chantier signalements) : une entrée
     # retirée par un admin suite à un signalement reste en base (trace
     # pour l'audit) mais ne doit plus jamais réapparaître dans le
     # catalogue, voir api/signalements.py.
     requete = (
         supabase.table("bibliotheque_publique")
-        .select("id, nom, description, nom_fichier, type_mime, taille_octets, url_publique, created_at, statut_vectorisation")
+        .select("id, nom, description, nom_fichier, type_mime, taille_octets, url_publique, created_at, statut_vectorisation, pays, classe, categorie")
         .eq("statut", "publie")
     )
     if (q or "").strip():
         requete = requete.or_(f"nom.ilike.%{q.strip()}%,description.ilike.%{q.strip()}%")
+    # 02/09/2026, demande Bourama : filtres pays/classe/catégorie, en
+    # plus du filtre par type déjà géré côté frontend.
+    if (pays or "").strip():
+        requete = requete.eq("pays", pays.strip())
+    if (classe or "").strip():
+        requete = requete.eq("classe", classe.strip())
+    if (categorie or "").strip():
+        requete = requete.eq("categorie", categorie.strip())
     res = requete.order("created_at", desc=True).limit(200).execute()
     return res.data or []
 
@@ -102,6 +126,9 @@ async def ajouter_a_bibliotheque_publique(
     nom: str = Form(""),
     description: str = Form(""),
     dossier_id: str = Form(""),
+    pays: str = Form(""),
+    classe: str = Form(""),
+    categorie: str = Form(""),
     utilisateur=Depends(utilisateur_courant),
 ):
     # Nom optionnel (28/08, demande Bourama : "nom et description
@@ -148,6 +175,11 @@ async def ajouter_a_bibliotheque_publique(
                 # bloquante -- long sur un gros fichier ou un upload en
                 # masse.
                 "statut_vectorisation": "en_attente" if necessite_vectorisation_fichier_publique(fichier.content_type) else "pret",
+                # 02/09/2026, demande Bourama : 3 filtres optionnels à la
+                # publication (voir core/listes_bibliotheque_publique.py).
+                "pays": normaliser_et_enregistrer("pays", pays),
+                "classe": normaliser_et_enregistrer("classe", classe),
+                "categorie": normaliser_et_enregistrer("categorie", categorie),
             })
             .execute()
         )
@@ -176,6 +208,9 @@ class AjouterLienPayload(BaseModel):
     nom: str = ""
     description: str = ""
     dossier_id: str = ""
+    pays: str = ""
+    classe: str = ""
+    categorie: str = ""
 
 
 @router.post("/lien", response_model=EntreeBibliothequePublique, status_code=201)
@@ -196,6 +231,9 @@ def ajouter_lien_bibliotheque_publique(payload: AjouterLienPayload, utilisateur=
                 "url_publique": payload.url.strip(),
                 "type_mime": "text/uri-list",
                 "statut_vectorisation": "pret",  # un lien n'est jamais vectorisé
+                "pays": normaliser_et_enregistrer("pays", payload.pays),
+                "classe": normaliser_et_enregistrer("classe", payload.classe),
+                "categorie": normaliser_et_enregistrer("categorie", payload.categorie),
             })
             .execute()
         )
@@ -217,6 +255,9 @@ class AjouterTextePayload(BaseModel):
     contenu: str
     nom: str = ""
     dossier_id: str = ""
+    pays: str = ""
+    classe: str = ""
+    categorie: str = ""
 
 
 @router.post("/texte", response_model=EntreeBibliothequePublique, status_code=201)
@@ -251,6 +292,9 @@ def ajouter_texte_bibliotheque_publique(payload: AjouterTextePayload, utilisateu
                 "type_mime": "text/plain",
                 "taille_octets": len(contenu_octets),
                 "statut_vectorisation": "en_attente" if necessite_vectorisation_note() else "pret",
+                "pays": normaliser_et_enregistrer("pays", payload.pays),
+                "classe": normaliser_et_enregistrer("classe", payload.classe),
+                "categorie": normaliser_et_enregistrer("categorie", payload.categorie),
             })
             .execute()
         )

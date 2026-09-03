@@ -27,6 +27,7 @@ from core.dossiers_publics_attaches import (
     lister_dossiers_attaches,
     propager_fichier_public_range_dossier,
 )
+from core.listes_bibliotheque_publique import normaliser_et_enregistrer
 
 router = APIRouter(prefix="/api/bibliotheque-publique/dossiers", tags=["dossiers-catalogue-public"])
 
@@ -35,6 +36,9 @@ class CreerDossierPayload(BaseModel):
     nom: str = ""
     statut: str = "contribution_libre"
     dossier_parent_id: str | None = None
+    pays: str = ""
+    classe: str = ""
+    categorie: str = ""
 
 
 class RenommerDossierPayload(BaseModel):
@@ -59,7 +63,12 @@ def creer(payload: CreerDossierPayload, utilisateur=Depends(utilisateur_courant)
         raise erreur_api(400, "STATUT_INVALIDE")
     # Nom optionnel (28/08, demande Bourama : "nom et description optionnels même pour dossier") -- repli sur "Nouveau dossier".
     nom = (payload.nom or "").strip() or "Nouveau dossier"
-    return creer_dossier(utilisateur.id, nom, payload.statut, payload.dossier_parent_id)
+    return creer_dossier(
+        utilisateur.id, nom, payload.statut, payload.dossier_parent_id,
+        pays=normaliser_et_enregistrer("pays", payload.pays),
+        classe=normaliser_et_enregistrer("classe", payload.classe),
+        categorie=normaliser_et_enregistrer("categorie", payload.categorie),
+    )
 
 
 @router.patch("/{dossier_id}")

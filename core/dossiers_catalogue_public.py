@@ -47,12 +47,21 @@ def peut_retirer_contenu(dossier_id: str, user_id: str) -> bool:
     return dossier["cree_par"] == user_id
 
 
-def creer_dossier(user_id: str, nom: str, statut: str = "contribution_libre", dossier_parent_id: str = None) -> dict:
+def creer_dossier(
+    user_id: str, nom: str, statut: str = "contribution_libre", dossier_parent_id: str = None,
+    pays: str = None, classe: str = None, categorie: str = None,
+) -> dict:
     insertion = supabase.table("dossiers_catalogue_public").insert({
         "cree_par": user_id,
         "nom": nom,
         "statut": statut,
         "dossier_parent_id": dossier_parent_id,
+        # 02/09/2026, demande Bourama : 3 filtres optionnels, cochables
+        # aussi à la publication d'un DOSSIER (pas seulement un fichier),
+        # voir core/listes_bibliotheque_publique.py.
+        "pays": pays,
+        "classe": classe,
+        "categorie": categorie,
     }).execute()
     return insertion.data[0]
 
@@ -65,7 +74,7 @@ def lister_dossiers() -> list:
     """Liste TOUS les dossiers du catalogue public, à plat -- visible par tout le monde, contrairement au perso."""
     return (
         supabase.table("dossiers_catalogue_public")
-        .select("id, cree_par, nom, statut, dossier_parent_id, created_at")
+        .select("id, cree_par, nom, statut, dossier_parent_id, created_at, pays, classe, categorie")
         .order("created_at")
         .execute()
         .data
