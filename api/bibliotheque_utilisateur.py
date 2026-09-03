@@ -33,7 +33,11 @@ from core.erreurs import erreur_api
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "core"))
 from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien, lister_fichiers, supprimer_fichier  # noqa: E402
-from file_attente_vectorisation import necessite_vectorisation_fichier_privee, necessite_vectorisation_note  # noqa: E402
+from file_attente_vectorisation import (  # noqa: E402
+    necessite_vectorisation_fichier_privee,
+    necessite_vectorisation_note,
+    reinitialiser_pour_reessai,
+)
 
 router = APIRouter(prefix="/api/bibliotheque", tags=["bibliotheque-utilisateur"])
 
@@ -379,6 +383,25 @@ def lister(utilisateur=Depends(utilisateur_courant)):
     # volontairement différent : une pièce jointe de conversation n'est
     # pas un document que l'IA doit ressortir comme si tu l'avais rangé.
     return lister_fichiers("utilisateur", user_id=utilisateur.id)
+
+
+@router.post("/{fichier_id}/reessayer-vectorisation", status_code=204)
+def reessayer_vectorisation(fichier_id: str, utilisateur=Depends(utilisateur_courant)):
+    """
+    Bouton "Réessayer" (03/09/2026, demande Bourama : un fichier en échec
+    de vectorisation restait affiché avec un point rouge indéfiniment,
+    seule "solution" = supprimer + réajouter -- voir core/file_attente_
+    vectorisation.py). Vérifie la propriété comme pour la suppression
+    ci-dessous, puis remet le fichier en file immédiatement.
+    """
+    res = supabase.table("fichiers_uploades").select("user_id, statut_vectorisation").eq("id", fichier_id).maybe_single().execute()
+    if not res or not res.data:
+        raise erreur_api(404, "FICHIER_INTROUVABLE")
+    if res.data["user_id"] != utilisateur.id:
+        raise erreur_api(403, "CE_FICHIER_NE_T_APPARTIENT_PAS")
+
+    if not reinitialiser_pour_reessai("fichiers_uploades", fichier_id):
+        raise erreur_api(409, "FICHIER_PAS_EN_ECHEC")
 
 
 @router.delete("/{fichier_id}", status_code=204)

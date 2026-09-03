@@ -40,12 +40,30 @@ Robustesse au redémarrage (Railway redéploie à chaque push) :
   fichier cassé (PDF corrompu, etc.) ne reparte indéfiniment à chaque
   redémarrage -- passe en statut "echec" au-delà, erreur_vectorisation
   garde le dernier message pour diagnostic.
+
+Réessai après "echec" (03/09/2026, demande Bourama : un fichier en échec
+restait affiché avec un point rouge indéfiniment, seule "solution"
+proposée à l'utilisateur = supprimer + réajouter) -- deux mécanismes :
+- AUTOMATIQUE, à froid : relancer_echecs_a_froid() (appelée en boucle
+  espacée depuis api/main.py:_boucle_reessai_echecs) repasse un fichier
+  "echec" à "en_attente" après un délai (COOLDOWN_AUTO_REESSAI) écoulé
+  depuis sa dernière tentative (derniere_tentative_vectorisation_a) --
+  utile pour une panne passagère (API de vectorisation en rate limit,
+  coupure réseau ponctuelle...). Plafonné à MAX_TENTATIVES_AUTO tentatives
+  au total pour ne jamais retenter indéfiniment un fichier réellement
+  cassé.
+- MANUEL : reinitialiser_pour_reessai() (appelée par les routes API
+  POST .../reessayer-vectorisation) remet tentatives_vectorisation à 0 et
+  le fichier à "en_attente" immédiatement, sans attendre le cooldown --
+  toujours disponible tant que le fichier est en échec, même après avoir
+  épuisé le plafond automatique.
 """
 
 import logging
 import os
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 
 from supabase import create_client
 
@@ -65,6 +83,16 @@ from description_multimedia import decrire_image_bibliotheque, transcrire_audio_
 BUCKET_BIBLIOTHEQUE = "bibliotheque"
 MAX_TENTATIVES = 3
 TAILLE_LOT = 5  # fichiers traités par passage, par bibliothèque -- garde-fou pour qu'un passage ne tourne jamais indéfiniment avant de rendre la main à la boucle appelante.
+
+# Réessai automatique à froid après "echec" (voir docstring du module) --
+# distinct de MAX_TENTATIVES (retries rapprochés, quasi immédiats, dans le
+# même passage de file d'attente) : ici on laisse d'abord passer un délai,
+# pour laisser une chance à une panne passagère de se résorber, avant de
+# retenter. MAX_TENTATIVES_AUTO est un plafond TOTAL (compte les tentatives
+# rapprochées initiales) -- au-delà, plus aucun réessai automatique, seul
+# le bouton "Réessayer" manuel (reinitialiser_pour_reessai) reste possible.
+COOLDOWN_AUTO_REESSAI = timedelta(minutes=15)
+MAX_TENTATIVES_AUTO = MAX_TENTATIVES + 3
 
 
 def _get_secret(cle):
@@ -228,15 +256,20 @@ def _traiter_lot(table: str, colonnes: str, fonction_vectorisation, filtre_nivea
 
     for ligne in lignes:
         fichier_id = ligne["id"]
+        maintenant_iso = datetime.now(timezone.utc).isoformat()
         try:
             supabase.table(table).update({"statut_vectorisation": "en_cours"}).eq("id", fichier_id).execute()
             fonction_vectorisation(ligne)
             supabase.table(table).update({
                 "statut_vectorisation": "pret",
                 "erreur_vectorisation": None,
+                "derniere_tentative_vectorisation_a": maintenant_iso,
             }).eq("id", fichier_id).execute()
         except Exception as e:
             tentatives = (ligne.get("tentatives_vectorisation") or 0) + 1
+            # MAX_TENTATIVES (retries rapprochés dans ce même passage) --
+            # au-delà, "echec" ; relancer_echecs_a_froid ci-dessous se
+            # charge des réessais automatiques suivants, plus espacés.
             nouveau_statut = "echec" if tentatives >= MAX_TENTATIVES else "en_attente"
             logging.error(f"ERREUR vectorisation ({table}, fichier_id={fichier_id}, tentative {tentatives}) : {e}")
             try:
@@ -244,6 +277,7 @@ def _traiter_lot(table: str, colonnes: str, fonction_vectorisation, filtre_nivea
                     "statut_vectorisation": nouveau_statut,
                     "tentatives_vectorisation": tentatives,
                     "erreur_vectorisation": str(e)[:500],
+                    "derniere_tentative_vectorisation_a": maintenant_iso,
                 }).eq("id", fichier_id).execute()
             except Exception as e2:
                 logging.error(f"ERREUR mise à jour statut échec ({table}, fichier_id={fichier_id}) : {e2}")
@@ -257,3 +291,58 @@ def traiter_file_attente_une_fois() -> int:
     total += _traiter_lot("fichiers_uploades", COLONNES_PRIVEE, _vectoriser_privee, filtre_niveau=True)
     total += _traiter_lot("bibliotheque_publique", COLONNES_PUBLIQUE, _vectoriser_publique, filtre_niveau=False)
     return total
+
+
+def _relancer_echecs_a_froid_table(table: str) -> int:
+    """
+    Repasse à "en_attente" les fichiers "echec" de `table` dont le
+    cooldown est écoulé et qui n'ont pas dépassé MAX_TENTATIVES_AUTO --
+    voir docstring du module. Renvoie le nombre de fichiers relancés.
+    """
+    seuil = (datetime.now(timezone.utc) - COOLDOWN_AUTO_REESSAI).isoformat()
+    try:
+        resultat = (
+            supabase.table(table)
+            .update({"statut_vectorisation": "en_attente"})
+            .eq("statut_vectorisation", "echec")
+            .lt("tentatives_vectorisation", MAX_TENTATIVES_AUTO)
+            .lt("derniere_tentative_vectorisation_a", seuil)
+            .execute()
+        )
+        return len(resultat.data or [])
+    except Exception as e:
+        logging.error(f"ERREUR réessai automatique à froid ({table}) : {e}")
+        return 0
+
+
+def relancer_echecs_a_froid() -> int:
+    """Appelée en boucle espacée depuis api/main.py:_boucle_reessai_echecs -- voir docstring du module."""
+    total = _relancer_echecs_a_froid_table("fichiers_uploades")
+    total += _relancer_echecs_a_froid_table("bibliotheque_publique")
+    return total
+
+
+def reinitialiser_pour_reessai(table: str, fichier_id: str) -> bool:
+    """
+    Réessai MANUEL (bouton "Réessayer" -- voir docstring du module) :
+    remet un fichier "echec" à "en_attente" immédiatement, avec un
+    compteur de tentatives repartant de zéro (nouvelle pleine série de
+    MAX_TENTATIVES essais rapprochés, plus à nouveau éligible au réessai
+    automatique à froid ensuite si ça échoue encore). Ne fait rien si le
+    fichier n'est pas en échec (pas de sens à "réessayer" un fichier déjà
+    prêt ou en cours de traitement) -- renvoie False dans ce cas, True si
+    la remise en attente a bien eu lieu.
+    """
+    resultat = (
+        supabase.table(table)
+        .update({
+            "statut_vectorisation": "en_attente",
+            "tentatives_vectorisation": 0,
+            "erreur_vectorisation": None,
+            "derniere_tentative_vectorisation_a": None,
+        })
+        .eq("id", fichier_id)
+        .eq("statut_vectorisation", "echec")
+        .execute()
+    )
+    return len(resultat.data or []) > 0

@@ -35,7 +35,11 @@ from supabase import create_client
 
 from api.auth import utilisateur_courant
 from core.erreurs import erreur_api
-from core.file_attente_vectorisation import necessite_vectorisation_fichier_publique, necessite_vectorisation_note
+from core.file_attente_vectorisation import (
+    necessite_vectorisation_fichier_publique,
+    necessite_vectorisation_note,
+    reinitialiser_pour_reessai,
+)
 from core.dossiers_catalogue_public import ranger_fichier as _ranger_fichier_dossier, peut_ajouter_contenu as _peut_ajouter_contenu_dossier, _dossier as _dossier_catalogue_public
 from core.dossiers_publics_attaches import propager_fichier_public_range_dossier as _propager_fichier_public_range_dossier
 from core.listes_bibliotheque_publique import lister_valeurs, normaliser_et_enregistrer
@@ -312,6 +316,25 @@ def ajouter_texte_bibliotheque_publique(payload: AjouterTextePayload, utilisateu
     # Vectorisation en arrière-plan (29/08, voir core/file_attente_vectorisation.py) --
     # avant, indexer_texte_catalogue_public était appelé directement ici.
     return entree
+
+
+@router.post("/{entree_id}/reessayer-vectorisation", status_code=204)
+def reessayer_vectorisation_publique(entree_id: str, utilisateur=Depends(utilisateur_courant)):
+    """Pendant de reessayer_vectorisation (api/bibliotheque_utilisateur.py) pour la bibliothèque publique -- voir sa docstring."""
+    res = (
+        supabase.table("bibliotheque_publique")
+        .select("ajoute_par, statut_vectorisation")
+        .eq("id", entree_id)
+        .maybe_single()
+        .execute()
+    )
+    if not res or not res.data:
+        raise erreur_api(404, "ENTREE_INTROUVABLE")
+    if res.data["ajoute_par"] != utilisateur.id:
+        raise erreur_api(403, "CETTE_ENTREE_NE_T_APPARTIENT_PAS")
+
+    if not reinitialiser_pour_reessai("bibliotheque_publique", entree_id):
+        raise erreur_api(409, "ENTREE_PAS_EN_ECHEC")
 
 
 @router.delete("/{entree_id}", status_code=204)

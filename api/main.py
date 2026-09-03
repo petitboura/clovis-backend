@@ -55,7 +55,7 @@ from api.canal_temps_reel import router as canal_temps_reel_router
 from core.serveur_mcp_generation import mcp_generation
 from core.notifications_push import traiter_rappels_echus, un_canal_push_disponible
 from core.proactivite import verifier_relances_proactives
-from core.file_attente_vectorisation import remettre_en_attente_bloques, traiter_file_attente_une_fois
+from core.file_attente_vectorisation import remettre_en_attente_bloques, traiter_file_attente_une_fois, relancer_echecs_a_froid
 # from core.audit_programme import executer_audits_hebdomadaires  -- désactivé, voir _desactive_programme/
 from core.serveur_mcp_github import mcp_github
 from core.serveur_mcp_public import mcp_public
@@ -123,6 +123,26 @@ async def _boucle_vectorisation():
         await asyncio.sleep(2 if traites > 0 else 5)
 
 
+async def _boucle_reessai_echecs():
+    """
+    Réessai automatique à froid des fichiers "echec" (03/09/2026, demande
+    Bourama : un fichier en échec restait affiché indéfiniment sans autre
+    recours qu'une suppression/réajout manuels -- voir docstring de
+    core/file_attente_vectorisation.py). Intervalle volontairement plus
+    espacé que _boucle_vectorisation : le cooldown lui-même (COOLDOWN_AUTO_
+    REESSAI) dure déjà plusieurs minutes, pas besoin de vérifier plus
+    souvent que ça.
+    """
+    while True:
+        try:
+            relances = await to_thread.run_sync(relancer_echecs_a_froid)
+            if relances:
+                logging.info(f"Réessai auto à froid : {relances} fichier(s) remis en file.")
+        except Exception as e:
+            logging.error(f"ERREUR boucle réessai à froid : {e}")
+        await asyncio.sleep(5 * 60)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     # Toutes les routes API sont en `def` sync (Supabase, Groq, Gemini :
@@ -161,12 +181,14 @@ async def _lifespan(app: FastAPI):
             tache_planificateur = asyncio.create_task(_boucle_planificateur_rappels())
             tache_proactivite = asyncio.create_task(_boucle_planificateur_proactivite())
         tache_vectorisation = asyncio.create_task(_boucle_vectorisation())
+        tache_reessai_echecs = asyncio.create_task(_boucle_reessai_echecs())
         yield
         if tache_planificateur:
             tache_planificateur.cancel()
         if tache_proactivite:
             tache_proactivite.cancel()
         tache_vectorisation.cancel()
+        tache_reessai_echecs.cancel()
 
 
 app = FastAPI(title="Clovis API", version="0.1.0", lifespan=_lifespan)
