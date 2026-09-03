@@ -85,39 +85,39 @@ class EntreeBibliothequePublique(BaseModel):
     # 02/09/2026, demande Bourama : 3 filtres cochables à la publication
     # (voir core/listes_bibliotheque_publique.py), optionnels.
     pays: str | None = None
-    classe: str | None = None
+    niveau: str | None = None
     categorie: str | None = None
 
 
 @router.get("/listes")
 def lister_listes_filtres():
-    """Valeurs déjà connues pour pays/classe/catégorie, pour peupler les menus du formulaire de publication ET les filtres de recherche côté frontend."""
+    """Valeurs déjà connues pour pays/niveau/catégorie, pour peupler les menus du formulaire de publication ET les filtres de recherche côté frontend."""
     return {
         "pays": lister_valeurs("pays"),
-        "classes": lister_valeurs("classe"),
+        "niveaux": lister_valeurs("niveau"),
         "categories": lister_valeurs("categorie"),
     }
 
 
 @router.get("", response_model=list[EntreeBibliothequePublique])
-def lister_bibliotheque_publique(q: str | None = None, pays: str | None = None, classe: str | None = None, categorie: str | None = None):
+def lister_bibliotheque_publique(q: str | None = None, pays: str | None = None, niveau: str | None = None, categorie: str | None = None):
     # Filtre statut="publie" (22/08, chantier signalements) : une entrée
     # retirée par un admin suite à un signalement reste en base (trace
     # pour l'audit) mais ne doit plus jamais réapparaître dans le
     # catalogue, voir api/signalements.py.
     requete = (
         supabase.table("bibliotheque_publique")
-        .select("id, nom, description, nom_fichier, type_mime, taille_octets, url_publique, created_at, statut_vectorisation, pays, classe, categorie")
+        .select("id, nom, description, nom_fichier, type_mime, taille_octets, url_publique, created_at, statut_vectorisation, pays, niveau, categorie")
         .eq("statut", "publie")
     )
     if (q or "").strip():
         requete = requete.or_(f"nom.ilike.%{q.strip()}%,description.ilike.%{q.strip()}%")
-    # 02/09/2026, demande Bourama : filtres pays/classe/catégorie, en
+    # 02/09/2026, demande Bourama : filtres pays/niveau/catégorie, en
     # plus du filtre par type déjà géré côté frontend.
     if (pays or "").strip():
         requete = requete.eq("pays", pays.strip())
-    if (classe or "").strip():
-        requete = requete.eq("classe", classe.strip())
+    if (niveau or "").strip():
+        requete = requete.eq("niveau", niveau.strip())
     if (categorie or "").strip():
         requete = requete.eq("categorie", categorie.strip())
     res = requete.order("created_at", desc=True).limit(200).execute()
@@ -131,7 +131,7 @@ async def ajouter_a_bibliotheque_publique(
     description: str = Form(""),
     dossier_id: str = Form(""),
     pays: str = Form(""),
-    classe: str = Form(""),
+    niveau: str = Form(""),
     categorie: str = Form(""),
     utilisateur=Depends(utilisateur_courant),
 ):
@@ -182,7 +182,7 @@ async def ajouter_a_bibliotheque_publique(
                 # 02/09/2026, demande Bourama : 3 filtres optionnels à la
                 # publication (voir core/listes_bibliotheque_publique.py).
                 "pays": normaliser_et_enregistrer("pays", pays),
-                "classe": normaliser_et_enregistrer("classe", classe),
+                "niveau": normaliser_et_enregistrer("niveau", niveau),
                 "categorie": normaliser_et_enregistrer("categorie", categorie),
             })
             .execute()
@@ -213,7 +213,7 @@ class AjouterLienPayload(BaseModel):
     description: str = ""
     dossier_id: str = ""
     pays: str = ""
-    classe: str = ""
+    niveau: str = ""
     categorie: str = ""
 
 
@@ -236,7 +236,7 @@ def ajouter_lien_bibliotheque_publique(payload: AjouterLienPayload, utilisateur=
                 "type_mime": "text/uri-list",
                 "statut_vectorisation": "pret",  # un lien n'est jamais vectorisé
                 "pays": normaliser_et_enregistrer("pays", payload.pays),
-                "classe": normaliser_et_enregistrer("classe", payload.classe),
+                "niveau": normaliser_et_enregistrer("niveau", payload.niveau),
                 "categorie": normaliser_et_enregistrer("categorie", payload.categorie),
             })
             .execute()
@@ -260,7 +260,7 @@ class AjouterTextePayload(BaseModel):
     nom: str = ""
     dossier_id: str = ""
     pays: str = ""
-    classe: str = ""
+    niveau: str = ""
     categorie: str = ""
 
 
@@ -297,7 +297,7 @@ def ajouter_texte_bibliotheque_publique(payload: AjouterTextePayload, utilisateu
                 "taille_octets": len(contenu_octets),
                 "statut_vectorisation": "en_attente" if necessite_vectorisation_note() else "pret",
                 "pays": normaliser_et_enregistrer("pays", payload.pays),
-                "classe": normaliser_et_enregistrer("classe", payload.classe),
+                "niveau": normaliser_et_enregistrer("niveau", payload.niveau),
                 "categorie": normaliser_et_enregistrer("categorie", payload.categorie),
             })
             .execute()

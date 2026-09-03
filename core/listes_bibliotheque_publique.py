@@ -1,8 +1,8 @@
 """
-Listes pays/classe/catégorie de la bibliothèque publique (02/09/2026,
+Listes pays/niveau/catégorie de la bibliothèque publique (02/09/2026,
 demande Bourama : en plus du filtre par type déjà existant, 3 nouveaux
 filtres cochables par le publieur au moment de publier un dossier ou un
-fichier -- pays, classe/niveau, catégorie).
+fichier -- pays, niveau, catégorie).
 
 Décisions confirmées par Bourama :
 - Liste SÉPARÉE de la table `categories` déjà utilisée pour classer les
@@ -13,6 +13,9 @@ Décisions confirmées par Bourama :
   y est ajoutée au passage (pour réapparaître en suggestion la
   prochaine fois) -- jamais une liste fermée qui bloquerait la
   publication.
+- 03/09/2026 : champ "classe" renommé en "niveau" partout (code +
+  base de données, voir migrations/2026_09_03_renommage_classe_en_
+  niveau_bibliotheque_publique.sql), sur demande Bourama.
 
 Limite connue (pas demandée, pas traitée pour l'instant) : la
 comparaison d'unicité est sensible à la casse/aux espaces au-delà du
@@ -30,13 +33,13 @@ from bibliotheque_fichiers import supabase  # noqa: E402
 
 TABLES = {
     "pays": "bibliotheque_publique_pays",
-    "classe": "bibliotheque_publique_classes",
+    "niveau": "bibliotheque_publique_niveaux",
     "categorie": "bibliotheque_publique_categories",
 }
 
 
 def lister_valeurs(champ: str) -> list[str]:
-    """Valeurs déjà connues pour un champ ("pays"/"classe"/"categorie"), pour peupler les suggestions du formulaire côté frontend."""
+    """Valeurs déjà connues pour un champ ("pays"/"niveau"/"categorie"), pour peupler les suggestions du formulaire côté frontend."""
     table = TABLES[champ]
     try:
         res = supabase.table(table).select("nom").order("nom").execute()

@@ -37,7 +37,7 @@ class CreerDossierPayload(BaseModel):
     statut: str = "contribution_libre"
     dossier_parent_id: str | None = None
     pays: str = ""
-    classe: str = ""
+    niveau: str = ""
     categorie: str = ""
 
 
@@ -66,7 +66,7 @@ def creer(payload: CreerDossierPayload, utilisateur=Depends(utilisateur_courant)
     return creer_dossier(
         utilisateur.id, nom, payload.statut, payload.dossier_parent_id,
         pays=normaliser_et_enregistrer("pays", payload.pays),
-        classe=normaliser_et_enregistrer("classe", payload.classe),
+        niveau=normaliser_et_enregistrer("niveau", payload.niveau),
         categorie=normaliser_et_enregistrer("categorie", payload.categorie),
     )
 
