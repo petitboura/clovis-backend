@@ -18,7 +18,7 @@ from core.erreurs import erreur_api
 
 router = APIRouter(prefix="/api/legal", tags=["contenu_legal"])
 
-CLES_VALIDES = ("cgu", "copyright")
+CLES_VALIDES = ("cgu", "copyright", "confidentialite")
 
 
 class ContenuLegalReponse(BaseModel):
