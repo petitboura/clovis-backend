@@ -369,14 +369,16 @@ def lister(utilisateur=Depends(utilisateur_courant)):
     # Corrigé le 01/08 (Bourama) : d'abord une comparaison fragile sur le
     # texte de la description (incomplète, ratait audio/image/vidéo, ne
     # gardait que "Document..."), remplacée par le vrai filtre origine
-    # (voir migration fichiers_uploades_origine + enregistrer_fichier) --
-    # ne remonte QUE ce qui a été ajouté explicitement ici, jamais un
-    # fichier envoyé en pièce jointe de conversation.
-    # CORRECTIF 02/09/2026 (nouvelles origines "publique"/"code_partage"/
-    # "ia_generee") : origine="bibliotheque" -> exclut_origine="chat",
-    # pour que ces fichiers restent visibles ici tant que le découpage en
-    # onglets d'origine n'est pas fait côté frontend.
-    return lister_fichiers("utilisateur", user_id=utilisateur.id, exclut_origine="chat")
+    # (voir migration fichiers_uploades_origine + enregistrer_fichier).
+    # CORRECTIF 02/09/2026 : les 5 onglets d'origine de l'écran Bibliothèque
+    # (EspaceBibliotheque.tsx) incluent désormais "Uploadé dans un chat" --
+    # donc plus aucun filtre d'origine ici, on remonte tout et c'est le
+    # frontend qui répartit par origine. Les outils IA
+    # (serveur_mcp_generation.py / serveur_mcp_espace.py) gardent eux
+    # exclut_origine="chat" pour leur recherche dans "ta bibliothèque",
+    # volontairement différent : une pièce jointe de conversation n'est
+    # pas un document que l'IA doit ressortir comme si tu l'avais rangé.
+    return lister_fichiers("utilisateur", user_id=utilisateur.id)
 
 
 @router.delete("/{fichier_id}", status_code=204)
