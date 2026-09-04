@@ -2213,6 +2213,20 @@ async def explorer_dossier(
       transcription d'un audio). Si le fichier est trop volumineux,
       dis clairement à l'étudiant que ce n'est pas encore possible mais
       que ça arrivera plus tard, n'essaie pas de contourner.
+    - "donner_fichier" : ENVOIE le fichier lui-même en pièce jointe dans
+      le chat (pas juste son contenu/résumé, voir "lire_fichier" pour
+      ça), identifié par `chemin` (même convention que "lire_fichier" --
+      DOIT venir d'un listing/recherche précédent, ne devine jamais).
+      Utilise cette action dès que l'étudiant demande explicitement le
+      fichier ("donne-moi ce fichier", "envoie-moi cette photo depuis
+      mon téléphone"), ou quand le contexte l'indique clairement. Le
+      fichier est transféré depuis le téléphone puis ajouté à la
+      bibliothèque personnelle de l'étudiant au passage (comme tout
+      fichier qui transite par le chat), donc redonnable ensuite via
+      gerer_document_bibliotheque (action "donner") sans redemander au
+      téléphone. Limite de taille : 50 Mo (plus large que "lire_fichier",
+      qui lui doit rester lisible par le modèle -- ici le fichier n'est
+      pas traité, juste transféré tel quel).
     - "chercher_par_contenu" : cherche `terme_recherche` dans le CONTENU
       des fichiers sous `dossier_nom` (pas dans leur nom, utilise
       "chercher_par_nom" pour ça), en lisant chaque fichier un par un.
@@ -2232,7 +2246,7 @@ async def explorer_dossier(
 
     actions_valides = {
         "lister_contenu", "ouvrir_sous_dossier", "chercher_par_nom",
-        "lire_fichier", "chercher_par_contenu",
+        "lire_fichier", "chercher_par_contenu", "donner_fichier",
     }
     if action not in actions_valides:
         return f"Erreur : action '{action}' inconnue. Actions valides : {', '.join(sorted(actions_valides))}."
@@ -2249,6 +2263,9 @@ async def explorer_dossier(
     if action == "lire_fichier" and not chemin:
         return "Erreur : paramètre 'chemin' manquant pour l'action 'lire_fichier'."
 
+    if action == "donner_fichier" and not chemin:
+        return "Erreur : paramètre 'chemin' manquant pour l'action 'donner_fichier'."
+
     try:
         if action == "lister_contenu":
             resultat = await _lister_contenu_dossier(user_id, dossier_nom)
@@ -2259,6 +2276,9 @@ async def explorer_dossier(
         elif action == "chercher_par_contenu":
             resultat = await _chercher_par_contenu(user_id, dossier_nom, terme_recherche)
         else:
+            # "lire_fichier" et "donner_fichier" : même récupération
+            # brute depuis le téléphone, traitement différent plus bas
+            # (extraction de texte vs upload bibliothèque + pièce jointe).
             resultat = await _lire_fichier(user_id, dossier_nom, chemin)
     except Exception as e:
         logging.error(f"ERREUR explorer_dossier ({action}, {dossier_nom}) : {e}")
@@ -2301,6 +2321,49 @@ async def explorer_dossier(
         if "erreur" in lecture:
             return f'Erreur de lecture de "{nom_fichier}" : {lecture["erreur"]}'
         return f'Contenu de "{nom_fichier}" :\n\n{lecture["texte"]}'
+
+    if action == "donner_fichier":
+        # 04/09/2026, demande Bourama (Partie B, dossier téléphone) :
+        # même principe que "donner"/"donner_catalogue_public" de
+        # gerer_document_bibliotheque (voir leurs commentaires pour le
+        # détail du mécanisme "fichiers_generes") -- ce texte ne doit
+        # PAS matcher le format "(Source : ...)". Contrairement à
+        # "lire_fichier" ci-dessus, aucun traitement/extraction : le
+        # fichier est stocké tel quel dans la bibliothèque personnelle
+        # (comme n'importe quel fichier qui transite par le chat), avec
+        # sa VRAIE url_publique, seule façon de le rendre attachable.
+        nom_fichier = resultat.get("nom_fichier") or chemin[-1]
+        type_mime = resultat.get("type_mime") or "application/octet-stream"
+        taille_octets = resultat.get("tailleOctets")
+
+        if taille_octets is not None and taille_octets > _TAILLE_MAX_OCTETS_BIBLIOTHEQUE:
+            return f'Le fichier "{nom_fichier}" dépasse 50 Mo, impossible de le transférer depuis le téléphone.'
+
+        contenu_base64 = resultat.get("contenu_base64")
+        if not contenu_base64:
+            return f'Erreur : contenu de "{nom_fichier}" introuvable dans la réponse du téléphone.'
+
+        try:
+            contenu = base64.b64decode(contenu_base64)
+        except Exception as e:
+            logging.error(f"ERREUR decodage base64 (donner_fichier, {nom_fichier}) : {e}")
+            return f'Erreur : contenu de "{nom_fichier}" illisible (erreur de transfert).'
+
+        try:
+            ligne = _enregistrer_fichier(
+                contenu=contenu,
+                nom_fichier=nom_fichier,
+                type_mime=type_mime,
+                niveau="utilisateur",
+                uploade_par=user_id,
+                user_id=user_id,
+                description=f"Depuis le téléphone : {nom_fichier}",
+            )
+        except Exception as e:
+            logging.error(f"ERREUR gerer_document_bibliotheque (donner_fichier, {nom_fichier}) : {e}")
+            return f'Erreur : impossible de transférer "{nom_fichier}" depuis le téléphone, réessaie.'
+
+        return f"Fichier envoyé : {nom_fichier} -- {ligne['url_publique']}"
 
     elements = resultat.get("elements") or []
     if not elements:
