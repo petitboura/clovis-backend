@@ -428,5 +428,6 @@ REGISTRE_AFFICHAGE_OUTILS = {
     # autonomie pendant la conversation, jamais des boutons cliqués.
     "gerer_dossier_telephone": {"label": "Dossiers du téléphone", "icone": "FolderPen", "onglet": None},
     "explorer_dossier": {"label": "Exploration du dossier en direct", "icone": "FolderOpen", "onglet": None},
+    "chercher_dossiers_designes": {"label": "Recherche dans les dossiers désignés", "icone": "FolderSearch", "onglet": None},
 }
 
