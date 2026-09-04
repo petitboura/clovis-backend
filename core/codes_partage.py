@@ -569,7 +569,10 @@ def modifier_code(
 
     if comportement_ids is not None:
         _remplacer_comportements_du_code(code_id, proprietaire_id, comportement_ids)
+    if dossier_ids is not None:
+        _remplacer_dossiers_du_code(code_id, proprietaire_id, dossier_ids)
     code["comportements"] = _comportements_par_code([code_id]).get(code_id, [])
+    code["dossiers"] = _dossiers_par_code([code_id]).get(code_id, [])
     return code
 
 
