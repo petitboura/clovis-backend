@@ -1419,6 +1419,37 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         "des noms listés par gerer_dossier_telephone pour fonctionner). "
         "SI TU HÉSITES entre bibliothèque et téléphone, suggère les "
         "outils des deux mondes.\n\n"
+        # AJOUT 2026-09-04 (bug remonté par Bourama : le nouveau
+        # comportement "donner le fichier en pièce jointe" -- actions
+        # "donner"/"donner_catalogue_public" de gerer_document_bibliotheque,
+        # voir [[clovis-fichiers-pieces-jointes]] -- ne se déclenchait
+        # jamais). Cause trouvée : AUCUN exemple ci-dessus ne ressemble à
+        # une demande de fichier lui-même (tous parlent d'expliquer/
+        # résumer/localiser un contenu), donc le petit routeur ne
+        # suggérait gerer_document_bibliotheque pour aucune de ces
+        # formulations -- outil absent du tour, donc littéralement
+        # impossible à appeler pour le grand modèle, quelle que soit sa
+        # docstring (le routeur ne voit qu'un résumé de 200 caractères
+        # par outil, jamais la liste de ses actions).
+        "IMPORTANT : dès que l'utilisateur veut RECEVOIR le fichier "
+        "lui-même (pas juste son contenu/résumé/explication), suggère "
+        "TOUJOURS gerer_document_bibliotheque, que le fichier soit dans "
+        "SA bibliothèque personnelle (monde 1), dans le catalogue "
+        "public (monde 3), OU qu'il ait déjà été envoyé/généré PLUS TÔT "
+        "DANS CETTE CONVERSATION (dans ce dernier cas, aucune recherche "
+        "n'est nécessaire, mais l'outil doit quand même être disponible "
+        "pour que le modèle puisse le redonner). Signal de reconnaissance : "
+        "\"donne-moi\", \"envoie-moi\", \"renvoie-moi\", \"redonne-moi\", "
+        "\"j'aimerais avoir/récupérer le fichier\", \"mets-le en pièce "
+        "jointe\", \"attache ce document\" -- appliqué à un fichier, pas à "
+        "une information. Exemples qui DOIVENT suggérer cet outil : "
+        "\"donne-moi le PDF sur les intégrales\", \"envoie-moi ce document "
+        "de la bibliothèque publique\", \"renvoie-moi le fichier que je "
+        "viens de t'envoyer\", \"j'aimerais récupérer le fichier audio "
+        "qu'on a mentionné plus haut\". Ne confonds pas avec une demande "
+        "de contenu/résumé (\"explique-moi ce PDF\", \"résume ce document\") "
+        "qui reste couverte par les règles des mondes 1/3 ci-dessus, sans "
+        "rapport avec cet ajout.\n\n"
         f"Outils disponibles :\n{catalogue}\n\n"
         f"{contexte}"
         f"Question de l'utilisateur : {message_utilisateur}\n\n"
