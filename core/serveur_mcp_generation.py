@@ -70,6 +70,10 @@ from core.lecture_fichier_mobile import (
     fichier_trop_volumineux as _fichier_trop_volumineux,
 )
 from core.dossiers_designes_mobile import lire_dossiers_designes as _lire_dossiers_designes
+from core.vectorisation_dossiers_designes import (
+    chercher_dossiers_designes as _chercher_dossiers_designes,
+    formater_source_dossier_designe as _formater_source_dossier_designe,
+)
 from api.roles import (
     resoudre_destinataire_autorise as _resoudre_destinataire_autorise,
     _inserer_message,
@@ -2379,3 +2383,55 @@ async def explorer_dossier(
         return f'Le dossier "{dossier_nom}" est vide.'
 
     return _formatter_elements_dossier(elements)
+
+
+@mcp_generation.tool()
+def chercher_dossiers_designes(question: str, ctx: Context) -> str:
+    """
+    Cherche par CONTENU (recherche sémantique, pas de mot-clé exact) dans
+    TOUS les dossiers désignés par l'étudiant sur son téléphone, déjà
+    vectorisés en arrière-plan (04/09/2026) -- contrairement à
+    explorer_dossier(action="chercher_par_contenu"), qui lit chaque
+    fichier un par un EN DIRECT et nécessite l'app ouverte, cet outil-ci
+    répond instantanément et fonctionne même app fermée, mais ne couvre
+    que ce qui a fini d'être vectorisé (un fichier tout juste ajouté peut
+    ne pas encore apparaître -- si rien de pertinent n'est trouvé ici et
+    que l'app est ouverte, tu peux enchaîner avec explorer_dossier pour
+    une recherche en direct plus lente mais toujours à jour).
+
+    Cherche à travers TOUS les dossiers désignés à la fois (pas besoin de
+    préciser lequel) : chaque résultat indique lui-même de quel dossier
+    et sous-dossier il vient. Utilise cet outil en PRIORITÉ dès que
+    l'étudiant décrit un contenu à retrouver sur son téléphone ("le cours
+    où on parle de...", "le PDF qui contient...") sans en connaître
+    l'emplacement exact.
+
+    Paramètre : `question` (ce que l'étudiant cherche, en langage
+    naturel -- pas un simple mot-clé).
+    """
+    user_id = ctx.request_context.request.query_params.get("user_id")
+    if not user_id:
+        return "Erreur : impossible d'identifier l'utilisateur."
+
+    try:
+        resultats = _chercher_dossiers_designes(question, user_id=user_id)
+    except Exception as e:
+        logging.error(f"ERREUR chercher_dossiers_designes : {e}")
+        return "Erreur : la recherche dans les dossiers désignés a échoué, réessaie."
+
+    if not resultats:
+        return (
+            "Rien de pertinent trouvé dans les dossiers désignés du téléphone "
+            "pour cette question (le fichier cherché n'a peut-être pas encore "
+            "fini d'être vectorisé, ou l'app n'a jamais été utilisée pour "
+            "désigner de dossier)."
+        )
+
+    blocs = []
+    for r in resultats:
+        bloc = r["contenu"]
+        source = _formater_source_dossier_designe(r)
+        if source:
+            bloc += f"\n{source}"
+        blocs.append(bloc)
+    return "\n\n---\n\n".join(blocs)

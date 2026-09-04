@@ -273,6 +273,66 @@ def traiter_file_attente_une_fois() -> int:
     return len(lignes)
 
 
+def chercher_dossiers_designes(question: str, user_id: str, match_count: int = 5) -> list:
+    """
+    Recherche semantique dans TOUT le contenu deja vectorise des dossiers
+    designes de `user_id` (tous dossiers confondus -- pas de filtre par
+    dossier_nom ici, voir recherche_dossiers_designes en SQL). Meme
+    principe que chercher_bibliotheque (core/bibliotheque_rag.py), sur la
+    table dediee documents_dossier_designe.
+
+    Renvoie une liste de {contenu, similarite, fichier_id, nom_fichier,
+    dossier_nom, chemin, url_publique, type_mime, page_debut, page_fin,
+    timestamp_debut, timestamp_fin} triee par pertinence. `chemin` est la
+    liste ordonnee des sous-dossiers depuis la racine designee (jamais le
+    nom du fichier), voir migrations/2026_09_04_dossiers_designes_
+    vectorisation.sql.
+    """
+    if not user_id:
+        logging.error("chercher_dossiers_designes appele sans user_id : renvoie vide.")
+        return []
+
+    try:
+        vecteur = vectoriser(question, task_type="RETRIEVAL_QUERY")
+    except Exception as e:
+        logging.error(f"ERREUR VECTORISATION dossiers designes (Gemini) : {e}")
+        return []
+
+    try:
+        return supabase.rpc(
+            "recherche_dossiers_designes",
+            {"query_embedding": vecteur, "match_count": match_count, "p_user_id": user_id},
+        ).execute().data or []
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE RPC recherche_dossiers_designes (user_id={user_id}) : {e}")
+        return []
+
+
+def formater_source_dossier_designe(r: dict) -> str | None:
+    """
+    Meme role que formater_source_bibliotheque (core/bibliotheque_rag.py),
+    adapte aux dossiers designes : ajoute le chemin (dossier_nom + sous-
+    dossiers) pour que l'IA sache d'ou vient chaque extrait, en plus de la
+    page/du timestamp quand ce chunk en a un.
+    """
+    if not (r.get("nom_fichier") and r.get("dossier_nom")):
+        return None
+    reperage = ""
+    if r.get("page_debut") is not None:
+        if r.get("page_fin") and r["page_fin"] != r["page_debut"]:
+            reperage = f", page {r['page_debut']}-{r['page_fin']}"
+        else:
+            reperage = f", page {r['page_debut']}"
+    elif r.get("timestamp_debut") is not None:
+        debut = int(r["timestamp_debut"])
+        reperage = f", à {debut // 60:02d}:{debut % 60:02d}"
+    chemin = r.get("chemin") or []
+    emplacement = " / ".join([r["dossier_nom"], *chemin]) if chemin else r["dossier_nom"]
+    lien = f", {r['url_publique']}" if r.get("url_publique") else ""
+    type_mime = r.get("type_mime") or ""
+    return f"(Source : {r['nom_fichier']}{reperage}, dossier {emplacement}{lien}, {type_mime})"
+
+
 def relancer_echecs_a_froid() -> int:
     """Reessai automatique a froid, SANS plafond (voir docstring du module) -- seul le cooldown separe deux tentatives."""
     seuil = (datetime.now(timezone.utc) - COOLDOWN_REESSAI).isoformat()
