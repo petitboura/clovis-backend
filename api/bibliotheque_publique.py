@@ -40,7 +40,12 @@ from core.file_attente_vectorisation import (
     necessite_vectorisation_note,
     reinitialiser_pour_reessai,
 )
-from core.dossiers_catalogue_public import ranger_fichier as _ranger_fichier_dossier, peut_ajouter_contenu as _peut_ajouter_contenu_dossier, _dossier as _dossier_catalogue_public
+from core.dossiers_catalogue_public import (
+    ranger_fichier as _ranger_fichier_dossier,
+    peut_ajouter_contenu as _peut_ajouter_contenu_dossier,
+    _dossier as _dossier_catalogue_public,
+    lister_fichiers_ids_dossier as _lister_fichiers_ids_dossier,
+)
 from core.dossiers_publics_attaches import propager_fichier_public_range_dossier as _propager_fichier_public_range_dossier
 from core.listes_bibliotheque_publique import lister_valeurs, normaliser_et_enregistrer
 
@@ -100,11 +105,29 @@ def lister_listes_filtres():
 
 
 @router.get("", response_model=list[EntreeBibliothequePublique])
-def lister_bibliotheque_publique(q: str | None = None, pays: str | None = None, niveau: str | None = None, categorie: str | None = None):
+def lister_bibliotheque_publique(
+    q: str | None = None,
+    pays: str | None = None,
+    niveau: str | None = None,
+    categorie: str | None = None,
+    dossier_id: str | None = None,
+    decalage: int = 0,
+    limite: int = 30,
+):
     # Filtre statut="publie" (22/08, chantier signalements) : une entrée
     # retirée par un admin suite à un signalement reste en base (trace
     # pour l'audit) mais ne doit plus jamais réapparaître dans le
     # catalogue, voir api/signalements.py.
+    #
+    # 04/09/2026, demande Bourama : plus de plafond fixe (l'ancien
+    # limit(200) cachait silencieusement les fichiers les plus anciens
+    # dès que le catalogue dépassait 200 entrées) -- scroll infini façon
+    # réseau social, chargé par lots via decalage/limite. dossier_id
+    # filtre sur la table de jonction fichiers_dossiers_catalogue_public
+    # pour qu'un dossier ouvert bénéficie du même chargement par lots que
+    # l'onglet "Tous", au lieu de charger tout son contenu d'un coup.
+    limite = min(max(limite, 1), 100)
+    decalage = max(decalage, 0)
     requete = (
         supabase.table("bibliotheque_publique")
         .select("id, nom, description, nom_fichier, type_mime, taille_octets, url_publique, created_at, statut_vectorisation, pays, niveau, categorie")
@@ -120,7 +143,12 @@ def lister_bibliotheque_publique(q: str | None = None, pays: str | None = None, 
         requete = requete.eq("niveau", niveau.strip())
     if (categorie or "").strip():
         requete = requete.eq("categorie", categorie.strip())
-    res = requete.order("created_at", desc=True).limit(200).execute()
+    if (dossier_id or "").strip():
+        ids_dossier = _lister_fichiers_ids_dossier(dossier_id.strip())
+        if not ids_dossier:
+            return []
+        requete = requete.in_("id", ids_dossier)
+    res = requete.order("created_at", desc=True).range(decalage, decalage + limite - 1).execute()
     return res.data or []
 
 
