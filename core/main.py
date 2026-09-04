@@ -1609,6 +1609,39 @@ def _est_timeout(erreur):
     return "timeout" in str(erreur).lower()
 
 
+def _repli_si_reponse_partielle(reponse_accumulee):
+    """
+    Bug signale par Bourama (04/09) : quand un modele de la cascade
+    echoue APRES avoir deja streame du texte "reponse" visible cote
+    frontend, le modele suivant reprenait juste apres -- ses propres
+    evenements "reponse" s'ajoutaient a la suite du texte deja affiche
+    (voir ChatIA.tsx:pousserTexteAffichage, qui empile tout dans le meme
+    message), donnant un texte combine/casse a l'utilisateur.
+
+    reponse_accumulee accumule le texte de TOUS les modeles tentes
+    pendant le passage courant de la cascade (voir chat(), une seule
+    liste passee a chaque _capturer_reponse d'un modele a l'autre) --
+    donc "non vide" signifie ici "du texte a deja ete affiche pour ce
+    tour, avant l'echec qu'on est en train de traiter".
+
+    Si c'est le cas : on vide l'accumulateur EN PLACE (sinon la reponse
+    finale du modele qui reussira ensuite serait sauvegardee en base
+    concatenee derriere ce texte invalide, voir _sauvegarder_echange)
+    et on renvoie l'evenement a yield pour que le frontend retire
+    proprement ce qui a deja ete affiche (voir ChatIA.tsx/
+    BulleMessage.tsx, evenement "reponse_annulee") avant que la
+    tentative suivante ne commence a ecrire.
+
+    Ne fait rien (renvoie None) si aucun texte n'avait encore ete
+    affiche pour ce tour (ex: le modele a echoue avant meme d'emettre
+    le premier fragment) -- rien a retirer cote frontend dans ce cas.
+    """
+    if reponse_accumulee:
+        reponse_accumulee.clear()
+        return {"type": "reponse_annulee"}
+    return None
+
+
 DELAI_MAX_PAR_APPEL = 10  # secondes : on bascule vite plutot que d'attendre
 MAX_PASSAGES_CASCADE = 2  # on ne retente toute la cascade que si TOUT a timeout
 
@@ -3504,6 +3537,9 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             if not _est_timeout(e):
                 tout_est_timeout = False
                 logging.error(f"ERREUR GROQ {GROQ_PRIMARY}: {e}")
+            evenement_repli = _repli_si_reponse_partielle(reponse_accumulee)
+            if evenement_repli:
+                yield evenement_repli
 
         # 2. Fallbacks Groq — AVEC les memes outils MCP (via _agent_groq),
         # pour que Notion/Wolfram restent utilisables meme quand
@@ -3549,6 +3585,9 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 if not _est_timeout(e):
                     tout_est_timeout = False
                     logging.error(f"ERREUR GROQ {model}: {e}")
+                evenement_repli = _repli_si_reponse_partielle(reponse_accumulee)
+                if evenement_repli:
+                    yield evenement_repli
                 continue
 
         # 3. Gemini 2.5 Flash — tout dernier recours, sans outils MCP a lui,
@@ -3659,6 +3698,9 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             if not _est_timeout(e):
                 tout_est_timeout = False
             logging.error(f"ERREUR GEMINI: {e}")
+            evenement_repli = _repli_si_reponse_partielle(reponse_accumulee)
+            if evenement_repli:
+                yield evenement_repli
 
         if not tout_est_timeout:
             break  # au moins une vraie erreur (pas juste lent) : inutile de retenter
