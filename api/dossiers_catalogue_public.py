@@ -39,6 +39,8 @@ class CreerDossierPayload(BaseModel):
     pays: str = ""
     niveau: str = ""
     categorie: str = ""
+    classe: str = ""
+    specialite: str = ""
 
 
 class RenommerDossierPayload(BaseModel):
@@ -68,6 +70,8 @@ def creer(payload: CreerDossierPayload, utilisateur=Depends(utilisateur_courant)
         pays=normaliser_et_enregistrer("pays", payload.pays),
         niveau=normaliser_et_enregistrer("niveau", payload.niveau),
         categorie=normaliser_et_enregistrer("categorie", payload.categorie),
+        classe=normaliser_et_enregistrer("classe", payload.classe),
+        specialite=normaliser_et_enregistrer("specialite", payload.specialite),
     )
 
 

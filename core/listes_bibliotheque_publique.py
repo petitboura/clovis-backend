@@ -35,6 +35,11 @@ TABLES = {
     "pays": "bibliotheque_publique_pays",
     "niveau": "bibliotheque_publique_niveaux",
     "categorie": "bibliotheque_publique_categories",
+    # 04/09/2026, demande Bourama : 2 filtres supplémentaires, même
+    # principe que les 3 premiers (voir tables bibliotheque_publique_
+    # classes / bibliotheque_publique_specialites côté Supabase).
+    "classe": "bibliotheque_publique_classes",
+    "specialite": "bibliotheque_publique_specialites",
 }
 
 

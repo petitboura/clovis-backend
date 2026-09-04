@@ -50,6 +50,7 @@ def peut_retirer_contenu(dossier_id: str, user_id: str) -> bool:
 def creer_dossier(
     user_id: str, nom: str, statut: str = "contribution_libre", dossier_parent_id: str = None,
     pays: str = None, niveau: str = None, categorie: str = None,
+    classe: str = None, specialite: str = None,
 ) -> dict:
     insertion = supabase.table("dossiers_catalogue_public").insert({
         "cree_par": user_id,
@@ -62,6 +63,9 @@ def creer_dossier(
         "pays": pays,
         "niveau": niveau,
         "categorie": categorie,
+        # 04/09/2026, demande Bourama : 2 filtres supplémentaires, même principe.
+        "classe": classe,
+        "specialite": specialite,
     }).execute()
     return insertion.data[0]
 
@@ -74,7 +78,7 @@ def lister_dossiers() -> list:
     """Liste TOUS les dossiers du catalogue public, à plat -- visible par tout le monde, contrairement au perso."""
     return (
         supabase.table("dossiers_catalogue_public")
-        .select("id, cree_par, nom, statut, dossier_parent_id, created_at, pays, niveau, categorie")
+        .select("id, cree_par, nom, statut, dossier_parent_id, created_at, pays, niveau, categorie, classe, specialite")
         .order("created_at")
         .execute()
         .data

@@ -92,6 +92,10 @@ class EntreeBibliothequePublique(BaseModel):
     pays: str | None = None
     niveau: str | None = None
     categorie: str | None = None
+    # 04/09/2026, demande Bourama : 2 filtres supplémentaires (voir
+    # core/listes_bibliotheque_publique.py), même principe.
+    classe: str | None = None
+    specialite: str | None = None
 
 
 @router.get("/listes")
@@ -101,6 +105,8 @@ def lister_listes_filtres():
         "pays": lister_valeurs("pays"),
         "niveaux": lister_valeurs("niveau"),
         "categories": lister_valeurs("categorie"),
+        "classes": lister_valeurs("classe"),
+        "specialites": lister_valeurs("specialite"),
     }
 
 
@@ -110,6 +116,8 @@ def lister_bibliotheque_publique(
     pays: str | None = None,
     niveau: str | None = None,
     categorie: str | None = None,
+    classe: str | None = None,
+    specialite: str | None = None,
     dossier_id: str | None = None,
     decalage: int = 0,
     limite: int = 30,
@@ -130,7 +138,10 @@ def lister_bibliotheque_publique(
     decalage = max(decalage, 0)
     requete = (
         supabase.table("bibliotheque_publique")
-        .select("id, nom, description, nom_fichier, type_mime, taille_octets, url_publique, created_at, statut_vectorisation, pays, niveau, categorie")
+        .select(
+            "id, nom, description, nom_fichier, type_mime, taille_octets, url_publique, created_at, "
+            "statut_vectorisation, pays, niveau, categorie, classe, specialite"
+        )
         .eq("statut", "publie")
     )
     if (q or "").strip():
@@ -143,6 +154,11 @@ def lister_bibliotheque_publique(
         requete = requete.eq("niveau", niveau.strip())
     if (categorie or "").strip():
         requete = requete.eq("categorie", categorie.strip())
+    # 04/09/2026, demande Bourama : 2 filtres supplémentaires, même principe.
+    if (classe or "").strip():
+        requete = requete.eq("classe", classe.strip())
+    if (specialite or "").strip():
+        requete = requete.eq("specialite", specialite.strip())
     if (dossier_id or "").strip():
         ids_dossier = _lister_fichiers_ids_dossier(dossier_id.strip())
         if not ids_dossier:
@@ -161,6 +177,8 @@ async def ajouter_a_bibliotheque_publique(
     pays: str = Form(""),
     niveau: str = Form(""),
     categorie: str = Form(""),
+    classe: str = Form(""),
+    specialite: str = Form(""),
     utilisateur=Depends(utilisateur_courant),
 ):
     # Nom optionnel (28/08, demande Bourama : "nom et description
@@ -212,6 +230,8 @@ async def ajouter_a_bibliotheque_publique(
                 "pays": normaliser_et_enregistrer("pays", pays),
                 "niveau": normaliser_et_enregistrer("niveau", niveau),
                 "categorie": normaliser_et_enregistrer("categorie", categorie),
+                "classe": normaliser_et_enregistrer("classe", classe),
+                "specialite": normaliser_et_enregistrer("specialite", specialite),
             })
             .execute()
         )
@@ -243,6 +263,8 @@ class AjouterLienPayload(BaseModel):
     pays: str = ""
     niveau: str = ""
     categorie: str = ""
+    classe: str = ""
+    specialite: str = ""
 
 
 @router.post("/lien", response_model=EntreeBibliothequePublique, status_code=201)
@@ -266,6 +288,8 @@ def ajouter_lien_bibliotheque_publique(payload: AjouterLienPayload, utilisateur=
                 "pays": normaliser_et_enregistrer("pays", payload.pays),
                 "niveau": normaliser_et_enregistrer("niveau", payload.niveau),
                 "categorie": normaliser_et_enregistrer("categorie", payload.categorie),
+                "classe": normaliser_et_enregistrer("classe", payload.classe),
+                "specialite": normaliser_et_enregistrer("specialite", payload.specialite),
             })
             .execute()
         )
@@ -290,6 +314,8 @@ class AjouterTextePayload(BaseModel):
     pays: str = ""
     niveau: str = ""
     categorie: str = ""
+    classe: str = ""
+    specialite: str = ""
 
 
 @router.post("/texte", response_model=EntreeBibliothequePublique, status_code=201)
@@ -327,6 +353,8 @@ def ajouter_texte_bibliotheque_publique(payload: AjouterTextePayload, utilisateu
                 "pays": normaliser_et_enregistrer("pays", payload.pays),
                 "niveau": normaliser_et_enregistrer("niveau", payload.niveau),
                 "categorie": normaliser_et_enregistrer("categorie", payload.categorie),
+                "classe": normaliser_et_enregistrer("classe", payload.classe),
+                "specialite": normaliser_et_enregistrer("specialite", payload.specialite),
             })
             .execute()
         )
