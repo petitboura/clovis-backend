@@ -283,6 +283,31 @@ def obtenir_fichier(fichier_id: str) -> dict | None:
     return res.data if res and res.data else None
 
 
+def obtenir_fichier_par_url(url_publique: str) -> dict | None:
+    """
+    Même chose que obtenir_fichier, mais par url_publique plutôt que
+    par id (04/09/2026, demande Bourama : un fichier uploadé par
+    l'utilisateur DANS la conversation est déjà indexé ici avec
+    origine="chat" (voir api/uploads.py) au moment de l'upload, mais le
+    modèle ne connaît jamais son id -- seulement son url_publique, reçue
+    dans le texte du message sous la forme "[Lien réel du fichier :
+    ...]" -- voir action "donner" de gerer_document_bibliotheque). None
+    si introuvable.
+    """
+    try:
+        res = (
+            supabase.table("fichiers_uploades")
+            .select("user_id, nom_fichier, url_publique, type_mime")
+            .eq("url_publique", url_publique)
+            .maybe_single()
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (obtenir_fichier_par_url url={url_publique}) : {e}")
+        return None
+    return res.data if res and res.data else None
+
+
 def supprimer_fichier(fichier_id: str) -> None:
     """
     Supprime un fichier de la bibliothèque : ligne en base ET objet

@@ -105,6 +105,7 @@ from core.bibliotheque_fichiers import (
     lister_fichiers as _lister_fichiers,
     supprimer_fichier as _supprimer_fichier,
     obtenir_fichier as _obtenir_fichier,
+    obtenir_fichier_par_url as _obtenir_fichier_par_url,
 )
 from core.bibliotheque_rag import (
     chercher_bibliotheque as _chercher_bibliotheque,
@@ -525,13 +526,18 @@ def gerer_document_bibliotheque(
       à l'utilisateur avant d'être exécuté, quelle que soit la
       formulation de sa demande.
     - "donner" : ENVOIE le fichier lui-même en pièce jointe dans le chat
-      (pas juste son contenu ou un lien), identifié par le `fichier_id`
-      obtenu via "chercher" ou "lister". Même règle de déclenchement que
-      "donner_catalogue_public" : à la demande explicite de
-      l'utilisateur, ou dès que le contexte l'indique clairement.
-      Fonctionne pour tout type de fichier (PDF, image, audio, vidéo,
-      document), pas seulement ceux déjà vectorisés. Paramètre :
-      `fichier_id`.
+      (pas juste son contenu ou un lien), identifié SOIT par le
+      `fichier_id` obtenu via "chercher" ou "lister" (documents de la
+      bibliothèque), SOIT par `url_fichier` -- le lien réel d'un fichier
+      que l'utilisateur a joint DANS cette conversation, visible entre
+      crochets "[Lien réel du fichier : ...]" juste après son upload :
+      utilise cette option pour redonner un fichier que l'utilisateur
+      vient d'envoyer ou a envoyé plus tôt dans le même fil, jamais un
+      lien deviné/reconstruit. Même règle de déclenchement que "donner_
+      catalogue_public" : à la demande explicite de l'utilisateur, ou
+      dès que le contexte l'indique clairement. Fonctionne pour tout
+      type de fichier (PDF, image, audio, vidéo, document), pas
+      seulement ceux déjà vectorisés.
     - "ranger_dossier" : range un fichier dans un dossier. Paramètres :
       `fichier_id`, `dossier_id`. Un fichier peut être rangé dans
       plusieurs dossiers à la fois.
@@ -797,7 +803,22 @@ def gerer_document_bibliotheque(
         # détail du mécanisme "fichiers_generes") mais côté bibliothèque
         # PERSONNELLE -- vérification de propriété obligatoire (contrairement
         # au catalogue public, ouvert à tout le monde).
-        doc = _obtenir_fichier(fichier_id)
+        #
+        # Étendu le 04/09/2026 (suite, cas "fichier uploadé dans la
+        # conversation") : un fichier joint par l'utilisateur DANS le
+        # chat est déjà indexé ici (origine="chat", voir api/uploads.py)
+        # au moment même de l'upload, mais le modèle n'a jamais reçu son
+        # fichier_id -- seulement son url_publique, visible dans le
+        # texte du message sous la forme "[Lien réel du fichier : ...]"
+        # (même convention que l'action "ajouter_fichier" ci-dessus).
+        # `url_fichier` (paramètre déjà existant de cet outil) permet
+        # donc de retrouver ce fichier sans recherche préalable.
+        if fichier_id:
+            doc = _obtenir_fichier(fichier_id)
+        elif url_fichier:
+            doc = _obtenir_fichier_par_url(url_fichier.strip())
+        else:
+            return "Erreur : fournis fichier_id (bibliothèque) ou url_fichier (fichier joint dans cette conversation)."
         if not doc:
             return "Ce document est introuvable."
         if doc.get("user_id") != user_id:
