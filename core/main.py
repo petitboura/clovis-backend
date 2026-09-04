@@ -1226,6 +1226,123 @@ def _resume_description_outil(description, max_caracteres=200):
     return coupe + "..."
 
 
+NOM_OUTIL_GARDER_OUTILS = "garder_outils"
+
+
+def _lire_outils_retenus(conversation_id):
+    """
+    Outils que le grand modele avait explicitement decide de garder au
+    tour precedent pour cette conversation (voir _outil_garder_outils).
+    Liste vide si rien n'est retenu, si conversation_id est absent, ou en
+    cas d'erreur Supabase -- fail-safe strict, ne doit jamais bloquer la
+    reponse normale (meme logique que _router_outils).
+    """
+    if not conversation_id:
+        return []
+    try:
+        res = (
+            supabase.table("outils_retenus_conversation")
+            .select("outils")
+            .eq("conversation_id", conversation_id)
+            .maybe_single()
+            .execute()
+        )
+        return (res.data or {}).get("outils") or []
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture outils_retenus_conversation) : {e}")
+        return []
+
+
+def _ecrire_outils_retenus(conversation_id, outils):
+    """
+    Ecrase (jamais cumule) la liste d'outils gardes pour cette
+    conversation. Appele a la fin de chaque tour ou garder_outils a ete
+    utilise (voir _agent_groq) -- y compris avec une liste vide si le
+    modele ne l'a pas rappele ce tour-ci, pour que l'effet retombe
+    naturellement au tour d'apres. Toute erreur est juste loguee.
+    """
+    if not conversation_id:
+        return
+    try:
+        supabase.table("outils_retenus_conversation").upsert({
+            "conversation_id": conversation_id,
+            "outils": list(dict.fromkeys(outils or [])),
+        }).execute()
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (ecriture outils_retenus_conversation) : {e}")
+
+
+def _outil_garder_outils(noms_disponibles):
+    """
+    Outil interne (2026-09-04, demande Bourama) : jamais un vrai outil
+    MCP, jamais route via table_routage, jamais compte dans le budget
+    d'aller-retours ni dans la detection de repetition (voir
+    _separer_appels_garder_outils dans _agent_groq). Permet au grand
+    modele de garder un ou plusieurs des outils qui lui sont proposes ce
+    tour-ci disponibles pour SON PROCHAIN message dans cette conversation,
+    sans attendre une nouvelle suggestion du petit routeur automatique
+    (_router_outils) ni un clic de confirmation cote frontend.
+
+    N'a d'effet que sur le tour suivant : si le modele veut le garder
+    encore apres, il doit rappeler cet outil a ce moment-la (voir
+    _ecrire_outils_retenus, ecrase a chaque tour).
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": NOM_OUTIL_GARDER_OUTILS,
+            "description": (
+                "Garde un ou plusieurs des outils qui te sont proposes "
+                "dans CE message disponibles pour TON PROCHAIN message "
+                "dans cette conversation, sans attendre une nouvelle "
+                "suggestion automatique. A utiliser quand tu juges qu'un "
+                "outil que tu viens de voir (que tu l'aies utilise ou "
+                "non ce tour-ci) sera probablement encore utile pour la "
+                "question suivante de l'utilisateur. Sans effet sur ta "
+                "reponse actuelle. Si tu veux le garder encore apres le "
+                "prochain message, rappelle cet outil a nouveau a ce "
+                "moment-la -- rien n'est conserve automatiquement plus "
+                "d'un message a l'avance."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "outils": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": noms_disponibles},
+                        "description": "Noms exacts (parmi les outils disponibles ce tour-ci) a garder pour le prochain message.",
+                    }
+                },
+                "required": ["outils"],
+            },
+        },
+    }
+
+
+def _separer_appels_garder_outils(appels):
+    """
+    Sort les appels a l'outil interne garder_outils (voir
+    _outil_garder_outils) du reste des appels normaux -- jamais envoyes a
+    table_routage/_traiter_appels, jamais comptes dans le budget ni la
+    detection de repetition. Renvoie (appels_normaux,
+    noms_outils_a_garder), noms_outils_a_garder etant l'union (dans
+    l'ordre) des arguments "outils" de tous les appels garder_outils de
+    ce lot -- rare qu'il y en ait plus d'un dans le meme lot, mais couvert.
+    """
+    appels_normaux = []
+    noms_a_garder = []
+    for appel in appels:
+        if appel["name"] == NOM_OUTIL_GARDER_OUTILS:
+            try:
+                arguments = json.loads(appel["arguments"] or "{}")
+                noms_a_garder.extend(arguments.get("outils") or [])
+            except Exception as e:
+                logging.error(f"ERREUR arguments garder_outils illisibles : {e}")
+        else:
+            appels_normaux.append(appel)
+    return appels_normaux, list(dict.fromkeys(noms_a_garder))
+
+
 def _router_outils(message_utilisateur, outils_disponibles, historique=None):
     """
     Bouton Outils, couche de suggestion automatique (2026-07-28, demande
@@ -2462,7 +2579,7 @@ def _generer_conclusion_forcee(client_groq, messages_agent, outils_mcp, modele, 
 
 def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
                  appels_en_cours_a_finir=None, modele=GROQ_PRIMARY, reasoning_effort=None, agent_nom=None,
-                 rattrapage_tool_code_restant=1):
+                 rattrapage_tool_code_restant=1, conversation_id=None):
     """
     Boucle d'agent generique sur le modele Groq utilise (par defaut
     GROQ_PRIMARY, mais peut recevoir n'importe quel modele Groq qui sait
@@ -2496,6 +2613,11 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
     est relance avec ce budget decremente a 0, pour eviter toute boucle. Si
     le meme bug se reproduit malgre le rattrapage, un message d'erreur clair
     est affiche a l'utilisateur plutot que de le laisser sans reponse.
+
+    `conversation_id` (2026-09-04) : uniquement utilise pour persister les
+    appels a l'outil interne garder_outils (voir
+    _separer_appels_garder_outils plus bas) -- None accepte, dans ce cas
+    garder_outils reste inoffensif (rien n'est ecrit, pas d'erreur).
     """
     kwargs_reasoning = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
     # Compteur de sources partagé sur tout le tour (26/08, citations
@@ -2695,6 +2817,7 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
                     client_groq, messages_agent, outils_mcp, table_routage,
                     modele=modele, reasoning_effort=reasoning_effort, agent_nom=agent_nom,
                     rattrapage_tool_code_restant=rattrapage_tool_code_restant - 1,
+                    conversation_id=conversation_id,
                 )
                 return
             else:
@@ -2730,14 +2853,25 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
 
         appels = [appels_en_cours[i] for i in sorted(appels_en_cours)]
 
+        # Outil interne garder_outils (2026-09-04, demande Bourama) :
+        # sorti du lot AVANT tout le reste -- jamais compte dans le
+        # budget/la detection de repetition, jamais route vers un vrai
+        # serveur MCP. Ecrit immediatement en base (ecrase le tour
+        # precedent) des qu'il apparait dans ce lot ; les appels normaux
+        # restants repartent seuls dans le circuit habituel juste apres.
+        appels_normaux, noms_a_garder_ce_lot = _separer_appels_garder_outils(appels)
+        if len(appels_normaux) != len(appels):
+            _ecrire_outils_retenus(conversation_id, noms_a_garder_ce_lot)
+
         # Detection de repetition (02/09/2026, demande Bourama) : si l'un
         # de ces appels ferait atteindre tolerance_repetition fois
         # d'affilee EXACTEMENT le meme appel (nom + arguments), on
         # s'arrete AVANT de l'executer -- signe d'une vraie boucle, pas
         # d'un usage legitime. On ne l'ajoute pas a messages_agent
-        # (aucun tool_calls sans tool_result correspondant).
-        appel_repete = _detecter_appel_repete(historique_appels_tour, appels, tolerance_repetition)
-        historique_appels_tour.extend((a["name"], a["arguments"]) for a in appels)
+        # (aucun tool_calls sans tool_result correspondant). Porte
+        # uniquement sur appels_normaux (garder_outils exclu).
+        appel_repete = _detecter_appel_repete(historique_appels_tour, appels_normaux, tolerance_repetition)
+        historique_appels_tour.extend((a["name"], a["arguments"]) for a in appels_normaux)
         if appel_repete:
             logging.warning(
                 f"Répétition détectée sur {modele} -- même appel ({appel_repete['name']}) "
@@ -2771,12 +2905,28 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
             ],
         })
 
-        try:
-            for event in _traiter_appels(appels, messages_agent, table_routage, compteur_sources):
-                yield event
-        except _AttenteConfirmation as attente:
-            yield _evenement_confirmation(attente, messages_agent, outils_mcp, table_routage, modele, reasoning_effort, agent_nom)
-            return
+        # Reponses synthetiques pour les appels garder_outils de ce lot --
+        # jamais via _traiter_appels (aucun evenement outil_resultat,
+        # totalement invisible pour l'utilisateur, voir NOM_OUTIL_GARDER_OUTILS).
+        for appel in appels:
+            if appel["name"] == NOM_OUTIL_GARDER_OUTILS:
+                messages_agent.append({
+                    "role": "tool",
+                    "tool_call_id": appel["id"],
+                    "content": (
+                        f"Outils gardés pour ton prochain message : {', '.join(noms_a_garder_ce_lot)}."
+                        if noms_a_garder_ce_lot else
+                        "Aucun outil gardé pour le prochain message."
+                    ),
+                })
+
+        if appels_normaux:
+            try:
+                for event in _traiter_appels(appels_normaux, messages_agent, table_routage, compteur_sources):
+                    yield event
+            except _AttenteConfirmation as attente:
+                yield _evenement_confirmation(attente, messages_agent, outils_mcp, table_routage, modele, reasoning_effort, agent_nom)
+                return
 
         # (2026-07-30, demande Bourama : round-trip standard apres
         # execution des outils, SANS EXCEPTION -- y compris pour les
@@ -3037,7 +3187,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             yield from _agent_groq(
                 client_groq, messages_agent, outils_mcp, table_routage,
                 modele=modele_reprise, reasoning_effort=reasoning_effort_reprise,
-                agent_nom=etat.get("agent_nom"),
+                agent_nom=etat.get("agent_nom"), conversation_id=conversation_id,
             )
         except Exception as e:
             logging.error(f"ERREUR GROQ (reprise apres limite/répétition) {modele_reprise}: {e}")
@@ -3112,7 +3262,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 client_groq, messages_agent, outils_mcp, table_routage,
                 appels_en_cours_a_finir=etat.get("appels_restants") or None,
                 modele=modele_reprise, reasoning_effort=reasoning_effort_reprise,
-                agent_nom=etat.get("agent_nom"),
+                agent_nom=etat.get("agent_nom"), conversation_id=conversation_id,
             )
         except Exception as e:
             logging.error(f"ERREUR GROQ (reprise apres confirmation) {modele_reprise}: {e}")
@@ -3230,6 +3380,17 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     if comportements_etudiant:
         outils_forces_contexte.append("gerer_comportement")
 
+    # Outils gardés par le grand modèle au tour précédent (2026-09-04,
+    # demande Bourama) : voir _outil_garder_outils/_lire_outils_retenus.
+    # VOLONTAIREMENT séparé de outils_forces_contexte -- ne doit jamais
+    # entrer dans le calcul de outils_suggeres (ligne plus bas) sous
+    # peine de redéclencher le bouton de confirmation "outils_suggeres"
+    # côté frontend pour un outil déjà consenti tacitement par le modèle
+    # lui-même. Fusionné uniquement aux deux points où le catalogue final
+    # est réellement construit (sans passer par ce bouton) : le prompt
+    # optimiste et la branche outil_force directe, plus bas.
+    outils_retenus_precedents = _lire_outils_retenus(conversation_id)
+
     def _fusionner_outils(liste_base, extra):
         """Union ordonnée sans doublons, jamais liste vide (None si rien)."""
         fusion = list(dict.fromkeys((liste_base or []) + (extra or [])))
@@ -3307,7 +3468,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             return _router_outils(message_utilisateur, outils_disponibles_agent, historique)
 
         def _tache_prompt_optimiste():
-            outil_force_contexte_seul = _fusionner_outils(None, outils_forces_contexte)
+            outil_force_contexte_seul = _fusionner_outils(None, outils_forces_contexte + outils_retenus_precedents)
             outils_mcp, table_routage = lister_tous_les_outils(get_secret, user_id, agent_id, outil_force_contexte_seul)
             outil_force_verifie_optimiste = [o["function"]["name"] for o in outils_mcp] if outil_force_contexte_seul else None
             system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie_optimiste, sans_enseignant, comportements_etudiant, mes_programmes)
@@ -3358,7 +3519,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 # quel malgré outil_force mis à jour juste en dessous --
                 # seul cas où on repaie le coût séquentiel, exactement
                 # comme avant ce correctif.
-                outil_force = outils_suggeres
+                outil_force = _fusionner_outils(outils_suggeres, outils_retenus_precedents)
                 outils_mcp = table_routage = system_final = None
             else:
                 yield {"type": "outils_suggeres", "outils": outils_suggeres}
@@ -3370,7 +3531,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             # bouton "Aucun" cliqué, ou pas de message) -- les outils de
             # contexte (comportement/programme) doivent quand même être
             # fusionnés, ils ne dépendent pas du routeur général.
-            outil_force = _fusionner_outils(outil_force, outils_forces_contexte)
+            outil_force = _fusionner_outils(outil_force, outils_forces_contexte + outils_retenus_precedents)
 
     # CORRECTION (29/07, Bourama) : la liste réelle d'outils (celle qui
     # part dans tools=... vers Groq, filtrée par autorisation agent en
@@ -3408,6 +3569,19 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 logging.warning(f"Message bloqué par la modération d'entrée (gpt-oss-safeguard, {categorie}).")
                 yield {"type": "reponse", "texte": MESSAGE_CONTENU_BLOQUE}
                 return
+
+    # Outil interne garder_outils (2026-09-04, demande Bourama) : ajouté
+    # UNE SEULE FOIS ici, une fois outils_mcp définitivement établi (tous
+    # les chemins ci-dessus convergent à ce point) -- voir
+    # _outil_garder_outils. Rien à garder si aucun outil n'est proposé ce
+    # tour-ci de toute façon. Le tour est aussi réinitialisé à liste vide
+    # ici (jamais dans _agent_groq lui-même, qui peut être rappelé
+    # plusieurs fois pour CE MÊME tour -- cascade de secours, rattrapage
+    # TOOL_CODE) : garder_outils, s'il est appelé plus loin, réécrira la
+    # bonne valeur par-dessus avant la fin du tour.
+    if outils_mcp:
+        outils_mcp = outils_mcp + [_outil_garder_outils([o["function"]["name"] for o in outils_mcp])]
+        _ecrire_outils_retenus(conversation_id, [])
 
     if localisation and localisation.get("latitude") is not None and localisation.get("longitude") is not None:
         # Contexte "système/environnement" (2026-07-20) : position GPS
@@ -3563,7 +3737,8 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         try:
             yield from _capturer_reponse(
                 _agent_groq(client_groq, messages_agent, outils_mcp, table_routage, agent_nom=agent_nom,
-                            reasoning_effort=MODELES_AVEC_REASONING_EFFORT.get(GROQ_PRIMARY)),
+                            reasoning_effort=MODELES_AVEC_REASONING_EFFORT.get(GROQ_PRIMARY),
+                            conversation_id=conversation_id),
                 reponse_accumulee,
                 meta_assistant,
             )
@@ -3602,6 +3777,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                     _agent_groq(
                         client_groq, messages_agent, outils_mcp, table_routage,
                         modele=model, reasoning_effort=reasoning_pour_ce_modele, agent_nom=agent_nom,
+                        conversation_id=conversation_id,
                     ),
                     reponse_accumulee,
                     meta_assistant,
