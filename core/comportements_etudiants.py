@@ -512,10 +512,29 @@ def importer_comportement_depuis_skill_md(
     (Bourama : "gardé tel quel, sans y toucher"). `texte` (colonne
     NOT NULL) est rempli avec le skill_md lui-même faute de "texte brut"
     distinct ; `description` (envoyée au petit routeur) est extraite du
-    frontmatter s'il y en a un, vide sinon -- un skill sans description
-    reste sélectionnable manuellement en clic direct, seul le routeur
-    automatique risque de moins bien le proposer."""
-    correspondance = re.search(r"^description:\s*(.+)$", skill_md, re.MULTILINE)
+    frontmatter s'il y en a un.
+
+    04/09/2026, correctif Bourama (bug remonté : import en masse d'un pack
+    de skills externe, la moitié affichait la description "input_format:
+    json" au lieu d'une vraie description) -- l'ancienne regex (motif
+    "description:" suivi d'espaces) matchait aussi les retours
+    à la ligne : quand le frontmatter du fichier importé a une ligne
+    "description:" vide (valide, mais jamais produit par _generer_skill en
+    interne, donc jamais testé avant), la regex débordait sur la ligne
+    SUIVANTE du frontmatter et prenait son contenu à la place. Corrigé en
+    n'autorisant plus que espaces/tabulations après les deux points,
+    jamais la ligne suivante.
+
+    Si la description reste vide après extraction (frontmatter sans
+    description, ou vide comme ci-dessus), le skill est quand même
+    enregistré tout de suite (upload jamais bloqué) mais avec
+    statut_description="en_attente" -- une vraie description est générée
+    ensuite en arrière-plan à partir du skill_md (voir
+    core/file_attente_description_skills.py), sans jamais toucher au texte
+    ni au skill_md lui-même (gardé tel quel). Seulement pour les imports à
+    partir de maintenant, les skills déjà importés avant ce correctif ne
+    sont pas repris automatiquement (demande explicite Bourama)."""
+    correspondance = re.search(r"^description:[ \t]*(.+)$", skill_md, re.MULTILINE)
     description = correspondance.group(1).strip().strip('"') if correspondance else ""
     ligne_a_inserer = {
         "agent_id": agent_id,
@@ -526,6 +545,7 @@ def importer_comportement_depuis_skill_md(
         "nom": nom.strip() or "Sans nom",
         "lien_type": lien_type,
         "lien_id": lien_id,
+        "statut_description": "pret" if description else "en_attente",
     }
     res = supabase.table("comportements_etudiants").insert(ligne_a_inserer).execute()
     ligne = res.data[0]

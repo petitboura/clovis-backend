@@ -56,6 +56,16 @@ from core.serveur_mcp_generation import mcp_generation
 from core.notifications_push import traiter_rappels_echus, un_canal_push_disponible
 from core.proactivite import verifier_relances_proactives
 from core.file_attente_vectorisation import remettre_en_attente_bloques, traiter_file_attente_une_fois, relancer_echecs_a_froid
+# 04/09/2026, demande Bourama : description manquante des skills importés
+# (.md) générée en arrière-plan, sans bloquer l'upload -- voir docstring
+# de core/file_attente_description_skills.py. Alias _description pour ne
+# pas entrer en collision avec les imports équivalents de la file
+# d'attente de vectorisation juste au-dessus.
+from core.file_attente_description_skills import (
+    remettre_en_attente_bloques as remettre_en_attente_bloques_description,
+    traiter_file_attente_une_fois as traiter_file_attente_description_une_fois,
+    relancer_echecs_a_froid as relancer_echecs_a_froid_description,
+)
 # from core.audit_programme import executer_audits_hebdomadaires  -- désactivé, voir _desactive_programme/
 from core.serveur_mcp_github import mcp_github
 from core.serveur_mcp_public import mcp_public
@@ -123,6 +133,36 @@ async def _boucle_vectorisation():
         await asyncio.sleep(2 if traites > 0 else 5)
 
 
+async def _boucle_description_skills():
+    """
+    File d'attente de génération de description manquante pour les
+    skills importés (04/09/2026, demande Bourama -- voir docstring de
+    core/file_attente_description_skills.py). Même rythme que
+    _boucle_vectorisation : passage rapproché tant qu'il y a du travail,
+    plus espacé sinon.
+    """
+    while True:
+        try:
+            traites = await to_thread.run_sync(traiter_file_attente_description_une_fois)
+        except Exception as e:
+            logging.error(f"ERREUR boucle description skills : {e}")
+            traites = 0
+        await asyncio.sleep(2 if traites > 0 else 5)
+
+
+async def _boucle_reessai_echecs_description():
+    """Réessai automatique à froid des skills "echec" -- même mécanisme
+    que _boucle_reessai_echecs pour la bibliothèque."""
+    while True:
+        try:
+            relances = await to_thread.run_sync(relancer_echecs_a_froid_description)
+            if relances:
+                logging.info(f"Réessai auto à froid (description skills) : {relances} skill(s) remis en file.")
+        except Exception as e:
+            logging.error(f"ERREUR boucle réessai à froid description skills : {e}")
+        await asyncio.sleep(5 * 60)
+
+
 async def _boucle_reessai_echecs():
     """
     Réessai automatique à froid des fichiers "echec" (03/09/2026, demande
@@ -168,6 +208,10 @@ async def _lifespan(app: FastAPI):
         await to_thread.run_sync(remettre_en_attente_bloques)
     except Exception as e:
         logging.error(f"ERREUR remise en attente au démarrage (vectorisation) : {e}")
+    try:
+        await to_thread.run_sync(remettre_en_attente_bloques_description)
+    except Exception as e:
+        logging.error(f"ERREUR remise en attente au démarrage (description skills) : {e}")
 
     async with (
         mcp_generation.session_manager.run(),
@@ -182,6 +226,8 @@ async def _lifespan(app: FastAPI):
             tache_proactivite = asyncio.create_task(_boucle_planificateur_proactivite())
         tache_vectorisation = asyncio.create_task(_boucle_vectorisation())
         tache_reessai_echecs = asyncio.create_task(_boucle_reessai_echecs())
+        tache_description_skills = asyncio.create_task(_boucle_description_skills())
+        tache_reessai_echecs_description = asyncio.create_task(_boucle_reessai_echecs_description())
         yield
         if tache_planificateur:
             tache_planificateur.cancel()
@@ -189,6 +235,8 @@ async def _lifespan(app: FastAPI):
             tache_proactivite.cancel()
         tache_vectorisation.cancel()
         tache_reessai_echecs.cancel()
+        tache_description_skills.cancel()
+        tache_reessai_echecs_description.cancel()
 
 
 app = FastAPI(title="Clovis API", version="0.1.0", lifespan=_lifespan)
