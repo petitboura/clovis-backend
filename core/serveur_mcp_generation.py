@@ -526,18 +526,29 @@ def gerer_document_bibliotheque(
       à l'utilisateur avant d'être exécuté, quelle que soit la
       formulation de sa demande.
     - "donner" : ENVOIE le fichier lui-même en pièce jointe dans le chat
-      (pas juste son contenu ou un lien), identifié SOIT par le
-      `fichier_id` obtenu via "chercher" ou "lister" (documents de la
-      bibliothèque), SOIT par `url_fichier` -- le lien réel d'un fichier
-      que l'utilisateur a joint DANS cette conversation, visible entre
-      crochets "[Lien réel du fichier : ...]" juste après son upload :
-      utilise cette option pour redonner un fichier que l'utilisateur
-      vient d'envoyer ou a envoyé plus tôt dans le même fil, jamais un
-      lien deviné/reconstruit. Même règle de déclenchement que "donner_
-      catalogue_public" : à la demande explicite de l'utilisateur, ou
-      dès que le contexte l'indique clairement. Fonctionne pour tout
-      type de fichier (PDF, image, audio, vidéo, document), pas
-      seulement ceux déjà vectorisés.
+      (pas juste son contenu ou un lien), identifié de l'une de ces
+      façons :
+        * `fichier_id` obtenu via "lister" ou "chercher" (documents de
+          la bibliothèque, Y COMPRIS un fichier que TU as généré plus
+          tôt dans cette conversation -- tout ce que tu génères est
+          automatiquement enregistré ici avec `description` = son nom.
+          Pour "redonne-moi l'image/document que tu as générée",
+          utilise "lister" en priorité (couvre TOUS les types, y
+          compris image/audio/vidéo -- "chercher" est une recherche
+          sémantique qui ne trouve que du texte déjà vectorisé, donc
+          rate les fichiers non-texte) pour retrouver le fichier_id,
+          PUIS "donner" avec cet id -- ne suppose jamais un id).
+        * `url_fichier` -- le lien réel d'un fichier que l'UTILISATEUR a
+          joint DANS cette conversation, visible entre crochets "[Lien
+          réel du fichier : ...]" juste après son upload : utilise cette
+          option pour redonner un fichier que l'utilisateur vient
+          d'envoyer ou a envoyé plus tôt dans le même fil, jamais un
+          lien deviné/reconstruit.
+      Même règle de déclenchement que "donner_catalogue_public" : à la
+      demande explicite de l'utilisateur, ou dès que le contexte
+      l'indique clairement. Fonctionne pour tout type de fichier (PDF,
+      image, audio, vidéo, document), pas seulement ceux déjà
+      vectorisés.
     - "ranger_dossier" : range un fichier dans un dossier. Paramètres :
       `fichier_id`, `dossier_id`. Un fichier peut être rangé dans
       plusieurs dossiers à la fois.
