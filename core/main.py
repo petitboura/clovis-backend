@@ -3493,7 +3493,27 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             f_routeur = executor.submit(_tache_routeur)
             f_optimiste = executor.submit(_tache_prompt_optimiste)
-        outils_suggeres = _fusionner_outils(f_routeur.result(), outils_forces_contexte) or []
+        # CORRECTIF PERF (04/09/2026, bug remonté par Bourama : "clovis
+        # répond trop lentement") : la décision d'entrer dans le bloc
+        # coûteux ci-dessous (if outils_suggeres:) doit se baser
+        # UNIQUEMENT sur ce que le ROUTEUR a réellement trouvé de
+        # nouveau, jamais sur outils_forces_contexte -- ces outils
+        # toujours forcés (ex: gerer_document_bibliotheque pour clovis,
+        # voir plus haut) sont de toute façon déjà inclus dans
+        # outil_force_contexte_seul et donc dans le prompt "optimiste"
+        # calculé en parallèle juste au-dessus (_tache_prompt_optimiste).
+        # Avant ce correctif, fusionner outils_forces_contexte ici
+        # rendait outils_suggeres non-vide à CHAQUE message pour clovis
+        # (gerer_document_bibliotheque toujours présent), qui entrait
+        # donc systématiquement dans le bloc `if outils_suggeres:` plus
+        # bas -- lequel jette le prompt optimiste déjà calculé et le
+        # recalcule intégralement en séquentiel (routeur_outils_auto=true
+        # pour clovis, confirmé en base) : coût payé sur 100% des
+        # messages au lieu des seuls cas où le petit routeur suggère
+        # vraiment quelque chose de nouveau, comme prévu à l'origine
+        # (voir commentaire PERF 10/08 juste au-dessus).
+        outils_suggeres_routeur = f_routeur.result()
+        outils_suggeres = _fusionner_outils(outils_suggeres_routeur, outils_forces_contexte) or []
         outils_mcp, table_routage, system_final = f_optimiste.result()
         outil_force_verifie = None
 
@@ -3511,7 +3531,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 yield {"type": "reponse", "texte": MESSAGE_CONTENU_BLOQUE}
                 return
 
-        if outils_suggeres:
+        if outils_suggeres_routeur:
             # routeur_outils_auto (03/08, demande Bourama, agent par agent) :
             # colonne sur `agents`, false par defaut. Si true pour CET agent,
             # on saute l'etape bouton cliquable (evenement "outils_suggeres")
