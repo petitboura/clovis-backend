@@ -258,6 +258,31 @@ def lister_fichiers(
     return requete.order("created_at", desc=True).execute().data
 
 
+def obtenir_fichier(fichier_id: str) -> dict | None:
+    """
+    Récupère user_id/nom_fichier/url_publique/type_mime d'UN fichier de
+    la bibliothèque personnelle par son id (04/09/2026, demande Bourama :
+    que l'IA puisse ressortir le fichier lui-même en pièce jointe dans
+    le chat, pas juste son contenu ou un lien -- voir action "donner" de
+    gerer_document_bibliotheque, core/serveur_mcp_generation.py).
+    L'appelant doit vérifier lui-même que user_id correspond à
+    l'utilisateur authentifié (pas de vérification de propriété ici,
+    même convention que le reste de ce module). None si introuvable.
+    """
+    try:
+        res = (
+            supabase.table("fichiers_uploades")
+            .select("user_id, nom_fichier, url_publique, type_mime")
+            .eq("id", fichier_id)
+            .maybe_single()
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (obtenir_fichier fichier_id={fichier_id}) : {e}")
+        return None
+    return res.data if res and res.data else None
+
+
 def supprimer_fichier(fichier_id: str) -> None:
     """
     Supprime un fichier de la bibliothèque : ligne en base ET objet

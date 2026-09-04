@@ -147,6 +147,33 @@ def lire_document_catalogue_public(fichier_id: str) -> str | None:
     return "\n\n".join(ligne["contenu"] for ligne in res.data)
 
 
+def obtenir_document_catalogue_public(fichier_id: str) -> dict | None:
+    """
+    Récupère nom/url_publique/type_mime d'UN document du catalogue
+    public par son fichier_id (04/09/2026, demande Bourama : que l'IA
+    puisse ressortir le fichier lui-même en pièce jointe dans le chat,
+    pas juste son contenu ou un lien -- voir action "donner_catalogue_
+    public" de gerer_document_bibliotheque, core/serveur_mcp_
+    generation.py). None si le document n'existe pas ou n'est pas
+    publié (statut != "publie").
+    """
+    try:
+        res = (
+            supabase.table("bibliotheque_publique")
+            .select("nom, url_publique, type_mime, statut")
+            .eq("id", fichier_id)
+            .maybe_single()
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (obtenir_document_catalogue_public fichier_id={fichier_id}) : {e}")
+        return None
+
+    if not res or not res.data or res.data.get("statut") != "publie":
+        return None
+    return res.data
+
+
 def lister_catalogue_public(limite: int = 15) -> dict:
     """
     Liste les documents les PLUS RÉCENTS du catalogue public (table

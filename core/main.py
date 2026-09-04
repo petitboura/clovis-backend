@@ -2041,6 +2041,20 @@ def _extraire_sources(appel, resultat_brut):
 EXTENSIONS_FICHIER_GENERE = (
     "pdf", "docx", "doc", "xlsx", "xls", "csv", "pptx", "ppt", "zip", "json",
     "xml", "png", "jpg", "jpeg", "webp", "glb", "tex", "md",
+    # 04/09/2026, demande Bourama ("donner"/"donner_catalogue_public" de
+    # gerer_document_bibliotheque) : un fichier audio/vidéo de la
+    # bibliothèque doit pouvoir sortir en pièce jointe comme n'importe
+    # quel autre type -- absents avant car aucun outil ne renvoyait de
+    # lien audio/vidéo brut par ce chemin (le cas markdown ![]() dans le
+    # texte du modèle passe par LecteurMedia.tsx, pas ici). Ne PAS
+    # ajouter côté FichierChip.tsx (EXTENSIONS_FICHIER, frontend) : cette
+    # liste-là sert uniquement au rendu markdown, où LecteurMedia.tsx
+    # intercepte déjà l'audio/vidéo avant -- le bloc "Fichier(s) généré(s)"
+    # de BulleMessage.tsx n'a lui aucune interception, il utilise
+    # FichierChip.tsx directement quelle que soit l'extension (repli sur
+    # icône générique + libellé "Fichier" pour une extension absente du
+    # dict frontend, déjà le cas aujourd'hui pour mp3/mp4).
+    "mp3", "wav", "m4a", "ogg", "mp4", "webm",
 )
 REGEX_FICHIER_GENERE = re.compile(
     r"https?://[^\s<>\"'\)\]]+\.(?:" + "|".join(EXTENSIONS_FICHIER_GENERE) + r")\b",

@@ -104,6 +104,7 @@ from core.bibliotheque_fichiers import (
     enregistrer_lien as _enregistrer_lien,
     lister_fichiers as _lister_fichiers,
     supprimer_fichier as _supprimer_fichier,
+    obtenir_fichier as _obtenir_fichier,
 )
 from core.bibliotheque_rag import (
     chercher_bibliotheque as _chercher_bibliotheque,
@@ -118,6 +119,7 @@ from core.catalogue_public_rag import (
     chercher_catalogue_public as _chercher_catalogue_public,
     lire_document_catalogue_public as _lire_document_catalogue_public,
     lister_catalogue_public as _lister_catalogue_public,
+    obtenir_document_catalogue_public as _obtenir_document_catalogue_public,
 )
 # Le classement de documents dans le programme et le rattachement de
 # comportements à un emplacement du programme dépendaient de
@@ -479,6 +481,15 @@ def gerer_document_bibliotheque(
       l'utilisateur demande explicitement à voir/lire ce document en
       entier -- jamais automatiquement après un "trouver_catalogue_
       public". Paramètre : `fichier_id`.
+    - "donner_catalogue_public" : ENVOIE le fichier lui-même en pièce
+      jointe dans le chat (pas juste son contenu ou un lien), identifié
+      par le `fichier_id` obtenu via "trouver_catalogue_public" ou
+      "lister_catalogue_public". Utilise cette action dès que
+      l'utilisateur demande explicitement le fichier ("donne-le-moi",
+      "envoie-moi le PDF", "je veux le fichier"), ou quand le contexte
+      de la conversation indique clairement qu'il veut le fichier
+      lui-même plutôt qu'un résumé (pas besoin qu'il le redemande mot
+      pour mot si c'est déjà évident). Paramètre : `fichier_id`.
     - "lister_catalogue_public" : liste les documents les plus RÉCENTS
       du catalogue public, SANS recherche par contenu -- à utiliser pour
       une demande vague ("qu'est-ce qu'il y a dans la bibliothèque
@@ -513,6 +524,14 @@ def gerer_document_bibliotheque(
       Paramètre : `fichier_id`. SENSIBLE : demande toujours confirmation
       à l'utilisateur avant d'être exécuté, quelle que soit la
       formulation de sa demande.
+    - "donner" : ENVOIE le fichier lui-même en pièce jointe dans le chat
+      (pas juste son contenu ou un lien), identifié par le `fichier_id`
+      obtenu via "chercher" ou "lister". Même règle de déclenchement que
+      "donner_catalogue_public" : à la demande explicite de
+      l'utilisateur, ou dès que le contexte l'indique clairement.
+      Fonctionne pour tout type de fichier (PDF, image, audio, vidéo,
+      document), pas seulement ceux déjà vectorisés. Paramètre :
+      `fichier_id`.
     - "ranger_dossier" : range un fichier dans un dossier. Paramètres :
       `fichier_id`, `dossier_id`. Un fichier peut être rangé dans
       plusieurs dossiers à la fois.
@@ -582,6 +601,22 @@ def gerer_document_bibliotheque(
         if texte is None:
             return "Rien à lire pour ce document : soit il n'existe pas, soit son contenu n'a pas pu être vectorisé (vidéo, ou lien externe)."
         return texte
+
+    if action == "donner_catalogue_public":
+        # 04/09/2026, demande Bourama : donner le FICHIER en pièce
+        # jointe, pas juste son lien en texte. Le texte renvoyé ici NE
+        # DOIT PAS matcher le format "(Source : ...)" attendu par
+        # _sources_bibliotheque_depuis_texte (core/main.py) -- sinon
+        # cet appel serait traité comme une citation et son URL exclue
+        # du mécanisme "fichiers_generes" (voir _traiter_appels,
+        # urls_deja_sourcees). L'URL brute suffit : _extraire_fichiers_
+        # generes la détecte par extension, indépendamment de ce texte.
+        doc = _obtenir_document_catalogue_public(fichier_id)
+        if not doc:
+            return "Ce document est introuvable dans le catalogue public."
+        if not doc.get("url_publique"):
+            return "Ce document n'a pas de fichier téléchargeable associé."
+        return f"Fichier envoyé : {doc.get('nom') or 'Document'} -- {doc['url_publique']}"
 
     if action == "lister_catalogue_public":
         try:
@@ -755,6 +790,21 @@ def gerer_document_bibliotheque(
         if type_emplacement and emplacement_id:
             message += " Attention : le classement dans le programme n'est plus disponible."
         return message
+
+    if action == "donner":
+        # 04/09/2026, demande Bourama : même principe que "donner_
+        # catalogue_public" ci-dessus (voir ce commentaire pour le
+        # détail du mécanisme "fichiers_generes") mais côté bibliothèque
+        # PERSONNELLE -- vérification de propriété obligatoire (contrairement
+        # au catalogue public, ouvert à tout le monde).
+        doc = _obtenir_fichier(fichier_id)
+        if not doc:
+            return "Ce document est introuvable."
+        if doc.get("user_id") != user_id:
+            return "Ce document ne t'appartient pas."
+        if not doc.get("url_publique"):
+            return "Ce document n'a pas de fichier téléchargeable associé."
+        return f"Fichier envoyé : {doc.get('nom_fichier') or 'Document'} -- {doc['url_publique']}"
 
     if action == "supprimer":
         try:
