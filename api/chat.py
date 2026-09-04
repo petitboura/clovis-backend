@@ -117,6 +117,12 @@ class EnvoyerMessagePayload(BaseModel):
     # _construire_system_prompt, qui ne consulte ce flag que pour les
     # agents marqués contenu_dynamique_par_matiere).
     sans_enseignant: Optional[bool] = False
+    # Détection appli installée (04/09/2026, demande Bourama) : envoyé par
+    # clovis-frontend (ChatFlottant.tsx -> ChatIA.tsx, Capacitor.isNativePlatform()),
+    # jamais deviné côté serveur. Sert à forcer explorer_dossier +
+    # gerer_dossier_telephone systématiquement quand l'app est installée --
+    # voir core/main.py:chat(), outils_forces_contexte.
+    natif: Optional[bool] = False
 
 
 def _resoudre_modele_force(agent_id, modele_demande):
@@ -188,6 +194,7 @@ def _evenements_sse(payload: EnvoyerMessagePayload, user_id: Optional[str]):
                 ignorer_suggestion_outils=payload.ignorer_suggestion_outils or False,
                 modele_force=_resoudre_modele_force(payload.agent_id, payload.modele),
                 sans_enseignant=payload.sans_enseignant or False,
+                natif=payload.natif or False,
             )
         for evenement in generateur:
             yield f"data: {json.dumps(evenement)}\n\n"

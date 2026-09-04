@@ -3002,7 +3002,7 @@ def _capturer_reponse(generateur, accumulateur, meta=None):
         yield event
 
 
-def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, agent_id=None, conversation_id=None, longueur_reponse="moyenne", image_url=None, localisation=None, fuseau_horaire=None, images_base64=None, recherche_forcee=False, outil_force=None, ignorer_suggestion_outils=False, modele_force=None, sans_enseignant=False):
+def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, agent_id=None, conversation_id=None, longueur_reponse="moyenne", image_url=None, localisation=None, fuseau_horaire=None, images_base64=None, recherche_forcee=False, outil_force=None, ignorer_suggestion_outils=False, modele_force=None, sans_enseignant=False, natif=False):
     """
     Generateur d'evenements. Chaque element produit est un dictionnaire :
     - {"type": "statut", "texte": "..."}         -> un outil MCP est en cours d'utilisation
@@ -3379,6 +3379,22 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     outils_forces_contexte = []
     if comportements_etudiant:
         outils_forces_contexte.append("gerer_comportement")
+    # Outils toujours actifs pour Clovis (04/09/2026, demande Bourama) :
+    # "sa source de connaissance dès qu'il connaît pas ou ne comprend
+    # pas" -- doivent être disponibles au grand modèle à CHAQUE message,
+    # sans dépendre de ce que suggère _router_outils ni d'une sélection
+    # manuelle. Condition en dur sur agent_id (et non une colonne agent
+    # générique comme routeur_outils_auto) : décision explicite de
+    # Bourama, clovis-frontend fixe AGENT_ID="clovis" en dur partout
+    # (simplification du 14/08, plus de vrai système multi-agents côté
+    # produit malgré le code partagé avec djiguigne-backend).
+    if agent_id == "clovis":
+        outils_forces_contexte.append("gerer_document_bibliotheque")
+        if natif:
+            # Paire indissociable (voir règle "monde téléphone" dans
+            # _router_outils) : explorer_dossier a besoin des noms
+            # listés par gerer_dossier_telephone pour fonctionner.
+            outils_forces_contexte += ["gerer_dossier_telephone", "explorer_dossier"]
 
     # Outils gardés par le grand modèle au tour précédent (2026-09-04,
     # demande Bourama) : voir _outil_garder_outils/_lire_outils_retenus.
