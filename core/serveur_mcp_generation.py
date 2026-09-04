@@ -21,6 +21,7 @@ import logging
 import tempfile
 import base64
 import requests
+from collections import Counter
 
 from mcp.server.mcpserver import MCPServer as FastMCP, Context
 
@@ -1988,10 +1989,17 @@ def gerer_dossier_telephone(
 
     `action` doit être l'une de :
     - "lister_dossiers" : liste les noms des dossiers que l'étudiant a
-      désignés sur son téléphone (accessibles à l'app Clovis mobile),
-      avec la plateforme (android/ios). Utilise TOUJOURS cette action
-      avant "executer" pour un type "dossier_*", afin de cibler un nom
-      qui existe vraiment, ne devine jamais un nom de dossier. Aucun
+      désignés sur son téléphone (accessibles à l'app Clovis mobile).
+      Chaque ligne montre UNIQUEMENT le nom, sauf si deux dossiers
+      différents partagent exactement le même nom sur deux plateformes
+      différentes (android/ios) : dans ce cas seulement, la plateforme
+      est ajoutée entre crochets à la fin de la ligne, ex.
+      "- Cours [plateforme: android]". Cette plateforme entre crochets
+      n'appartient JAMAIS au nom du dossier : ne l'inclus JAMAIS dans
+      "dossier_nom"/"nouveau_dossier_nom", reprends uniquement le texte
+      avant les crochets, tel quel. Utilise TOUJOURS cette action avant
+      "executer" pour un type "dossier_*", afin de cibler un nom qui
+      existe vraiment, ne devine jamais un nom de dossier. Aucun
       paramètre.
     - "executer" : décide une action à exécuter sur le téléphone de
       l'étudiant. L'action est mise en attente et poussée immédiatement
@@ -2041,7 +2049,20 @@ def gerer_dossier_telephone(
             return "Erreur : impossible de lister les dossiers désignés, réessaie."
         if not dossiers:
             return "Aucun dossier désigné sur le téléphone de l'étudiant pour l'instant."
-        return "\n".join(f"- {d['nom']} ({d['plateforme']})" for d in dossiers)
+        # Correctif 05/09/2026 (Bourama) : la plateforme n'est affichée que
+        # s'il y a une vraie collision de nom entre android et ios, pour ne
+        # jamais laisser le modèle coller la plateforme au nom du dossier
+        # (ce qui rendait "dossier_nom" invalide côté téléphone, égalité
+        # stricte). Format sans ambiguïté : plateforme entre crochets,
+        # jamais collée directement au nom.
+        noms_comptes = Counter(d["nom"] for d in dossiers)
+        lignes = []
+        for d in dossiers:
+            if noms_comptes[d["nom"]] > 1:
+                lignes.append(f"- {d['nom']} [plateforme: {d['plateforme']}]")
+            else:
+                lignes.append(f"- {d['nom']}")
+        return "\n".join(lignes)
 
     if action == "executer":
         if type_action not in TYPES_ACTION_MOBILE_VALIDES:
