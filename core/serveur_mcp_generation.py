@@ -108,8 +108,6 @@ from core.bibliotheque_fichiers import (
     enregistrer_lien as _enregistrer_lien,
     lister_fichiers as _lister_fichiers,
     supprimer_fichier as _supprimer_fichier,
-    obtenir_fichier as _obtenir_fichier,
-    obtenir_fichier_par_url as _obtenir_fichier_par_url,
 )
 from core.bibliotheque_rag import (
     chercher_bibliotheque as _chercher_bibliotheque,
@@ -124,7 +122,6 @@ from core.catalogue_public_rag import (
     chercher_catalogue_public as _chercher_catalogue_public,
     lire_document_catalogue_public as _lire_document_catalogue_public,
     lister_catalogue_public as _lister_catalogue_public,
-    obtenir_document_catalogue_public as _obtenir_document_catalogue_public,
 )
 # Le classement de documents dans le programme et le rattachement de
 # comportements à un emplacement du programme dépendaient de
@@ -470,6 +467,24 @@ def gerer_document_bibliotheque(
     ci-dessous), le texte entre crochets DOIT être le vrai nom du
     fichier, jamais l'URL elle-même.
 
+    04/09/2026 (demande Bourama : plus besoin d'une action séparée pour
+    "donner" un fichier -- "chercher"/"lister"/"trouver_catalogue_public"/
+    "lister_catalogue_public" ci-dessous renvoient déjà le lien de chaque
+    document trouvé). Dès que tu as ce lien (par une de ces actions, ou
+    parce qu'il est déjà visible plus tôt dans cette même conversation),
+    tu peux directement écrire ce lien dans ta réponse, en markdown, avec
+    le vrai nom du fichier comme texte affiché -- il apparaît alors
+    automatiquement en pièce jointe pour l'étudiant, sans appel d'outil
+    supplémentaire. Fais-le à la demande explicite de l'étudiant
+    ("donne-moi ce fichier", "envoie-moi le PDF"), ou quand le contexte
+    indique clairement qu'il veut le fichier lui-même plutôt qu'un
+    résumé -- pas systématiquement à chaque fois qu'un document apparaît
+    dans une recherche. Même chose pour redonner un fichier que
+    l'utilisateur a joint DANS cette conversation : son lien réel est
+    déjà visible entre crochets "[Lien réel du fichier : ...]" juste
+    après son upload, réécris-le directement, pas besoin d'appeler cet
+    outil pour ça.
+
     `action` doit être l'une de :
     - "chercher" : cherche par contenu dans la bibliothèque PERSONNELLE.
       Paramètre : `question`.
@@ -486,15 +501,6 @@ def gerer_document_bibliotheque(
       l'utilisateur demande explicitement à voir/lire ce document en
       entier -- jamais automatiquement après un "trouver_catalogue_
       public". Paramètre : `fichier_id`.
-    - "donner_catalogue_public" : ENVOIE le fichier lui-même en pièce
-      jointe dans le chat (pas juste son contenu ou un lien), identifié
-      par le `fichier_id` obtenu via "trouver_catalogue_public" ou
-      "lister_catalogue_public". Utilise cette action dès que
-      l'utilisateur demande explicitement le fichier ("donne-le-moi",
-      "envoie-moi le PDF", "je veux le fichier"), ou quand le contexte
-      de la conversation indique clairement qu'il veut le fichier
-      lui-même plutôt qu'un résumé (pas besoin qu'il le redemande mot
-      pour mot si c'est déjà évident). Paramètre : `fichier_id`.
     - "lister_catalogue_public" : liste les documents les plus RÉCENTS
       du catalogue public, SANS recherche par contenu -- à utiliser pour
       une demande vague ("qu'est-ce qu'il y a dans la bibliothèque
@@ -506,7 +512,13 @@ def gerer_document_bibliotheque(
       cherche quelque chose de précis, utilise "trouver_catalogue_public"
       à la place. Aucun paramètre.
     - "lister" : liste les documents/liens/notes de la bibliothèque
-      personnelle, sans recherche par contenu. Aucun paramètre.
+      personnelle (avec le lien de chacun), sans recherche par contenu.
+      Couvre TOUS les types, y compris image/audio/vidéo, contrairement
+      à "chercher" (recherche sémantique qui ne trouve que du texte déjà
+      vectorisé, donc rate les fichiers non-texte) -- utilise "lister"
+      en priorité pour "redonne-moi l'image/document que tu as générée"
+      (tout ce que tu génères est automatiquement enregistré ici avec
+      `description` = son nom). Aucun paramètre.
     - "ajouter_lien" : ajoute un lien. Paramètres : `url`, `titre`.
     - "ajouter_texte" : ajoute une note de texte libre. Paramètres :
       `contenu`, `titre`.
@@ -529,30 +541,6 @@ def gerer_document_bibliotheque(
       Paramètre : `fichier_id`. SENSIBLE : demande toujours confirmation
       à l'utilisateur avant d'être exécuté, quelle que soit la
       formulation de sa demande.
-    - "donner" : ENVOIE le fichier lui-même en pièce jointe dans le chat
-      (pas juste son contenu ou un lien), identifié de l'une de ces
-      façons :
-        * `fichier_id` obtenu via "lister" ou "chercher" (documents de
-          la bibliothèque, Y COMPRIS un fichier que TU as généré plus
-          tôt dans cette conversation -- tout ce que tu génères est
-          automatiquement enregistré ici avec `description` = son nom.
-          Pour "redonne-moi l'image/document que tu as générée",
-          utilise "lister" en priorité (couvre TOUS les types, y
-          compris image/audio/vidéo -- "chercher" est une recherche
-          sémantique qui ne trouve que du texte déjà vectorisé, donc
-          rate les fichiers non-texte) pour retrouver le fichier_id,
-          PUIS "donner" avec cet id -- ne suppose jamais un id).
-        * `url_fichier` -- le lien réel d'un fichier que l'UTILISATEUR a
-          joint DANS cette conversation, visible entre crochets "[Lien
-          réel du fichier : ...]" juste après son upload : utilise cette
-          option pour redonner un fichier que l'utilisateur vient
-          d'envoyer ou a envoyé plus tôt dans le même fil, jamais un
-          lien deviné/reconstruit.
-      Même règle de déclenchement que "donner_catalogue_public" : à la
-      demande explicite de l'utilisateur, ou dès que le contexte
-      l'indique clairement. Fonctionne pour tout type de fichier (PDF,
-      image, audio, vidéo, document), pas seulement ceux déjà
-      vectorisés.
     - "ranger_dossier" : range un fichier dans un dossier. Paramètres :
       `fichier_id`, `dossier_id`. Un fichier peut être rangé dans
       plusieurs dossiers à la fois.
@@ -623,22 +611,6 @@ def gerer_document_bibliotheque(
             return "Rien à lire pour ce document : soit il n'existe pas, soit son contenu n'a pas pu être vectorisé (vidéo, ou lien externe)."
         return texte
 
-    if action == "donner_catalogue_public":
-        # 04/09/2026, demande Bourama : donner le FICHIER en pièce
-        # jointe, pas juste son lien en texte. Le texte renvoyé ici NE
-        # DOIT PAS matcher le format "(Source : ...)" attendu par
-        # _sources_bibliotheque_depuis_texte (core/main.py) -- sinon
-        # cet appel serait traité comme une citation et son URL exclue
-        # du mécanisme "fichiers_generes" (voir _traiter_appels,
-        # urls_deja_sourcees). L'URL brute suffit : _extraire_fichiers_
-        # generes la détecte par extension, indépendamment de ce texte.
-        doc = _obtenir_document_catalogue_public(fichier_id)
-        if not doc:
-            return "Ce document est introuvable dans le catalogue public."
-        if not doc.get("url_publique"):
-            return "Ce document n'a pas de fichier téléchargeable associé."
-        return f"Fichier envoyé : {doc.get('nom') or 'Document'} -- {doc['url_publique']}"
-
     if action == "lister_catalogue_public":
         try:
             resultat = _lister_catalogue_public()
@@ -683,6 +655,11 @@ def gerer_document_bibliotheque(
             if emplacements:
                 ligne += " | classé dans : " + ", ".join(e["libelle"] for e in emplacements)
             ligne += f" [id: {f['id']}]"
+            # 04/09/2026, demande Bourama : lien inclus directement ici
+            # (déjà connu, remonté par le select("*") de _lister_fichiers)
+            # pour que l'IA puisse le redonner sans appel d'outil séparé.
+            if f.get("url_publique"):
+                ligne += f" -- {f['url_publique']}"
             lignes.append(ligne)
         return "\n".join(lignes)
 
@@ -811,36 +788,6 @@ def gerer_document_bibliotheque(
         if type_emplacement and emplacement_id:
             message += " Attention : le classement dans le programme n'est plus disponible."
         return message
-
-    if action == "donner":
-        # 04/09/2026, demande Bourama : même principe que "donner_
-        # catalogue_public" ci-dessus (voir ce commentaire pour le
-        # détail du mécanisme "fichiers_generes") mais côté bibliothèque
-        # PERSONNELLE -- vérification de propriété obligatoire (contrairement
-        # au catalogue public, ouvert à tout le monde).
-        #
-        # Étendu le 04/09/2026 (suite, cas "fichier uploadé dans la
-        # conversation") : un fichier joint par l'utilisateur DANS le
-        # chat est déjà indexé ici (origine="chat", voir api/uploads.py)
-        # au moment même de l'upload, mais le modèle n'a jamais reçu son
-        # fichier_id -- seulement son url_publique, visible dans le
-        # texte du message sous la forme "[Lien réel du fichier : ...]"
-        # (même convention que l'action "ajouter_fichier" ci-dessus).
-        # `url_fichier` (paramètre déjà existant de cet outil) permet
-        # donc de retrouver ce fichier sans recherche préalable.
-        if fichier_id:
-            doc = _obtenir_fichier(fichier_id)
-        elif url_fichier:
-            doc = _obtenir_fichier_par_url(url_fichier.strip())
-        else:
-            return "Erreur : fournis fichier_id (bibliothèque) ou url_fichier (fichier joint dans cette conversation)."
-        if not doc:
-            return "Ce document est introuvable."
-        if doc.get("user_id") != user_id:
-            return "Ce document ne t'appartient pas."
-        if not doc.get("url_publique"):
-            return "Ce document n'a pas de fichier téléchargeable associé."
-        return f"Fichier envoyé : {doc.get('nom_fichier') or 'Document'} -- {doc['url_publique']}"
 
     if action == "supprimer":
         try:
@@ -2226,23 +2173,29 @@ async def explorer_dossier(
       mon téléphone"), ou quand le contexte l'indique clairement. Le
       fichier est transféré depuis le téléphone puis ajouté à la
       bibliothèque personnelle de l'étudiant au passage (comme tout
-      fichier qui transite par le chat), donc redonnable ensuite via
-      gerer_document_bibliotheque (action "donner") sans redemander au
+      fichier qui transite par le chat) : son lien y est visible ensuite
+      via gerer_document_bibliotheque (action "lister" ou "chercher"),
+      redonnable directement dans ta réponse sans redemander au
       téléphone. Limite de taille : 50 Mo (plus large que "lire_fichier",
       qui lui doit rester lisible par le modèle -- ici le fichier n'est
       pas traité, juste transféré tel quel).
     - "chercher_par_contenu" : cherche `terme_recherche` dans le CONTENU
       des fichiers sous `dossier_nom` (pas dans leur nom, utilise
-      "chercher_par_nom" pour ça), en lisant chaque fichier un par un.
-      Utilise cette action quand l'étudiant décrit ce qu'il cherche sans
-      en connaître le nom exact ("le cours où on parle des dérivées"),
-      ou juste après un "chercher_par_nom" resté sans résultat si ça
-      semble pertinent. Peut prendre plus de temps qu'une recherche par
-      nom si le dossier contient beaucoup de fichiers, c'est normal.
-      Renvoie les fichiers correspondants avec un court extrait de leur
-      contenu autour de la correspondance trouvée, réutilisable ensuite
-      avec "lire_fichier" (même convention de chemin) pour lire le
-      fichier en entier si besoin.
+      "chercher_par_nom" pour ça). Utilise cette action quand l'étudiant
+      décrit ce qu'il cherche sans en connaître le nom exact ("le cours
+      où on parle des dérivées"), ou juste après un "chercher_par_nom"
+      resté sans résultat si ça semble pertinent. Essaie D'ABORD la
+      recherche sémantique instantanée dans ce qui a déjà été vectorisé
+      en arrière-plan (04/09/2026) -- fonctionne même app fermée, renvoie
+      directement un extrait du contenu ET le lien du fichier. Si rien
+      n'y correspond (fichier pas encore vectorisé), bascule
+      automatiquement sur une lecture EN DIRECT de chaque fichier
+      (nécessite l'app ouverte, peut prendre plus de temps si le dossier
+      contient beaucoup de fichiers, c'est normal) : renvoie alors les
+      fichiers correspondants avec un court extrait autour de la
+      correspondance trouvée, réutilisable ensuite avec "lire_fichier"
+      (même convention de chemin) pour lire le fichier en entier si
+      besoin.
     """
     user_id = ctx.request_context.request.query_params.get("user_id")
     if not user_id:
@@ -2278,6 +2231,27 @@ async def explorer_dossier(
         elif action == "chercher_par_nom":
             resultat = await _chercher_par_nom(user_id, dossier_nom, terme_recherche)
         elif action == "chercher_par_contenu":
+            # 04/09/2026, demande Bourama : essaie D'ABORD la recherche
+            # vectorisée (core/vectorisation_dossiers_designes.py, fusion
+            # de l'ancien outil séparé chercher_dossiers_designes ici,
+            # même action plutôt que deux outils qui font presque la même
+            # chose) -- instantanée, fonctionne même app fermée, lien
+            # déjà inclus dans chaque résultat. Ne tombe sur la lecture
+            # EN DIRECT (plus lente, app requise) que si rien n'y
+            # correspond, ex. fichier pas encore vectorisé.
+            resultats_vectorises = [
+                r for r in _chercher_dossiers_designes(terme_recherche, user_id=user_id)
+                if r.get("dossier_nom") == dossier_nom
+            ]
+            if resultats_vectorises:
+                blocs = []
+                for r in resultats_vectorises:
+                    bloc = r["contenu"]
+                    source = _formater_source_dossier_designe(r)
+                    if source:
+                        bloc += f"\n{source}"
+                    blocs.append(bloc)
+                return "\n\n---\n\n".join(blocs)
             resultat = await _chercher_par_contenu(user_id, dossier_nom, terme_recherche)
         else:
             # "lire_fichier" et "donner_fichier" : même récupération
@@ -2328,10 +2302,14 @@ async def explorer_dossier(
 
     if action == "donner_fichier":
         # 04/09/2026, demande Bourama (Partie B, dossier téléphone) :
-        # même principe que "donner"/"donner_catalogue_public" de
-        # gerer_document_bibliotheque (voir leurs commentaires pour le
-        # détail du mécanisme "fichiers_generes") -- ce texte ne doit
-        # PAS matcher le format "(Source : ...)". Contrairement à
+        # CE cas-ci reste différent du reste de gerer_document_
+        # bibliotheque (actions "donner"/"donner_catalogue_public"
+        # retirées le même jour, voir leur docstring -- le lien y est
+        # déjà connu dès la recherche, l'IA l'écrit directement dans sa
+        # réponse). Ici, le fichier n'est lu qu'EN DIRECT sur le
+        # téléphone : aucun lien n'existe encore avant ce transfert, donc
+        # cette action reste nécessaire pour aller le chercher et le
+        # stocker AVANT de pouvoir donner son lien. Contrairement à
         # "lire_fichier" ci-dessus, aucun traitement/extraction : le
         # fichier est stocké tel quel dans la bibliothèque personnelle
         # (comme n'importe quel fichier qui transite par le chat), avec
@@ -2384,54 +2362,3 @@ async def explorer_dossier(
 
     return _formatter_elements_dossier(elements)
 
-
-@mcp_generation.tool()
-def chercher_dossiers_designes(question: str, ctx: Context) -> str:
-    """
-    Cherche par CONTENU (recherche sémantique, pas de mot-clé exact) dans
-    TOUS les dossiers désignés par l'étudiant sur son téléphone, déjà
-    vectorisés en arrière-plan (04/09/2026) -- contrairement à
-    explorer_dossier(action="chercher_par_contenu"), qui lit chaque
-    fichier un par un EN DIRECT et nécessite l'app ouverte, cet outil-ci
-    répond instantanément et fonctionne même app fermée, mais ne couvre
-    que ce qui a fini d'être vectorisé (un fichier tout juste ajouté peut
-    ne pas encore apparaître -- si rien de pertinent n'est trouvé ici et
-    que l'app est ouverte, tu peux enchaîner avec explorer_dossier pour
-    une recherche en direct plus lente mais toujours à jour).
-
-    Cherche à travers TOUS les dossiers désignés à la fois (pas besoin de
-    préciser lequel) : chaque résultat indique lui-même de quel dossier
-    et sous-dossier il vient. Utilise cet outil en PRIORITÉ dès que
-    l'étudiant décrit un contenu à retrouver sur son téléphone ("le cours
-    où on parle de...", "le PDF qui contient...") sans en connaître
-    l'emplacement exact.
-
-    Paramètre : `question` (ce que l'étudiant cherche, en langage
-    naturel -- pas un simple mot-clé).
-    """
-    user_id = ctx.request_context.request.query_params.get("user_id")
-    if not user_id:
-        return "Erreur : impossible d'identifier l'utilisateur."
-
-    try:
-        resultats = _chercher_dossiers_designes(question, user_id=user_id)
-    except Exception as e:
-        logging.error(f"ERREUR chercher_dossiers_designes : {e}")
-        return "Erreur : la recherche dans les dossiers désignés a échoué, réessaie."
-
-    if not resultats:
-        return (
-            "Rien de pertinent trouvé dans les dossiers désignés du téléphone "
-            "pour cette question (le fichier cherché n'a peut-être pas encore "
-            "fini d'être vectorisé, ou l'app n'a jamais été utilisée pour "
-            "désigner de dossier)."
-        )
-
-    blocs = []
-    for r in resultats:
-        bloc = r["contenu"]
-        source = _formater_source_dossier_designe(r)
-        if source:
-            bloc += f"\n{source}"
-        blocs.append(bloc)
-    return "\n\n---\n\n".join(blocs)

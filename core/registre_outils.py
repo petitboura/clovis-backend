@@ -294,11 +294,6 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "gerer_document_bibliotheque:trouver_catalogue_public": {"label": "Catalogue public", "icone": "Library", "onglet": None},
     "gerer_document_bibliotheque:lire_catalogue_public": {"label": "Catalogue public", "icone": "Library", "onglet": None},
     "gerer_document_bibliotheque:lister_catalogue_public": {"label": "Catalogue public", "icone": "Library", "onglet": None},
-    # 04/09/2026, même raison que les 3 entrées composites ci-dessus :
-    # "donner_catalogue_public" concerne le catalogue public, pas la
-    # bibliothèque personnelle -- sans cette entrée, le libellé générique
-    # "Bibliothèque personnelle" s'afficherait à tort pendant l'exécution.
-    "gerer_document_bibliotheque:donner_catalogue_public": {"label": "Catalogue public", "icone": "Library", "onglet": None},
     "gerer_base_connaissance": {"label": "Base de connaissances de Clovis", "icone": "BookMarked", "onglet": "rechercher"},
 
     # --- Action dans l'app : GitHub ---
@@ -428,6 +423,5 @@ REGISTRE_AFFICHAGE_OUTILS = {
     # autonomie pendant la conversation, jamais des boutons cliqués.
     "gerer_dossier_telephone": {"label": "Dossiers du téléphone", "icone": "FolderPen", "onglet": None},
     "explorer_dossier": {"label": "Exploration du dossier en direct", "icone": "FolderOpen", "onglet": None},
-    "chercher_dossiers_designes": {"label": "Recherche dans les dossiers désignés", "icone": "FolderSearch", "onglet": None},
 }
 
