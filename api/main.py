@@ -52,10 +52,21 @@ from api.codes_partage import router_mes_codes, router_rattachements
 from api.outils_registre import router as outils_registre_router
 from api.appareils_mobiles import router as appareils_mobiles_router
 from api.canal_temps_reel import router as canal_temps_reel_router
+from api.dossiers_designes import router as dossiers_designes_router
 from core.serveur_mcp_generation import mcp_generation
 from core.notifications_push import traiter_rappels_echus, un_canal_push_disponible
 from core.proactivite import verifier_relances_proactives
 from core.file_attente_vectorisation import remettre_en_attente_bloques, traiter_file_attente_une_fois, relancer_echecs_a_froid
+# 04/09/2026, demande Bourama : vectorisation en masse des fichiers d'un
+# dossier désigné (téléphone) -- module DÉDIÉ, distinct de la file
+# d'attente ci-dessus (bibliothèque perso/publique), voir docstring de
+# core/vectorisation_dossiers_designes.py. Alias _dossiers_designes pour
+# ne pas entrer en collision avec les imports équivalents juste au-dessus.
+from core.vectorisation_dossiers_designes import (
+    remettre_en_attente_bloques as remettre_en_attente_bloques_dossiers_designes,
+    traiter_file_attente_une_fois as traiter_file_attente_dossiers_designes_une_fois,
+    relancer_echecs_a_froid as relancer_echecs_a_froid_dossiers_designes,
+)
 # 04/09/2026, demande Bourama : description manquante des skills importés
 # (.md) générée en arrière-plan, sans bloquer l'upload -- voir docstring
 # de core/file_attente_description_skills.py. Alias _description pour ne
@@ -131,6 +142,40 @@ async def _boucle_vectorisation():
             logging.error(f"ERREUR boucle vectorisation : {e}")
             traites = 0
         await asyncio.sleep(2 if traites > 0 else 5)
+
+
+async def _boucle_vectorisation_dossiers_designes():
+    """
+    File d'attente de vectorisation des fichiers de dossiers désignés
+    (04/09/2026, voir docstring de core/vectorisation_dossiers_designes.py)
+    -- même rythme que _boucle_vectorisation (bibliothèque perso/publique) :
+    passage rapproché tant qu'il y a du travail, plus espacé sinon.
+    """
+    while True:
+        try:
+            traites = await to_thread.run_sync(traiter_file_attente_dossiers_designes_une_fois)
+        except Exception as e:
+            logging.error(f"ERREUR boucle vectorisation dossiers désignés : {e}")
+            traites = 0
+        await asyncio.sleep(2 if traites > 0 else 5)
+
+
+async def _boucle_reessai_echecs_dossiers_designes():
+    """
+    Réessai automatique à froid, SANS plafond (voir docstring de
+    core/vectorisation_dossiers_designes.py -- politique différente de
+    _boucle_reessai_echecs, précisée par Bourama le 04/09). Même
+    intervalle que la bibliothèque perso : le cooldown lui-même dure déjà
+    plusieurs minutes.
+    """
+    while True:
+        try:
+            relances = await to_thread.run_sync(relancer_echecs_a_froid_dossiers_designes)
+            if relances:
+                logging.info(f"Réessai auto à froid (dossiers désignés) : {relances} fichier(s) remis en file.")
+        except Exception as e:
+            logging.error(f"ERREUR boucle réessai à froid dossiers désignés : {e}")
+        await asyncio.sleep(5 * 60)
 
 
 async def _boucle_description_skills():
@@ -212,6 +257,10 @@ async def _lifespan(app: FastAPI):
         await to_thread.run_sync(remettre_en_attente_bloques_description)
     except Exception as e:
         logging.error(f"ERREUR remise en attente au démarrage (description skills) : {e}")
+    try:
+        await to_thread.run_sync(remettre_en_attente_bloques_dossiers_designes)
+    except Exception as e:
+        logging.error(f"ERREUR remise en attente au démarrage (dossiers désignés) : {e}")
 
     async with (
         mcp_generation.session_manager.run(),
@@ -226,6 +275,8 @@ async def _lifespan(app: FastAPI):
             tache_proactivite = asyncio.create_task(_boucle_planificateur_proactivite())
         tache_vectorisation = asyncio.create_task(_boucle_vectorisation())
         tache_reessai_echecs = asyncio.create_task(_boucle_reessai_echecs())
+        tache_vectorisation_dossiers_designes = asyncio.create_task(_boucle_vectorisation_dossiers_designes())
+        tache_reessai_echecs_dossiers_designes = asyncio.create_task(_boucle_reessai_echecs_dossiers_designes())
         tache_description_skills = asyncio.create_task(_boucle_description_skills())
         tache_reessai_echecs_description = asyncio.create_task(_boucle_reessai_echecs_description())
         yield
@@ -235,6 +286,8 @@ async def _lifespan(app: FastAPI):
             tache_proactivite.cancel()
         tache_vectorisation.cancel()
         tache_reessai_echecs.cancel()
+        tache_vectorisation_dossiers_designes.cancel()
+        tache_reessai_echecs_dossiers_designes.cancel()
         tache_description_skills.cancel()
         tache_reessai_echecs_description.cancel()
 
@@ -519,6 +572,7 @@ app.include_router(router_rattachements)
 app.include_router(outils_registre_router)
 app.include_router(appareils_mobiles_router)
 app.include_router(canal_temps_reel_router)
+app.include_router(dossiers_designes_router)
 
 
 @app.get("/health")
