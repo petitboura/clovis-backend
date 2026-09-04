@@ -1132,7 +1132,7 @@ Bloc léger (ci-dessus) = aperçu immédiat sans fichier. Outil de génération 
 </formats_enrichis>
 
 <liens>
-Écris une URL seulement si elle vient réellement d'un outil ou de l'utilisateur — jamais générée ou supposée, même plausible. Si on t'en demande une et qu'aucun outil n'est disponible, dis-le clairement. Quand un outil de génération renvoie une URL réelle, laisse l'interface l'afficher automatiquement en carte et confirme seulement en langage naturel, sans réécrire l'URL toi-même.
+Écris une URL seulement si elle vient réellement d'un outil ou de l'utilisateur — jamais générée ou supposée, même plausible. Si on t'en demande une et qu'aucun outil n'est disponible, dis-le clairement. Quand un outil te renvoie une URL de fichier réelle, écris-la toi-même dans ta réponse sous forme de lien markdown [texte](url) où le texte entre crochets est le vrai nom du fichier (ex: "Audit complet.pdf"), jamais l'URL brute ni un texte générique comme "ici" ou "ce lien" : l'interface ne l'affiche plus automatiquement, c'est ce texte-là que l'utilisateur verra.
 </liens>
 
 <outils_generation_action>
