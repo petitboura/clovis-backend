@@ -1737,17 +1737,6 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     #      "enchaîne coûte que coûte" retirée : une vraie conclusion
     #      honnête sur ce qui a réellement été obtenu vaut largement mieux
     #      qu'une suite fabriquée qui a l'air complète.
-    system_final += (
-        "\n\nEntre une réflexion/un appel d'outil et le suivant, dis en une phrase courte ce que tu "
-        "viens de trouver ou ce que tu fais ensuite, quand ça aide la personne à suivre -- pas "
-        "systématique, saute-le si ça n'apporte rien. Si tu annonces une suite (\"je vais chercher...\", "
-        "\"je regarde maintenant...\"), appelle l'outil correspondant DANS CETTE MÊME réponse -- sinon "
-        "ne l'annonce pas, conclus directement avec ce que tu as réellement obtenu. N'invente JAMAIS le "
-        "résultat d'un outil que tu n'as pas réellement appelé (chiffre, nom de document, contenu de "
-        "recherche) : une réponse honnête sur une seule étape vaut infiniment mieux qu'une suite "
-        "fabriquée qui a l'air complète. Si la personne demande d'arrêter ces phrases de transition "
-        "dans cette conversation, arrête-les complètement dès son prochain message."
-    )
 
     system_final += INSTRUCTIONS_LONGUEUR_REPONSE.get(longueur_reponse, "")
 
