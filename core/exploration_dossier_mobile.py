@@ -15,6 +15,14 @@ A NE PAS CONFONDRE avec :
 Ici, la demande part EN DIRECT vers le telephone via
 core/canal_temps_reel.poser_question_appareil et la reponse arrive dans
 le meme tour de raisonnement de l'agent.
+
+Modifie le 04/09/2026, Bourama : chaque fonction prend desormais
+`appareil_id` (l'appareil PRECIS proprietaire du dossier vise, deja
+resolu par l'appelant via
+core/dossiers_designes_mobile.resoudre_appareil_cible -- voir
+core/serveur_mcp_generation.py) -- indispensable des que l'etudiant a
+plusieurs telephones, sinon la question pouvait partir vers n'importe
+lequel de ses appareils connectes.
 """
 
 from typing import Any
@@ -23,7 +31,9 @@ from core.canal_temps_reel import poser_question_appareil
 from core.lecture_fichier_mobile import lire_contenu_fichier, fichier_trop_volumineux
 
 
-async def lister_contenu_dossier(user_id: str, dossier_nom: str, on_statut=None) -> dict[str, Any] | None:
+async def lister_contenu_dossier(
+    user_id: str, appareil_id: str, dossier_nom: str, on_statut=None
+) -> dict[str, Any] | None:
     """
     Demande en direct au telephone de l'etudiant le contenu du dossier
     designe `dossier_nom`.
@@ -40,13 +50,14 @@ async def lister_contenu_dossier(user_id: str, dossier_nom: str, on_statut=None)
     """
     return await poser_question_appareil(
         user_id,
+        appareil_id,
         {"action": "lister_contenu", "dossier_nom": dossier_nom},
         on_statut=on_statut,
     )
 
 
 async def ouvrir_sous_dossier(
-    user_id: str, dossier_nom: str, chemin: list[str], on_statut=None
+    user_id: str, appareil_id: str, dossier_nom: str, chemin: list[str], on_statut=None
 ) -> dict[str, Any] | None:
     """
     Cree le 30/08/2026, Bourama : Lot 3 (voir 03-navigation-recherche-nom.md).
@@ -60,13 +71,14 @@ async def ouvrir_sous_dossier(
     """
     return await poser_question_appareil(
         user_id,
+        appareil_id,
         {"action": "ouvrir_sous_dossier", "dossier_nom": dossier_nom, "chemin": chemin},
         on_statut=on_statut,
     )
 
 
 async def chercher_par_nom(
-    user_id: str, dossier_nom: str, terme_recherche: str, on_statut=None
+    user_id: str, appareil_id: str, dossier_nom: str, terme_recherche: str, on_statut=None
 ) -> dict[str, Any] | None:
     """
     Cree le 30/08/2026, Bourama : Lot 3 (voir 03-navigation-recherche-nom.md).
@@ -85,13 +97,14 @@ async def chercher_par_nom(
     """
     return await poser_question_appareil(
         user_id,
+        appareil_id,
         {"action": "chercher_par_nom", "dossier_nom": dossier_nom, "terme_recherche": terme_recherche},
         on_statut=on_statut,
     )
 
 
 async def lire_fichier(
-    user_id: str, dossier_nom: str, chemin: list[str], on_statut=None
+    user_id: str, appareil_id: str, dossier_nom: str, chemin: list[str], on_statut=None
 ) -> dict[str, Any] | None:
     """
     Cree le 30/08/2026, Bourama : Lot 4 (voir 04-lecture-contenu.md).
@@ -115,12 +128,15 @@ async def lire_fichier(
     """
     return await poser_question_appareil(
         user_id,
+        appareil_id,
         {"action": "lire_fichier", "dossier_nom": dossier_nom, "chemin": chemin},
         on_statut=on_statut,
     )
 
 
-async def lister_tous_fichiers(user_id: str, dossier_nom: str, on_statut=None) -> dict[str, Any] | None:
+async def lister_tous_fichiers(
+    user_id: str, appareil_id: str, dossier_nom: str, on_statut=None
+) -> dict[str, Any] | None:
     """
     Cree le 30/08/2026, Bourama : Lot 5 (voir 05-recherche-contenu-app-fermee.md).
 
@@ -135,13 +151,14 @@ async def lister_tous_fichiers(user_id: str, dossier_nom: str, on_statut=None) -
     """
     return await poser_question_appareil(
         user_id,
+        appareil_id,
         {"action": "lister_tous_fichiers", "dossier_nom": dossier_nom},
         on_statut=on_statut,
     )
 
 
 async def chercher_par_contenu(
-    user_id: str, dossier_nom: str, terme_recherche: str, on_statut=None
+    user_id: str, appareil_id: str, dossier_nom: str, terme_recherche: str, on_statut=None
 ) -> dict[str, Any] | None:
     """
     Cree le 30/08/2026, Bourama : Lot 5 (voir 05-recherche-contenu-app-fermee.md).
@@ -175,7 +192,7 @@ async def chercher_par_contenu(
     - {"erreur": "..."} si le listing initial du dossier echoue (dossier
       designe introuvable).
     """
-    listing = await lister_tous_fichiers(user_id, dossier_nom, on_statut=on_statut)
+    listing = await lister_tous_fichiers(user_id, appareil_id, dossier_nom, on_statut=on_statut)
     if listing is None:
         return None
     if "erreur" in listing:
@@ -187,7 +204,7 @@ async def chercher_par_contenu(
     for element in listing.get("elements") or []:
         chemin_element = element.get("chemin") or [element.get("nom")]
 
-        lecture_brute = await lire_fichier(user_id, dossier_nom, chemin_element, on_statut=on_statut)
+        lecture_brute = await lire_fichier(user_id, appareil_id, dossier_nom, chemin_element, on_statut=on_statut)
         if lecture_brute is None:
             return None
         if "erreur" in lecture_brute:

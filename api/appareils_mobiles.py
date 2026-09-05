@@ -119,6 +119,8 @@ def obtenir_usage(jours: int = 7, utilisateur=Depends(utilisateur_courant)):
 
 class SynchronisationDossiers(BaseModel):
     plateforme: str  # "android" ou "ios"
+    appareil_id: str  # ajoute le 04/09/2026 : UUID genere/persiste par l'app, voir IdentifiantAppareil.kt/.swift
+    appareil_nom: str | None = None  # libelle lisible (choisi par l'etudiant ou genere par defaut cote app)
     noms: list[str]
 
 
@@ -126,9 +128,13 @@ class SynchronisationDossiers(BaseModel):
 def synchroniser_dossiers(payload: SynchronisationDossiers, utilisateur=Depends(utilisateur_courant)):
     if payload.plateforme not in ("android", "ios"):
         raise erreur_api(400, "PLATEFORME_INCONNUE")
+    if not payload.appareil_id.strip():
+        raise erreur_api(400, "APPAREIL_ID_MANQUANT")
 
     try:
-        synchroniser_dossiers_designes(utilisateur.id, payload.plateforme, payload.noms)
+        synchroniser_dossiers_designes(
+            utilisateur.id, payload.plateforme, payload.appareil_id, payload.appareil_nom, payload.noms
+        )
     except Exception as e:
         logging.error(f"ERREUR synchronisation dossiers designes (utilisateur {utilisateur.id}) : {e}")
         raise erreur_api(500, "ECHEC_SYNCHRONISATION_DOSSIERS")
@@ -137,6 +143,7 @@ def synchroniser_dossiers(payload: SynchronisationDossiers, utilisateur=Depends(
 class TokenPush(BaseModel):
     plateforme: str  # "android" ou "ios"
     token: str
+    appareil_id: str | None = None  # ajoute le 04/09/2026, voir migrations/2026_09_04_appareil_id_ciblage.sql
 
 
 @router.post("/push-token", status_code=204)
@@ -146,6 +153,10 @@ def enregistrer_push_token(payload: TokenPush, utilisateur=Depends(utilisateur_c
     token FCM (Android, onNewToken) ou APNs (iOS,
     didRegisterForRemoteNotificationsWithDeviceToken) -- pas seulement
     au premier lancement, le SDK peut renouveler ce token a tout moment.
+    `appareil_id` (depuis le 04/09/2026) permet de livrer une action a
+    UN SEUL appareil precis (voir core/notifications_push.py) ; laisse
+    vide, le token reste utilisable mais uniquement pour une diffusion
+    large (comportement d'avant cette date).
     """
     if payload.plateforme not in ("android", "ios"):
         raise erreur_api(400, "PLATEFORME_INCONNUE")
@@ -153,7 +164,7 @@ def enregistrer_push_token(payload: TokenPush, utilisateur=Depends(utilisateur_c
         raise erreur_api(400, "TOKEN_VIDE")
 
     try:
-        enregistrer_token_natif(utilisateur.id, payload.plateforme, payload.token)
+        enregistrer_token_natif(utilisateur.id, payload.plateforme, payload.token, payload.appareil_id)
     except Exception as e:
         logging.error(f"ERREUR enregistrement token push mobile (utilisateur {utilisateur.id}) : {e}")
         raise erreur_api(500, "ECHEC_ENREGISTREMENT_TOKEN")
@@ -181,13 +192,17 @@ def desinscrire_push_token(token: str, utilisateur=Depends(utilisateur_courant))
 
 
 @router.get("/actions/en-attente")
-def obtenir_actions_en_attente(utilisateur=Depends(utilisateur_courant)):
+def obtenir_actions_en_attente(appareil_id: str = "", utilisateur=Depends(utilisateur_courant)):
     """
     CONTRAT APP MOBILE : filet de secours a appeler a chaque ouverture de
     l'app, pour rattraper les actions decidees par Clovis pendant qu'elle
-    etait fermee/hors ligne (le push peut ne pas etre arrive).
+    etait fermee/hors ligne (le push peut ne pas etre arrive). Passer
+    `appareil_id` (depuis le 04/09/2026) : une action ciblant un AUTRE
+    appareil du meme compte (dossier possede par un autre telephone)
+    n'est jamais renvoyee ici, pour ne pas qu'un appareil qui n'a pas le
+    bon dossier la marque "echouee" a la place du bon appareil.
     """
-    return {"actions": lire_actions_en_attente(utilisateur.id)}
+    return {"actions": lire_actions_en_attente(utilisateur.id, appareil_id)}
 
 
 @router.get("/actions/{action_id}")

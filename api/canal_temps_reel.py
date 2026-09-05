@@ -50,7 +50,9 @@ def _verifier_token(token: str):
 
 
 @router.websocket("/ws")
-async def canal_temps_reel(websocket: WebSocket, token: str = Query(default="")):
+async def canal_temps_reel(
+    websocket: WebSocket, token: str = Query(default=""), appareil_id: str = Query(default="")
+):
     """
     CONTRAT APP MOBILE : ouvrir cette connexion des que l'app est au
     premier plan (et la reouvrir a chaque reprise), tant qu'un compte est
@@ -59,6 +61,13 @@ async def canal_temps_reel(websocket: WebSocket, token: str = Query(default=""))
     "reponse": ...}. Pour ce lot, aucun traitement reel n'est attendu :
     repondre "oui" a n'importe quelle question suffit pour valider le
     tuyau (voir 01-canal-temps-reel.md).
+
+    `appareil_id` (ajoute le 04/09/2026, voir
+    core/canal_temps_reel.py, commentaire au-dessus de _connexions) :
+    identifie CET appareil precis (ou "" pour une session web, voir
+    urlWebSocket cote clovis-frontend) -- sans ca, un deuxieme appareil
+    du meme compte qui se connecte remplacerait purement et simplement
+    le premier dans la table des connexions actives.
     """
     utilisateur = _verifier_token(token)
     if utilisateur is None:
@@ -66,7 +75,7 @@ async def canal_temps_reel(websocket: WebSocket, token: str = Query(default=""))
         return
 
     await websocket.accept()
-    await connecter(utilisateur.id, websocket)
+    await connecter(utilisateur.id, appareil_id, websocket)
 
     try:
         while True:
@@ -78,21 +87,22 @@ async def canal_temps_reel(websocket: WebSocket, token: str = Query(default=""))
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        logging.error(f"ERREUR canal temps reel (user={utilisateur.id}) : {e}")
+        logging.error(f"ERREUR canal temps reel (user={utilisateur.id}, appareil={appareil_id}) : {e}")
     finally:
-        await deconnecter(utilisateur.id, websocket)
+        await deconnecter(utilisateur.id, appareil_id, websocket)
 
 
 @router.post("/test")
-async def tester_canal(utilisateur=Depends(utilisateur_courant)):
+async def tester_canal(appareil_id: str = "", utilisateur=Depends(utilisateur_courant)):
     """
     Route de test (critere de fin du Lot 1) : envoie une question de
-    test ("es-tu la ?") au telephone de l'utilisateur connecte et attend
-    la reponse en direct via le WebSocket ci-dessus. `connecte: false`
-    signifie que l'app est fermee (renvoi immediat, sans attendre le
-    timeout de 30s) -- a distinguer d'une reponse regue apres attente.
+    test ("es-tu la ?") au telephone `appareil_id` de l'utilisateur
+    connecte et attend la reponse en direct via le WebSocket ci-dessus.
+    `connecte: false` signifie que cet appareil precis n'a pas de
+    connexion active (renvoi immediat, sans attendre le timeout de 30s)
+    -- a distinguer d'une reponse recue apres attente.
     """
-    reponse = await poser_question_appareil(utilisateur.id, "es-tu là ?")
+    reponse = await poser_question_appareil(utilisateur.id, appareil_id, "es-tu là ?")
     if reponse is None:
         return {"connecte": False, "reponse": None}
     return {"connecte": True, "reponse": reponse}

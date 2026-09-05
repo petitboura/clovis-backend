@@ -39,10 +39,20 @@ from datetime import datetime, timezone
 from api.auth import supabase
 
 
-def creer_action(user_id: str, type_action: str, parametres: dict) -> str:
+def creer_action(user_id: str, type_action: str, parametres: dict, appareil_id_cible: str | None = None) -> str:
     """
     Enregistre une action en attente et reveille le telephone via push.
     Renvoie l'id de l'action creee.
+
+    `appareil_id_cible` (ajoute le 04/09/2026, voir
+    migrations/2026_09_04_appareil_id_ciblage.sql) : quand l'appelant
+    connait deja l'appareil precis proprietaire du dossier vise (voir
+    core/dossiers_designes_mobile.resoudre_appareil_cible), l'action
+    n'est renvoyee par lire_actions_en_attente qu'a CET appareil, et le
+    push (si configure) n'est envoye qu'a son token -- indispensable des
+    que l'etudiant a deux telephones de la meme plateforme, sinon le
+    mauvais appareil peut recevoir l'action et la marquer "echouee" a la
+    place du bon. None = comportement precedent (diffusion large).
     """
     try:
         res = (
@@ -53,6 +63,7 @@ def creer_action(user_id: str, type_action: str, parametres: dict) -> str:
                     "type_action": type_action,
                     "parametres": parametres,
                     "statut": "en_attente",
+                    "appareil_id_cible": appareil_id_cible,
                 }
             )
             .execute()
@@ -65,7 +76,7 @@ def creer_action(user_id: str, type_action: str, parametres: dict) -> str:
     from core.notifications_push import envoyer_action_appareil
 
     try:
-        envoyer_action_appareil(user_id, action_id, type_action)
+        envoyer_action_appareil(user_id, action_id, type_action, appareil_id_cible)
     except Exception as e:
         # L'action reste en base meme si le push echoue (ex: aucun token
         # enregistre, ou canaux FCM/APNs pas encore configures -- voir
@@ -121,25 +132,38 @@ def attendre_resultat_action(
     return None
 
 
-def lire_actions_en_attente(user_id: str) -> list[dict]:
+def lire_actions_en_attente(user_id: str, appareil_id: str = "") -> list[dict]:
     """
     Filet de secours si le push n'est pas arrive (app fermee, token pas
     encore configure...) -- l'app peut appeler ceci a chaque ouverture
     pour rattraper les actions manquees.
+
+    Ajoute le 04/09/2026 : ne renvoie JAMAIS une action dont
+    `appareil_id_cible` est renseigne et differe de `appareil_id` --
+    sinon, avec deux telephones du meme compte, le mauvais appareil
+    pourrait recuperer une action visant l'autre et la marquer
+    "echouee" (dossier introuvable chez lui) avant que le bon appareil
+    n'ait sa chance. Une action SANS cible (`appareil_id_cible` NULL)
+    reste visible par tous, comme avant cette date.
     """
     try:
         res = (
             supabase.table("actions_appareil_mobile")
-            .select("id, type_action, parametres")
+            .select("id, type_action, parametres, appareil_id_cible")
             .eq("user_id", user_id)
             .eq("statut", "en_attente")
             .order("cree_le")
             .execute()
         )
-        return res.data or []
+        lignes = res.data or []
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (lire_actions_en_attente user={user_id}) : {e}")
         return []
+
+    return [
+        ligne for ligne in lignes
+        if not ligne.get("appareil_id_cible") or ligne["appareil_id_cible"] == appareil_id
+    ]
 
 
 def marquer_resultat(action_id: str, user_id: str, succes: bool, resultat: str = "") -> None:

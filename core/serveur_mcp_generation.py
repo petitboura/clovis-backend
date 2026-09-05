@@ -70,7 +70,10 @@ from core.lecture_fichier_mobile import (
     lire_contenu_fichier as _lire_contenu_fichier,
     fichier_trop_volumineux as _fichier_trop_volumineux,
 )
-from core.dossiers_designes_mobile import lire_dossiers_designes as _lire_dossiers_designes
+from core.dossiers_designes_mobile import (
+    lire_dossiers_designes as _lire_dossiers_designes,
+    resoudre_appareil_cible as _resoudre_appareil_cible,
+)
 from core.vectorisation_dossiers_designes import (
     chercher_dossiers_designes as _chercher_dossiers_designes,
     formater_source_dossier_designe as _formater_source_dossier_designe,
@@ -1967,12 +1970,23 @@ def gerer_dossier_telephone(
     ctx: Context,
     type_action: str = "",
     parametres: dict = None,
+    appareil_nom: str = "",
 ) -> str:
     """
     Gère les DOSSIERS ET FICHIERS PHYSIQUES du téléphone de l'étudiant
     (renommé le 01/09/2026, ex-gerer_action_mobile -- l'accessibilité a
     été retirée de cet outil, il ne gère plus QUE les dossiers désignés
     sur l'appareil). Un seul outil, deux actions.
+
+    `appareil_nom` (ajouté le 04/09/2026, utile pour "executer"
+    seulement) : l'étudiant peut avoir DÉSIGNÉ le même nom de dossier
+    sur plusieurs de ses téléphones -- dans ce cas seulement, "lister_dossiers"
+    affiche l'appareil entre crochets à côté du nom concerné (ex.
+    "- Cours [appareil: iPhone d'Amadou]"). Si "executer" cible un nom
+    ambigu, l'erreur renvoyée liste les appareils possibles : rappelle
+    alors l'outil avec "appareil_nom" reprenant EXACTEMENT le libellé
+    entre crochets. Ne jamais inventer ni deviner ce libellé. Laisser
+    vide dès qu'un seul appareil possède ce nom (cas normal).
 
     NE PAS CONFONDRE avec :
     - gerer_dossier_bibliotheque : gère les dossiers de la bibliothèque
@@ -1990,16 +2004,12 @@ def gerer_dossier_telephone(
     `action` doit être l'une de :
     - "lister_dossiers" : liste les noms des dossiers que l'étudiant a
       désignés sur son téléphone (accessibles à l'app Clovis mobile).
-      Chaque ligne montre UNIQUEMENT le nom, sauf si deux dossiers
-      différents partagent exactement le même nom sur deux plateformes
-      différentes (android/ios) : dans ce cas seulement, la plateforme
-      est ajoutée entre crochets à la fin de la ligne, ex.
-      "- Cours [plateforme: android]". Cette plateforme entre crochets
-      n'appartient JAMAIS au nom du dossier : ne l'inclus JAMAIS dans
-      "dossier_nom"/"nouveau_dossier_nom", reprends uniquement le texte
-      avant les crochets, tel quel. Utilise TOUJOURS cette action avant
-      "executer" pour un type "dossier_*", afin de cibler un nom qui
-      existe vraiment, ne devine jamais un nom de dossier. Aucun
+      Utilise TOUJOURS cette action avant "executer" pour un type
+      "dossier_*", afin de cibler un nom qui existe vraiment, ne devine
+      jamais un nom de dossier. Chaque ligne renvoyée est le nom EXACT à
+      réutiliser comme "dossier_nom" -- tout ce qui suit entre crochets
+      "[appareil: ...]", quand présent, est une INDICATION SÉPARÉE, à ne
+      JAMAIS coller au nom ni inclure dans "dossier_nom". Aucun
       paramètre.
     - "executer" : décide une action à exécuter sur le téléphone de
       l'étudiant. L'action est mise en attente et poussée immédiatement
@@ -2049,17 +2059,21 @@ def gerer_dossier_telephone(
             return "Erreur : impossible de lister les dossiers désignés, réessaie."
         if not dossiers:
             return "Aucun dossier désigné sur le téléphone de l'étudiant pour l'instant."
-        # Correctif 05/09/2026 (Bourama) : la plateforme n'est affichée que
-        # s'il y a une vraie collision de nom entre android et ios, pour ne
-        # jamais laisser le modèle coller la plateforme au nom du dossier
-        # (ce qui rendait "dossier_nom" invalide côté téléphone, égalité
-        # stricte). Format sans ambiguïté : plateforme entre crochets,
-        # jamais collée directement au nom.
-        noms_comptes = Counter(d["nom"] for d in dossiers)
+
+        # Corrige le 04/09/2026, Bourama : la plateforme n'est plus
+        # affichée systematiquement collee au nom (ex. "Download
+        # (android)"), qui amenait parfois l'agent a la reprendre comme
+        # si elle faisait partie du nom lui-meme, faisant echouer toute
+        # action suivante ("Download (android)" introuvable, seul
+        # "Download" existe vraiment). L'appareil n'est indique QUE
+        # quand deux appareils partagent le meme nom de dossier, entre
+        # crochets pour bien le distinguer visuellement du nom.
+        comptage = Counter(d["nom"] for d in dossiers)
         lignes = []
         for d in dossiers:
-            if noms_comptes[d["nom"]] > 1:
-                lignes.append(f"- {d['nom']} [plateforme: {d['plateforme']}]")
+            if comptage[d["nom"]] > 1:
+                libelle_appareil = d.get("appareil_nom") or d["plateforme"]
+                lignes.append(f"- {d['nom']} [appareil: {libelle_appareil}]")
             else:
                 lignes.append(f"- {d['nom']}")
         return "\n".join(lignes)
@@ -2083,8 +2097,23 @@ def gerer_dossier_telephone(
             ):
                 return f"Erreur : \"{cle_chemin}\" doit être une liste de noms de sous-dossiers."
 
+        # Ajoute le 04/09/2026, Bourama : resout l'appareil PRECIS
+        # proprietaire de "dossier_nom" AVANT de creer l'action -- sans
+        # ca, avec deux telephones designant un dossier du meme nom,
+        # l'action partait en diffusion large et pouvait etre executee
+        # (ou echouer) sur le mauvais appareil, voir
+        # core/dossiers_designes_mobile.resoudre_appareil_cible.
+        dossier_nom_vise = (parametres or {}).get("dossier_nom")
+        appareil_id_cible, erreur_resolution = (None, None)
+        if dossier_nom_vise:
+            appareil_id_cible, erreur_resolution = _resoudre_appareil_cible(
+                user_id, dossier_nom_vise, appareil_nom or None
+            )
+            if erreur_resolution:
+                return f"Erreur : {erreur_resolution}"
+
         try:
-            action_id = _creer_action_mobile(user_id, type_action, parametres)
+            action_id = _creer_action_mobile(user_id, type_action, parametres, appareil_id_cible)
         except Exception as e:
             logging.error(f"ERREUR gerer_dossier_telephone (executer, {type_action}) : {e}")
             return "Erreur : impossible de programmer cette action, réessaie."
@@ -2142,6 +2171,7 @@ async def explorer_dossier(
     dossier_nom: str = "",
     chemin: list[str] = None,
     terme_recherche: str = "",
+    appareil_nom: str = "",
 ) -> str:
     """
     Explore EN DIRECT le contenu d'un dossier désigné par l'étudiant sur
@@ -2217,6 +2247,12 @@ async def explorer_dossier(
       correspondance trouvée, réutilisable ensuite avec "lire_fichier"
       (même convention de chemin) pour lire le fichier en entier si
       besoin.
+
+    `appareil_nom` (ajouté le 04/09/2026) : uniquement nécessaire si
+    l'étudiant a désigné un dossier du MÊME nom sur plusieurs
+    téléphones -- "lister_dossiers" (outil gerer_dossier_telephone)
+    l'indique alors entre crochets à côté du nom concerné. Reprends ce
+    libellé exactement, ne le devine jamais. Laisse vide sinon.
     """
     user_id = ctx.request_context.request.query_params.get("user_id")
     if not user_id:
@@ -2244,13 +2280,27 @@ async def explorer_dossier(
     if action == "donner_fichier" and not chemin:
         return "Erreur : paramètre 'chemin' manquant pour l'action 'donner_fichier'."
 
+    # Ajoute le 04/09/2026, Bourama : resout l'appareil PRECIS
+    # proprietaire de "dossier_nom" AVANT toute question en direct --
+    # meme raisonnement que gerer_dossier_telephone (action "executer"),
+    # voir core/dossiers_designes_mobile.resoudre_appareil_cible. Pas
+    # necessaire pour la branche "vectorisee" de chercher_par_contenu
+    # ci-dessous (recherche dans du contenu deja indexe, aucune question
+    # posee a un appareil precis) -- resolu seulement si cette branche
+    # ne suffit pas.
+    appareil_id_cible, erreur_resolution = _resoudre_appareil_cible(
+        user_id, dossier_nom, appareil_nom or None
+    )
+    if erreur_resolution and action != "chercher_par_contenu":
+        return f"Erreur : {erreur_resolution}"
+
     try:
         if action == "lister_contenu":
-            resultat = await _lister_contenu_dossier(user_id, dossier_nom)
+            resultat = await _lister_contenu_dossier(user_id, appareil_id_cible, dossier_nom)
         elif action == "ouvrir_sous_dossier":
-            resultat = await _ouvrir_sous_dossier(user_id, dossier_nom, chemin)
+            resultat = await _ouvrir_sous_dossier(user_id, appareil_id_cible, dossier_nom, chemin)
         elif action == "chercher_par_nom":
-            resultat = await _chercher_par_nom(user_id, dossier_nom, terme_recherche)
+            resultat = await _chercher_par_nom(user_id, appareil_id_cible, dossier_nom, terme_recherche)
         elif action == "chercher_par_contenu":
             # 04/09/2026, demande Bourama : essaie D'ABORD la recherche
             # vectorisée (core/vectorisation_dossiers_designes.py, fusion
@@ -2273,12 +2323,17 @@ async def explorer_dossier(
                         bloc += f"\n{source}"
                     blocs.append(bloc)
                 return "\n\n---\n\n".join(blocs)
-            resultat = await _chercher_par_contenu(user_id, dossier_nom, terme_recherche)
+            # Rien trouve dans le deja-vectorise : bascule sur la
+            # lecture en direct, qui a besoin de l'appareil resolu
+            # au-dessus (jamais tente si l'ambiguite n'a pas ete levee).
+            if erreur_resolution:
+                return f"Erreur : {erreur_resolution}"
+            resultat = await _chercher_par_contenu(user_id, appareil_id_cible, dossier_nom, terme_recherche)
         else:
             # "lire_fichier" et "donner_fichier" : même récupération
             # brute depuis le téléphone, traitement différent plus bas
             # (extraction de texte vs upload bibliothèque + pièce jointe).
-            resultat = await _lire_fichier(user_id, dossier_nom, chemin)
+            resultat = await _lire_fichier(user_id, appareil_id_cible, dossier_nom, chemin)
     except Exception as e:
         logging.error(f"ERREUR explorer_dossier ({action}, {dossier_nom}) : {e}")
         return "Erreur : impossible d'explorer ce dossier, réessaie."

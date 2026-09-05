@@ -150,13 +150,18 @@ def supprimer_abonnement(user_id: str, endpoint: str) -> None:
         raise
 
 
-def enregistrer_token_natif(user_id: str, plateforme: str, token: str) -> None:
+def enregistrer_token_natif(user_id: str, plateforme: str, token: str, appareil_id: str | None = None) -> None:
     """
     Appelée par api/appareils_mobiles.py quand l'app mobile (Android/iOS)
     obtient ou renouvelle son token FCM/APNs. Upsert sur `token` (unique
     en base) : si le même token revient, on rafraîchit juste user_id/
-    plateforme/mis_a_jour_le plutôt que de dupliquer -- un token FCM
-    change rarement mais peut être ré-émis par le SDK à tout moment.
+    plateforme/appareil_id/mis_a_jour_le plutôt que de dupliquer -- un
+    token FCM change rarement mais peut être ré-émis par le SDK à tout
+    moment.
+
+    `appareil_id` (ajouté le 04/09/2026) : permet à envoyer_action_appareil
+    de cibler CE téléphone précis plutôt que de diffuser à tous les
+    tokens de l'utilisateur, voir migrations/2026_09_04_appareil_id_ciblage.sql.
     """
     try:
         supabase.table("appareils_mobiles_push_tokens").upsert(
@@ -164,6 +169,7 @@ def enregistrer_token_natif(user_id: str, plateforme: str, token: str) -> None:
                 "user_id": user_id,
                 "plateforme": plateforme,
                 "token": token,
+                "appareil_id": appareil_id,
                 "mis_a_jour_le": datetime.now(timezone.utc).isoformat(),
             },
             on_conflict="token",
@@ -364,7 +370,9 @@ def _envoyer_apns_action(token: str, action_id: str, type_action: str) -> bool:
         return False
 
 
-def envoyer_action_appareil(user_id: str, action_id: str, type_action: str) -> int:
+def envoyer_action_appareil(
+    user_id: str, action_id: str, type_action: str, appareil_id_cible: str | None = None
+) -> int:
     """
     Reveille le telephone pour qu'il aille chercher une action en attente
     (voir core/actions_appareil_mobile.py). Push SILENCIEUX -- contrairement
@@ -373,15 +381,27 @@ def envoyer_action_appareil(user_id: str, action_id: str, type_action: str) -> i
     (FCM/APNs) : Web Push exclu, aucun mecanisme d'execution cote
     navigateur pour ce lot (l'agent ne pilote que le telephone, pas
     l'appareil sur lequel tourne clovis-frontend dans un onglet).
+
+    `appareil_id_cible` (ajoute le 04/09/2026) : si fourni, reveille
+    UNIQUEMENT le(s) token(s) de cet appareil precis (indispensable des
+    que l'etudiant a deux telephones de la meme plateforme, sinon le
+    mauvais telephone recoit le reveil en meme temps que le bon). None =
+    diffusion large a tous les tokens de l'utilisateur, comportement
+    d'avant cette date -- le filet de secours GET /actions/en-attente
+    (lire_actions_en_attente) filtre de toute facon par appareil_id cote
+    app, donc un reveil recu par le mauvais appareil reste sans effet.
     """
     if not (_fcm_disponible() or _apns_disponible()):
         raise RuntimeError("Aucun canal natif (FCM/APNs) configure pour les actions appareil.")
 
     envoyes = 0
     try:
-        res = supabase.table("appareils_mobiles_push_tokens").select(
+        requete = supabase.table("appareils_mobiles_push_tokens").select(
             "plateforme, token"
-        ).eq("user_id", user_id).execute()
+        ).eq("user_id", user_id)
+        if appareil_id_cible:
+            requete = requete.eq("appareil_id", appareil_id_cible)
+        res = requete.execute()
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (lecture tokens natifs pour action user={user_id}) : {e}")
         return 0

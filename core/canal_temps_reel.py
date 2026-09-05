@@ -25,10 +25,21 @@ from typing import Any
 
 from fastapi import WebSocket
 
-# Une seule connexion active par utilisateur (user_id) a la fois : une
-# nouvelle connexion (ex: reconnexion apres coupure reseau) remplace
-# toujours l'ancienne (voir 01-canal-temps-reel.md).
-_connexions: dict[str, WebSocket] = {}
+# Une seule connexion active par (utilisateur, appareil) a la fois : une
+# nouvelle connexion du MEME appareil (ex: reconnexion apres coupure
+# reseau) remplace toujours l'ancienne (voir 01-canal-temps-reel.md).
+#
+# Modifie le 04/09/2026, Bourama : cle composite (user_id, appareil_id)
+# plutot que user_id seul -- avant cette date, un etudiant connecte sur
+# deux telephones (ou telephone + onglet web, le meme canal servant les
+# deux, voir lib/canalTempsReel.ts) voyait sa DEUXIEME connexion
+# remplacer purement et simplement la premiere, rendant le premier
+# appareil injoignable pour l'exploration en direct sans aucun signe
+# visible de l'erreur. `appareil_id` vide ("") est une cle valide comme
+# une autre : c'est celle utilisee par une session web (voir
+# urlWebSocket cote clovis-frontend), naturellement distincte de tout
+# vrai telephone.
+_connexions: dict[tuple[str, str], WebSocket] = {}
 _verrou_connexions = asyncio.Lock()
 
 # Requetes en attente de reponse, indexees par identifiant de correlation
@@ -48,16 +59,18 @@ TEXTE_STATUT_1 = "Clovis regarde toujours..."
 TEXTE_STATUT_2 = "Ça prend un peu plus de temps que prévu..."
 
 
-async def connecter(user_id: str, websocket: WebSocket) -> None:
+async def connecter(user_id: str, appareil_id: str, websocket: WebSocket) -> None:
     """
-    Enregistre `websocket` comme connexion active pour cet utilisateur.
-    Si une connexion existait deja (reconnexion), elle est fermee puis
-    remplacee -- jamais deux connexions actives en meme temps pour un
-    meme utilisateur.
+    Enregistre `websocket` comme connexion active pour CET appareil de
+    cet utilisateur. Si une connexion existait deja pour le MEME
+    (user_id, appareil_id) (reconnexion), elle est fermee puis remplacee
+    -- mais une connexion d'un AUTRE appareil du meme utilisateur n'est
+    jamais touchee (voir commentaire au-dessus de _connexions).
     """
+    cle = (user_id, appareil_id)
     async with _verrou_connexions:
-        ancienne = _connexions.get(user_id)
-        _connexions[user_id] = websocket
+        ancienne = _connexions.get(cle)
+        _connexions[cle] = websocket
 
     if ancienne is not None and ancienne is not websocket:
         try:
@@ -68,16 +81,18 @@ async def connecter(user_id: str, websocket: WebSocket) -> None:
             pass
 
 
-async def deconnecter(user_id: str, websocket: WebSocket) -> None:
+async def deconnecter(user_id: str, appareil_id: str, websocket: WebSocket) -> None:
     """
     Retire `websocket` de la table des connexions actives, seulement si
-    c'est toujours la connexion active pour cet utilisateur (une
-    reconnexion a pu deja la remplacer entre-temps -- dans ce cas, ne
-    surtout pas supprimer la nouvelle connexion par erreur).
+    c'est toujours la connexion active pour ce (user_id, appareil_id)
+    (une reconnexion du MEME appareil a pu deja la remplacer entre-temps
+    -- dans ce cas, ne surtout pas supprimer la nouvelle connexion par
+    erreur).
     """
+    cle = (user_id, appareil_id)
     async with _verrou_connexions:
-        if _connexions.get(user_id) is websocket:
-            del _connexions[user_id]
+        if _connexions.get(cle) is websocket:
+            del _connexions[cle]
 
 
 def recevoir_reponse(correlation_id: str, reponse: Any) -> None:
@@ -107,19 +122,27 @@ async def notifier_utilisateur(user_id: str, notification: dict) -> bool:
     l'utilisateur n'a aucune connexion active -- la notification reste
     de toute facon en base (voir core/notifications.py), ce n'est qu'un
     bonus temps reel.
+
+    Modifie le 04/09/2026 : diffuse desormais a TOUS les appareils
+    connectes de cet utilisateur (avant cette date, un seul -- la notion
+    meme d'"appareil" n'existait pas encore ici), coherent avec le
+    centre de notifications qui doit sonner partout, pas seulement sur
+    le dernier appareil connecte.
     """
     async with _verrou_connexions:
-        websocket = _connexions.get(user_id)
+        websockets = [ws for (uid, _appareil_id), ws in _connexions.items() if uid == user_id]
 
-    if websocket is None:
+    if not websockets:
         return False
 
-    try:
-        await websocket.send_json({"type": "notification_nouvelle", "notification": notification})
-        return True
-    except Exception as e:
-        logging.error(f"ERREUR diffusion notification temps reel (user={user_id}) : {e}")
-        return False
+    diffuse = False
+    for websocket in websockets:
+        try:
+            await websocket.send_json({"type": "notification_nouvelle", "notification": notification})
+            diffuse = True
+        except Exception as e:
+            logging.error(f"ERREUR diffusion notification temps reel (user={user_id}) : {e}")
+    return diffuse
 
 
 async def _appeler_statut(on_statut, texte: str) -> None:
@@ -133,19 +156,30 @@ async def _appeler_statut(on_statut, texte: str) -> None:
         logging.error(f"ERREUR callback statut canal temps reel : {e}")
 
 
-async def poser_question_appareil(user_id: str, contenu: Any, on_statut=None) -> Any | None:
+async def poser_question_appareil(
+    user_id: str, appareil_id: str, contenu: Any, on_statut=None
+) -> Any | None:
     """
     Fonction centrale du canal temps reel (voir 01-canal-temps-reel.md).
 
-    Pose `contenu` comme question au telephone de `user_id` et attend la
-    reponse. `contenu` est un texte simple pour un test basique (Lot 1),
-    ou un objet JSON structure (ex: {"action": "lister_contenu",
-    "dossier_nom": ...}) pour les capacites d'exploration reelles (Lot 2
-    et suivants, voir core/exploration_dossier_mobile.py) -- transmis tel
-    quel au telephone via le champ "question" du message WebSocket.
+    Pose `contenu` comme question au telephone `appareil_id` de
+    `user_id` et attend la reponse. `contenu` est un texte simple pour
+    un test basique (Lot 1), ou un objet JSON structure (ex: {"action":
+    "lister_contenu", "dossier_nom": ...}) pour les capacites
+    d'exploration reelles (Lot 2 et suivants, voir
+    core/exploration_dossier_mobile.py) -- transmis tel quel au
+    telephone via le champ "question" du message WebSocket.
+
+    `appareil_id` (obligatoire depuis le 04/09/2026, voir
+    core/dossiers_designes_mobile.resoudre_appareil_cible) : l'appelant
+    doit deja savoir QUEL appareil possede le dossier vise avant
+    d'interroger le canal temps reel -- ce module ne devine plus jamais
+    "le" telephone de l'utilisateur des qu'il peut y en avoir plusieurs.
+
     Renvoie :
-    - None IMMEDIATEMENT si aucune connexion active pour cet utilisateur
-      (app fermee) -- jamais d'attente de 30 secondes inutile dans ce cas ;
+    - None IMMEDIATEMENT si aucune connexion active pour cet appareil
+      precis (app fermee, ou c'est un AUTRE appareil du meme utilisateur
+      qui est ouvert) -- jamais d'attente de 30 secondes inutile ;
     - la reponse du telephone des qu'elle arrive (meme forme que ce que
       l'app a mis dans le champ "reponse" -- texte ou objet JSON) ;
     - None apres 30 secondes si la connexion existait mais n'a jamais
@@ -161,7 +195,7 @@ async def poser_question_appareil(user_id: str, contenu: Any, on_statut=None) ->
     agent existera vraiment.
     """
     async with _verrou_connexions:
-        websocket = _connexions.get(user_id)
+        websocket = _connexions.get((user_id, appareil_id))
 
     if websocket is None:
         return None
@@ -174,7 +208,7 @@ async def poser_question_appareil(user_id: str, contenu: Any, on_statut=None) ->
         try:
             await websocket.send_json({"id": correlation_id, "question": contenu})
         except Exception as e:
-            logging.error(f"ERREUR envoi question canal temps reel (user={user_id}) : {e}")
+            logging.error(f"ERREUR envoi question canal temps reel (user={user_id}, appareil={appareil_id}) : {e}")
             return None
 
         try:
@@ -197,7 +231,7 @@ async def poser_question_appareil(user_id: str, contenu: Any, on_statut=None) ->
             )
         except asyncio.TimeoutError:
             logging.warning(
-                f"ABANDON canal temps reel (user={user_id}, id={correlation_id}) : "
+                f"ABANDON canal temps reel (user={user_id}, appareil={appareil_id}, id={correlation_id}) : "
                 f"pas de reponse apres {DELAI_ABANDON_SECONDES}s"
             )
             return None
