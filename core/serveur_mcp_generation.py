@@ -22,6 +22,7 @@ import tempfile
 import base64
 import requests
 from collections import Counter
+from anyio import to_thread
 
 from mcp.server.mcpserver import MCPServer as FastMCP, Context
 
@@ -2288,8 +2289,16 @@ async def explorer_dossier(
     # ci-dessous (recherche dans du contenu deja indexe, aucune question
     # posee a un appareil precis) -- resolu seulement si cette branche
     # ne suffit pas.
-    appareil_id_cible, erreur_resolution = _resoudre_appareil_cible(
-        user_id, dossier_nom, appareil_nom or None
+    # Correctif 05/09/2026, Bourama : _resoudre_appareil_cible fait un
+    # appel Supabase SYNCHRONE (bloquant). Appelée directement dans cette
+    # fonction async sans offload, elle gelait tout l'event loop asyncio
+    # du process pendant sa durée -- plus aucune tâche async ne pouvait
+    # avancer, y compris l'envoi des évènements de statut ("outil en
+    # cours") vers le frontend, d'où l'impression que l'outil ne
+    # s'exécutait même pas. to_thread.run_sync l'exécute dans un thread
+    # séparé, sans bloquer le event loop (même pattern que api/main.py).
+    appareil_id_cible, erreur_resolution = await to_thread.run_sync(
+        _resoudre_appareil_cible, user_id, dossier_nom, appareil_nom or None
     )
     if erreur_resolution and action != "chercher_par_contenu":
         return f"Erreur : {erreur_resolution}"
@@ -2310,8 +2319,15 @@ async def explorer_dossier(
             # déjà inclus dans chaque résultat. Ne tombe sur la lecture
             # EN DIRECT (plus lente, app requise) que si rien n'y
             # correspond, ex. fichier pas encore vectorisé.
+            # Meme correctif que _resoudre_appareil_cible plus haut :
+            # _chercher_dossiers_designes est SYNCHRONE (appel Supabase +
+            # appel Gemini embedding), offload sur un thread pour ne pas
+            # geler le event loop.
+            resultats_bruts = await to_thread.run_sync(
+                _chercher_dossiers_designes, terme_recherche, user_id
+            )
             resultats_vectorises = [
-                r for r in _chercher_dossiers_designes(terme_recherche, user_id=user_id)
+                r for r in resultats_bruts
                 if r.get("dossier_nom") == dossier_nom
             ]
             if resultats_vectorises:
