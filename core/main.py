@@ -92,6 +92,14 @@ MESSAGE_ERREUR = "Désolé, je rencontre un souci technique pour répondre. Merc
 # console.groq.com/docs/content-moderation). Demande Bourama (25/07) :
 # uniquement l'entree pour l'instant (pas la sortie), pour limiter le
 # surcout en tokens.
+# Flag desactive le 2026-09-05 (demande Bourama) : la moderation d'entree
+# bloquait des messages a tort. Le code de moderation (fonction
+# _verifier_message_utilisateur, POLITIQUE_MODERATION ci-dessous, et les
+# deux points de verification PERF plus bas dans cette fonction) est
+# intact -- il suffit de remettre ce flag a True pour la reactiver, rien
+# d'autre a toucher.
+MODERATION_ENTREE_ACTIVE = False
+
 MODELE_MODERATION = "openai/gpt-oss-safeguard-20b"
 POLITIQUE_MODERATION = """# Politique de modération -- messages d'étudiants vers un assistant IA éducatif
 
@@ -3286,7 +3294,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     # sûr est toujours bloqué avant toute réponse, juste sans avoir
     # attendu son tour en premier.
     f_moderation = None
-    if message_utilisateur:
+    if MODERATION_ENTREE_ACTIVE and message_utilisateur:
         f_moderation_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         f_moderation = f_moderation_executor.submit(_verifier_message_utilisateur, message_utilisateur)
 
