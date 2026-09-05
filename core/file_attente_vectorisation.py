@@ -79,6 +79,7 @@ from catalogue_public_rag import (  # noqa: E402
     indexer_transcription_catalogue_public,
 )
 from description_multimedia import decrire_image_bibliotheque, transcrire_audio_bibliotheque  # noqa: E402
+from embeddings import est_erreur_quota_gemini  # noqa: E402
 
 BUCKET_BIBLIOTHEQUE = "bibliotheque"
 MAX_TENTATIVES = 3
@@ -267,11 +268,25 @@ def _traiter_lot(table: str, colonnes: str, fonction_vectorisation, filtre_nivea
             }).eq("id", fichier_id).execute()
         except Exception as e:
             tentatives = (ligne.get("tentatives_vectorisation") or 0) + 1
-            # MAX_TENTATIVES (retries rapprochés dans ce même passage) --
-            # au-delà, "echec" ; relancer_echecs_a_froid ci-dessous se
-            # charge des réessais automatiques suivants, plus espacés.
-            nouveau_statut = "echec" if tentatives >= MAX_TENTATIVES else "en_attente"
-            logging.error(f"ERREUR vectorisation ({table}, fichier_id={fichier_id}, tentative {tentatives}) : {e}")
+            if est_erreur_quota_gemini(str(e)):
+                # Ajouté le 05/09/2026, demande Bourama : quota Gemini
+                # épuisé (quotidien) -- passe DIRECTEMENT en "echec" ET
+                # au-delà de MAX_TENTATIVES_AUTO, pour que
+                # relancer_echecs_a_froid ci-dessous ne le reprenne
+                # plus JAMAIS automatiquement (seul le bouton "Réessayer"
+                # manuel reste possible). Continuer à retenter toutes les
+                # 15 min n'a aucun sens contre un quota qui ne se
+                # régénère qu'une fois par jour.
+                nouveau_statut = "echec"
+                tentatives = MAX_TENTATIVES_AUTO
+                logging.error(f"QUOTA GEMINI épuisé ({table}, fichier_id={fichier_id}) : plus aucun réessai automatique. {e}")
+            else:
+                # MAX_TENTATIVES (retries rapprochés dans ce même passage)
+                # -- au-delà, "echec" ; relancer_echecs_a_froid ci-dessous
+                # se charge des réessais automatiques suivants, plus
+                # espacés.
+                nouveau_statut = "echec" if tentatives >= MAX_TENTATIVES else "en_attente"
+                logging.error(f"ERREUR vectorisation ({table}, fichier_id={fichier_id}, tentative {tentatives}) : {e}")
             try:
                 supabase.table(table).update({
                     "statut_vectorisation": nouveau_statut,

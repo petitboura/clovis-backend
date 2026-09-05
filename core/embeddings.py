@@ -62,6 +62,22 @@ def vectoriser(texte, task_type="RETRIEVAL_DOCUMENT"):
     return response.embeddings[0].values
 
 
+def est_erreur_quota_gemini(message: str) -> bool:
+    """
+    Ajoute le 05/09/2026, demande Bourama : détecte un quota Gemini
+    épuisé (429 RESOURCE_EXHAUSTED, quota GRATUIT quotidien --
+    generativelanguage.googleapis.com/embed_content_free_tier_requests)
+    à partir du texte d'une exception. Utilisé par les files d'attente de
+    vectorisation (file_attente_vectorisation.py, vectorisation_dossiers_
+    designes.py) pour arrêter TOUT réessai automatique dès qu'un quota
+    est détecté -- un quota QUOTIDIEN ne se régénère pas en 15 minutes
+    (COOLDOWN_REESSAI), donc continuer à retenter ne fait que marteler
+    l'API pour rien jusqu'au reset de Google, en pure perte.
+    """
+    message = (message or "").upper()
+    return "RESOURCE_EXHAUSTED" in message or "429" in message
+
+
 def decouper_texte(texte, taille=500):
     """Découpe un texte en morceaux de `taille` mots."""
     mots = texte.split()
