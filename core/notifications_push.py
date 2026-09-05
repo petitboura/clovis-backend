@@ -508,6 +508,63 @@ def envoyer_notification_push(user_id: str, titre: str, corps: str, url: str = N
     return envoyes
 
 
+def notifier_nouvelle_version_disponible(version: str) -> int:
+    """
+    Diffuse une notification "nouvelle version disponible" à TOUS les
+    appareils mobiles enregistrés, tous utilisateurs confondus --
+    déclenchée par le webhook GitHub à la publication d'une release
+    (voir api/webhooks_github.py). Demande Bourama, 05/09/2026.
+
+    Contrairement à envoyer_notification_push, ne cible pas un user_id
+    précis : diffusion large, car aujourd'hui aucune installation ne
+    vient du Play Store (pas encore publié faute de frais payés) --
+    tous les appareils enregistrés sont donc concernés de la même façon.
+    Le jour où l'app est réellement publiée sur le Play Store, il faudra
+    revenir ici pour exclure ces appareils (le Play Store gère déjà ses
+    propres mises à jour) -- nécessitera d'abord de distinguer le flavor
+    (play/externe) dans appareils_mobiles_push_tokens, ce qui n'existe
+    pas aujourd'hui (signalé à Bourama, pas encore fait).
+
+    Web Push (abonnements_push) volontairement exclu : notification
+    pertinente uniquement pour qui a l'app installée, pas pour un simple
+    visiteur du site dans son navigateur.
+
+    Renvoie le nombre d'appareils effectivement notifiés.
+    """
+    if not (_fcm_disponible() or _apns_disponible()):
+        logging.warning(
+            "notifier_nouvelle_version_disponible : aucun canal natif (FCM/APNs) configuré, notification ignorée."
+        )
+        return 0
+
+    titre = "Nouvelle version de Clovis disponible"
+    corps = f"La version {version} est prête à être installée."
+
+    try:
+        res = supabase.table("appareils_mobiles_push_tokens").select("user_id, plateforme, token").execute()
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture de tous les tokens natifs pour notif version) : {e}")
+        return 0
+
+    envoyes = 0
+    for appareil in res.data or []:
+        plateforme, token, user_id = appareil["plateforme"], appareil["token"], appareil["user_id"]
+        ok = False
+        if plateforme == "android" and _fcm_disponible():
+            ok = _envoyer_fcm(token, titre, corps)
+        elif plateforme == "ios" and _apns_disponible():
+            ok = _envoyer_apns(token, titre, corps)
+        else:
+            continue  # canal de cette plateforme pas configuré, on ignore ce token
+
+        if ok:
+            envoyes += 1
+        else:
+            supprimer_token_natif(user_id, token)
+
+    return envoyes
+
+
 def planifier_rappel(user_id: str, agent_id: str, contenu: str, dans_minutes: int) -> int:
     """
     Enregistre un rappel à envoyer plus tard (voir le planificateur dans
