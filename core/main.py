@@ -1718,25 +1718,30 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
         )
 
     # Réflexe de transition (2026-09-05, demande Bourama, timeline
-    # chronologique) : pas une obligation systématique -- juste une
-    # tendance naturelle à ne pas garder. Si l'utilisateur demande dans la
-    # conversation de ne plus le faire, respecter ça immédiatement et ne
-    # plus jamais le refaire dans cette conversation.
-    #
-    # Deux pièges constatés par Bourama en test réel, tous deux corrigés
-    # ci-dessous :
-    #   1. (05/09, 1er test) le modèle écrivait "je vais chercher X
-    #      ensuite" en texte SEUL, sans appeler l'outil dans la même
-    #      réponse -- une réponse sans appel d'outil termine le tour pour
-    #      de bon, la promesse n'était donc jamais tenue.
-    #   2. (05/09, 2e test, PLUS GRAVE) en essayant de corriger le piège 1
-    #      avec une consigne "enchaîne toi-même sans t'arrêter", le modèle
-    #      s'est mis à INVENTER le résultat des étapes suivantes (chiffres
-    #      et nom de document fabriqués) plutôt que de réellement rappeler
-    #      l'outil, pour donner l'impression d'avoir continué. Consigne
-    #      "enchaîne coûte que coûte" retirée : une vraie conclusion
-    #      honnête sur ce qui a réellement été obtenu vaut largement mieux
-    #      qu'une suite fabriquée qui a l'air complète.
+    # chronologique) retiré le même jour après deux pièges constatés en
+    # test réel avec gpt-oss-120b (Groq) : 1) le modèle annonçait "je vais
+    # chercher X ensuite" en texte SEUL sans appeler l'outil dans la même
+    # réponse (promesse jamais tenue, le tour se terminait pour de bon) ;
+    # 2) en corrigeant ce piège avec "enchaîne toi-même sans t'arrêter",
+    # le modèle s'est mis à INVENTER le résultat des étapes suivantes
+    # (chiffres/nom de document fabriqués) plutôt que de rappeler l'outil.
+    # Cause identifiée : ce modèle (format Harmony) n'est pas entraîné à
+    # entrelacer réflexion/commentaire/outil comme Claude (pas de
+    # mécanisme "interleaved thinking" natif) -- soit il décide plusieurs
+    # outils d'un coup dans un seul tour, soit il répond directement.
+    # Forcer ce comportement par le prompt allait donc contre son
+    # fonctionnement naturel. Décision : revenir à ce qu'il sait bien
+    # faire (enchaîner les outils nécessaires puis répondre), sans
+    # obligation de commentaire entre chaque étape. Code et affichage
+    # (segments timeline) inchangés : si le modèle s'arrête quand même
+    # avec du texte entre deux outils, ça s'affiche toujours en timeline ;
+    # sinon la réponse reste un bloc unique. Au prochain changement de
+    # modèle principal, seul ce bloc de prompt est à revoir.
+    system_final += (
+        "\n\nAppelle tous les outils nécessaires pour répondre complètement à la demande, "
+        "puis donne ta réponse. N'invente JAMAIS le résultat d'un outil que tu n'as pas "
+        "réellement appelé (chiffre, nom de document, contenu de recherche)."
+    )
 
     system_final += INSTRUCTIONS_LONGUEUR_REPONSE.get(longueur_reponse, "")
 
