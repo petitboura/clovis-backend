@@ -31,6 +31,7 @@ from constantes_agent import (
     AGENT_ID_PAR_DEFAUT, GOOGLE_MODEL, GROQ_FALLBACKS, GROQ_PRIMARY,
     MESSAGE_CONTENU_BLOQUE, MESSAGE_ERREUR, MODELES_AVEC_REASONING_EFFORT,
     MODELES_QUALITE_REDUITE, MODERATION_ENTREE_ACTIVE, get_secret, supabase,
+    MAX_PASSAGES_CASCADE,
 )
 from moderation_message import _verifier_message_utilisateur
 from filtre_texte_streaming import _ressemble_a_du_json_casse  # réexporté pour core/proactivite.py (05/09/2026)

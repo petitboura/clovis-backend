@@ -6,7 +6,8 @@ import json
 import logging
 from datetime import datetime
 from groq import Groq
-from constantes_agent import get_secret, supabase, MODELE_PROFIL, SEUIL_PROFIL_MESSAGES
+from constantes_agent import get_secret, supabase, MODELE_PROFIL, SEUIL_PROFIL_MESSAGES, DELAI_MAX_PAR_APPEL
+from filtre_texte_streaming import NOMS_OUTILS_LISIBLES
 
 def _nom_agent(agent_id):
     """

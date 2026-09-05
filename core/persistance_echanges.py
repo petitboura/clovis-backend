@@ -3,7 +3,7 @@
 # periodique du resume memoire de l'utilisateur.
 import logging
 from groq import Groq
-from constantes_agent import get_secret, supabase, MODELE_RESUME, SEUIL_RESUME_MESSAGES
+from constantes_agent import get_secret, supabase, MODELE_RESUME, SEUIL_RESUME_MESSAGES, DELAI_MAX_PAR_APPEL
 from profils_agents import _charger_resume_memoire
 
 def _sauvegarder_echange(user_id, agent_id, message_utilisateur, reponse_finale, conversation_id=None, modele=None, meta_utilisateur=None, meta_assistant=None):

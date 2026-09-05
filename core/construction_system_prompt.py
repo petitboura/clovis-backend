@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from configuration import get_system_prompt
-from profils_agents import INSTRUCTIONS_FORMATS_AFFICHAGE, INSTRUCTIONS_ARBITRAGE_CALCUL, REGLE_CONTEXTE_INVISIBLE
+from profils_agents import INSTRUCTIONS_FORMATS_AFFICHAGE, INSTRUCTIONS_ARBITRAGE_CALCUL, REGLE_CONTEXTE_INVISIBLE, INSTRUCTIONS_LONGUEUR_REPONSE
 
 def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longueur_reponse="moyenne", fuseau_horaire=None, recherche_forcee=False, outil_force=None, sans_enseignant=False, comportements_etudiant=None, mes_programmes=None):
     # Restauré le 14/08 (voir commentaire des constantes plus haut) : la
@@ -217,7 +217,9 @@ def _repli_si_reponse_partielle(reponse_accumulee):
     return None
 
 
-DELAI_MAX_PAR_APPEL = 10  # secondes : on bascule vite plutot que d'attendre
-MAX_PASSAGES_CASCADE = 2  # on ne retente toute la cascade que si TOUT a timeout
+# DELAI_MAX_PAR_APPEL et MAX_PASSAGES_CASCADE deplacees vers
+# constantes_agent.py le 05/09/2026 (correctif) : utilisees aussi dans
+# profils_agents.py, routage_outils.py, persistance_echanges.py et
+# boucle_agent.py -- rester ici aurait cree un import circulaire.
 
 

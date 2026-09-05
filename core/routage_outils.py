@@ -5,7 +5,7 @@
 import json
 import logging
 from groq import Groq
-from constantes_agent import get_secret, supabase, MODELE_ROUTEUR_OUTILS
+from constantes_agent import get_secret, supabase, MODELE_ROUTEUR_OUTILS, DELAI_MAX_PAR_APPEL
 
 def _resume_description_outil(description, max_caracteres=200):
     """

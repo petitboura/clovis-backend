@@ -6,9 +6,9 @@
 import json
 import logging
 from mcp_tools import parametres_outils
-from constantes_agent import GROQ_PRIMARY, MODELES_AVEC_REASONING_EFFORT
+from constantes_agent import GROQ_PRIMARY, MODELES_AVEC_REASONING_EFFORT, DELAI_MAX_PAR_APPEL
 from execution_outils import _AttenteConfirmation, _traiter_appels
-from routage_outils import _ecrire_outils_retenus, _separer_appels_garder_outils
+from routage_outils import _ecrire_outils_retenus, _separer_appels_garder_outils, NOM_OUTIL_GARDER_OUTILS
 from filtre_texte_streaming import _finaliser_fragment_texte, _nouvel_etat_filtre_texte, _traiter_fragment_texte
 from profils_agents import _nom_lisible_appel
 

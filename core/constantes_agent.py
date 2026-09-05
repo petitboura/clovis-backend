@@ -156,3 +156,13 @@ MODELES_AVEC_REASONING_EFFORT = {
 # repetition (meme appel refait plusieurs fois d'affilee) plutot qu'un
 # simple compteur brut. Voir _agent_groq ci-dessous.
 
+# Deplacees ici le 05/09/2026 (correctif) : etaient definies dans
+# construction_system_prompt.py mais utilisees aussi dans profils_agents.py,
+# routage_outils.py, persistance_echanges.py et boucle_agent.py -- rester
+# la-bas aurait cree un import circulaire (construction_system_prompt.py
+# importe deja profils_agents.py). constantes_agent.py est le seul module
+# sans dependance vers aucun des autres, donc le seul endroit sur qui tout
+# le monde peut s'appuyer sans cycle.
+DELAI_MAX_PAR_APPEL = 10  # secondes : on bascule vite plutot que d'attendre
+MAX_PASSAGES_CASCADE = 2  # on ne retente toute la cascade que si TOUT a timeout
+
