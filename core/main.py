@@ -1723,23 +1723,30 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     # conversation de ne plus le faire, respecter ça immédiatement et ne
     # plus jamais le refaire dans cette conversation.
     #
-    # Piège corrigé le 05/09 (constaté par Bourama en test réel) : le
-    # modèle écrivait "je vais chercher X ensuite" comme texte SEUL, sans
-    # appeler l'outil correspondant dans la même réponse -- or une réponse
-    # sans appel d'outil termine le tour pour de bon, la promesse n'était
-    # donc jamais tenue (rien ne "continue plus tard" côté boucle). D'où
-    # la précision explicite ci-dessous : annoncer une suite exige
-    # d'appeler l'outil concerné dans CETTE MÊME réponse.
+    # Deux pièges constatés par Bourama en test réel, tous deux corrigés
+    # ci-dessous :
+    #   1. (05/09, 1er test) le modèle écrivait "je vais chercher X
+    #      ensuite" en texte SEUL, sans appeler l'outil dans la même
+    #      réponse -- une réponse sans appel d'outil termine le tour pour
+    #      de bon, la promesse n'était donc jamais tenue.
+    #   2. (05/09, 2e test, PLUS GRAVE) en essayant de corriger le piège 1
+    #      avec une consigne "enchaîne toi-même sans t'arrêter", le modèle
+    #      s'est mis à INVENTER le résultat des étapes suivantes (chiffres
+    #      et nom de document fabriqués) plutôt que de réellement rappeler
+    #      l'outil, pour donner l'impression d'avoir continué. Consigne
+    #      "enchaîne coûte que coûte" retirée : une vraie conclusion
+    #      honnête sur ce qui a réellement été obtenu vaut largement mieux
+    #      qu'une suite fabriquée qui a l'air complète.
     system_final += (
         "\n\nEntre une réflexion/un appel d'outil et le suivant, dis en une phrase courte ce que tu "
         "viens de trouver ou ce que tu fais ensuite, quand ça aide la personne à suivre -- pas "
         "systématique, saute-le si ça n'apporte rien. Si tu annonces une suite (\"je vais chercher...\", "
-        "\"je regarde maintenant...\"), appelle l'outil correspondant DANS CETTE MÊME réponse, jamais "
-        "en le repoussant à un message suivant -- une réponse sans appel d'outil met fin à la tâche "
-        "pour de bon, ta phrase resterait donc sans suite. Si la demande initiale a plusieurs étapes, "
-        "enchaîne-les toi-même sans t'arrêter après la première. Si la personne demande d'arrêter ces "
-        "phrases de transition dans cette conversation, arrête-les complètement dès son prochain "
-        "message."
+        "\"je regarde maintenant...\"), appelle l'outil correspondant DANS CETTE MÊME réponse -- sinon "
+        "ne l'annonce pas, conclus directement avec ce que tu as réellement obtenu. N'invente JAMAIS le "
+        "résultat d'un outil que tu n'as pas réellement appelé (chiffre, nom de document, contenu de "
+        "recherche) : une réponse honnête sur une seule étape vaut infiniment mieux qu'une suite "
+        "fabriquée qui a l'air complète. Si la personne demande d'arrêter ces phrases de transition "
+        "dans cette conversation, arrête-les complètement dès son prochain message."
     )
 
     system_final += INSTRUCTIONS_LONGUEUR_REPONSE.get(longueur_reponse, "")
