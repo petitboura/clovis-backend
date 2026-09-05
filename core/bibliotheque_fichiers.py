@@ -232,12 +232,30 @@ def chercher_fichiers(recherche: str, agent_id: str = None, user_id: str = None,
 
 
 def lister_fichiers(
-    niveau: str, agent_id: str = None, user_id: str = None, origine: str = None, exclut_origine: str = None
-) -> list:
+    niveau: str,
+    agent_id: str = None,
+    user_id: str = None,
+    origine: str = None,
+    exclut_origine: str = None,
+    limite: int = None,
+    decalage: int = 0,
+) -> list | dict:
     """
-    Liste exhaustive (pas une recherche par mot-clé) des fichiers d'un
-    niveau précis -- utilisé pour l'écran de gestion du créateur
-    ("ma bibliothèque pour cet agent"), pas par l'IA en conversation.
+    Liste des fichiers d'un niveau précis. Historiquement exhaustive
+    (pas une recherche par mot-clé) -- utilisée pour l'écran de gestion
+    du créateur ("ma bibliothèque pour cet agent") -- ce comportement
+    est INCHANGÉ par défaut (`limite=None`, renvoie une simple `list`
+    comme avant).
+
+    `limite`/`decalage` (05/09/2026, demande Bourama : l'action "lister"
+    de gerer_document_bibliotheque -- voir core/serveur_mcp_generation.py
+    -- n'avait, contrairement au catalogue public, AUCUN plafond : un
+    fallback censé être rare pouvait renvoyer toute une bibliothèque
+    d'un coup) : quand `limite` est fourni, renvoie un `dict`
+    {"fichiers": [...], "total": N} au lieu d'une liste brute, pour que
+    l'appelant sache s'il reste des pages (pagination par lots de
+    `limite`, les plus récents en premier, `decalage` en fichiers déjà
+    vus à sauter).
     `origine` (2026-08-01) : optionnel, filtre EXACT sur une origine.
     `exclut_origine` (02/09/2026, demande Bourama : distinguer les
     origines "publique"/"code_partage"/"ia_generee" de l'ancien
@@ -246,7 +264,7 @@ def lister_fichiers(
     "chat") pour continuer à voir tous ces fichiers ensemble tant que le
     découpage en onglets d'origine n'est pas fait côté frontend.
     """
-    requete = supabase.table("fichiers_uploades").select("*").eq("niveau", niveau)
+    requete = supabase.table("fichiers_uploades").select("*", count="exact" if limite else None).eq("niveau", niveau)
     if agent_id:
         requete = requete.eq("agent_id", agent_id)
     if user_id:
@@ -255,7 +273,14 @@ def lister_fichiers(
         requete = requete.eq("origine", origine)
     if exclut_origine:
         requete = requete.neq("origine", exclut_origine)
-    return requete.order("created_at", desc=True).execute().data
+    requete = requete.order("created_at", desc=True)
+
+    if limite is None:
+        return requete.execute().data
+
+    reponse = requete.range(decalage, decalage + limite - 1).execute()
+    total = reponse.count if reponse.count is not None else None
+    return {"fichiers": reponse.data or [], "total": total}
 
 
 def supprimer_fichier(fichier_id: str) -> None:

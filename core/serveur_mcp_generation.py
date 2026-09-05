@@ -116,6 +116,7 @@ from core.bibliotheque_fichiers import (
 )
 from core.bibliotheque_rag import (
     chercher_bibliotheque as _chercher_bibliotheque,
+    chercher_bibliotheque_combinee as _chercher_bibliotheque_combinee,
     chercher_bibliotheque_publique as _chercher_bibliotheque_publique,
     lire_document_bibliotheque_en_entier as _lire_document_bibliotheque_en_entier,
     indexer_pdf_bibliotheque as _indexer_pdf_bibliotheque,
@@ -457,6 +458,9 @@ def gerer_document_bibliotheque(
     type_emplacement: str = "",
     emplacement_id: str = "",
     dossier_id: str = "",
+    type_fichier: str = "",
+    nom_dossier: str = "",
+    decalage: int = 0,
 ) -> str:
     """
     Gère la bibliothèque personnelle de CET utilisateur, et permet aussi de
@@ -491,8 +495,17 @@ def gerer_document_bibliotheque(
     outil pour ça.
 
     `action` doit être l'une de :
-    - "chercher" : cherche par contenu dans la bibliothèque PERSONNELLE.
-      Paramètre : `question`.
+    - "chercher" : RECHERCHE COMBINÉE dans la bibliothèque PERSONNELLE
+      (contenu vectorisé + nom de fichier + type + dossier) -- TOUJOURS
+      la première action à essayer dès qu'il y a un sujet, un nom, un
+      type ou un dossier précis à chercher, avant même de songer à
+      "lister" (qui est exhaustif/coûteux -- une recherche ciblée est
+      largement moins volumineuse). Paramètres : `question` (sujet ou
+      mot-clé -- peut rester vide si tu ne filtres que par
+      `type_fichier`/`nom_dossier`), `type_fichier` (optionnel, ex.
+      "pdf"/"image"/"audio"/"vidéo" -- à ne remplir QUE si l'étudiant
+      mentionne clairement un type), `nom_dossier` (optionnel -- à ne
+      remplir QUE si l'étudiant mentionne clairement un dossier).
     - "trouver_catalogue_public" : LOCALISE un document dans le
       CATALOGUE PUBLIC (section "Bibliothèque publique", ouvert à tout
       le monde). Renvoie
@@ -513,17 +526,40 @@ def gerer_document_bibliotheque(
       "trouver_catalogue_public" ne renverrait rien faute de sujet
       précis à chercher. N'IMPORTE QUI peut ajouter un document au
       catalogue public : cette action n'est JAMAIS exhaustive, toujours
-      plafonnée aux entrées les plus récentes -- si l'utilisateur
-      cherche quelque chose de précis, utilise "trouver_catalogue_public"
-      à la place. Aucun paramètre.
+      plafonnée à 15 entrées PAR APPEL, les plus récentes -- si
+      l'utilisateur cherche quelque chose de précis, utilise
+      "trouver_catalogue_public" à la place. Le TOUT PREMIER appel de
+      cette action dans une conversation doit être précédé d'une
+      confirmation en langage naturel à l'étudiant (ex. "veux-tu que je
+      te montre les documents récents du catalogue public ?"), sauf s'il
+      a déjà demandé explicitement de tout voir/lister -- les appels
+      SUIVANTS (pagination via `decalage`, voir "lister" ci-dessous pour
+      la logique, identique ici) n'ont pas besoin d'une nouvelle
+      confirmation, ils font partie de la même demande déjà approuvée.
+      Paramètre optionnel : `decalage`.
     - "lister" : liste les documents/liens/notes de la bibliothèque
       personnelle (avec le lien de chacun), sans recherche par contenu.
       Couvre TOUS les types, y compris image/audio/vidéo, contrairement
-      à "chercher" (recherche sémantique qui ne trouve que du texte déjà
-      vectorisé, donc rate les fichiers non-texte) -- utilise "lister"
-      en priorité pour "redonne-moi l'image/document que tu as générée"
+      à "chercher" (qui rate un fichier non-texte jamais vectorisé et
+      non trouvable par nom/type/dossier) -- utilise "lister" en
+      priorité pour "redonne-moi l'image/document que tu as générée"
       (tout ce que tu génères est automatiquement enregistré ici avec
-      `description` = son nom). Aucun paramètre.
+      `description` = son nom). DANS TOUS LES AUTRES CAS : n'appelle
+      "lister" (ici ou "lister_catalogue_public") QUE si "chercher" (ou
+      "trouver_catalogue_public") n'a RIEN trouvé -- jamais comme
+      substitut ou raccourci de recherche ; "lister" est plafonné à 15
+      résultats PAR APPEL (comme "lister_catalogue_public") et coûte
+      plus cher en volume qu'une recherche ciblée.
+      Pagination : si les 15 premiers résultats (ou ceux de la page
+      précédente) ne contiennent rien de pertinent ET que la réponse
+      indique qu'il en reste d'autres, tu peux rappeler "lister"
+      toi-même avec `decalage` augmenté de 15 (ex. decalage=15 puis
+      30...) SANS redemander à l'étudiant -- c'est la suite de la même
+      recherche. Arrête-toi dès que la réponse ne signale plus qu'il en
+      reste ("c'est fini" veut vraiment dire fini : ne rappelle plus
+      "lister" au-delà, dis simplement à l'étudiant que rien de
+      pertinent n'a été trouvé). Paramètre optionnel : `decalage`
+      (défaut 0).
     - "ajouter_lien" : ajoute un lien. Paramètres : `url`, `titre`.
     - "ajouter_texte" : ajoute une note de texte libre. Paramètres :
       `contenu`, `titre`.
@@ -573,7 +609,9 @@ def gerer_document_bibliotheque(
         # indexés) -- user_id vient de ctx (authentifié), jamais d'un
         # paramètre que le modèle pourrait halluciner/inventer.
         try:
-            resultats = _chercher_bibliotheque(question, user_id=user_id)
+            resultats = _chercher_bibliotheque_combinee(
+                question, user_id=user_id, type_fichier=type_fichier, nom_dossier=nom_dossier
+            )
         except Exception:
             return "Erreur : la recherche dans la bibliothèque a échoué, réessaie."
         if not resultats:
@@ -617,14 +655,17 @@ def gerer_document_bibliotheque(
         return texte
 
     if action == "lister_catalogue_public":
+        decalage_val = max(0, decalage or 0)
         try:
-            resultat = _lister_catalogue_public()
+            resultat = _lister_catalogue_public(decalage=decalage_val)
         except Exception as e:
             logging.error(f"ERREUR gerer_document_bibliotheque (lister_catalogue_public) : {e}")
             return "Erreur : impossible de lister le catalogue public, réessaie."
         documents = resultat["documents"]
         total = resultat["total"]
         if not documents:
+            if decalage_val > 0:
+                return "C'est fini : plus aucun document au-delà de ceux déjà vus dans le catalogue public."
             return "Le catalogue public est vide pour l'instant."
         lignes = []
         for r in documents:
@@ -634,21 +675,38 @@ def gerer_document_bibliotheque(
             if r.get("url_publique"):
                 ligne += f" ({r['url_publique']})"
             lignes.append(ligne)
-        entete = f"{len(documents)} document(s) les plus récents du catalogue public"
-        if total is not None and total > len(documents):
-            entete += f" (sur {total} au total -- précise ta recherche pour affiner)"
-        return entete + " :\n" + "\n".join(lignes)
+        entete = f"{len(documents)} document(s) (à partir du rang {decalage_val + 1}) du catalogue public"
+        reste = total is not None and total > decalage_val + len(documents)
+        if total is not None:
+            entete += f" (sur {total} au total)"
+        resultat_txt = entete + " :\n" + "\n".join(lignes)
+        if reste:
+            resultat_txt += (
+                f"\n\n(Il en reste d'autres -- tu peux rappeler \"lister_catalogue_public\" avec "
+                f"decalage={decalage_val + len(documents)} si rien de pertinent ici, sans redemander "
+                f"confirmation à l'étudiant.)"
+            )
+        else:
+            resultat_txt += "\n\n(C'est fini : plus rien au-delà de cette liste.)"
+        return resultat_txt
 
     if action == "lister":
+        decalage_val = max(0, decalage or 0)
         try:
             # CORRECTIF 02/09/2026 : origine="bibliotheque" -> exclut_origine=
             # "chat", pour que les nouvelles origines "publique"/"code_partage"/
             # "ia_generee" restent visibles ici (voir bibliotheque_fichiers.py).
-            fichiers = _lister_fichiers("utilisateur", user_id=user_id, exclut_origine="chat")
+            resultat = _lister_fichiers(
+                "utilisateur", user_id=user_id, exclut_origine="chat", limite=15, decalage=decalage_val
+            )
         except Exception as e:
             logging.error(f"ERREUR gerer_document_bibliotheque (lister) : {e}")
             return "Erreur : impossible de lister la bibliothèque, réessaie."
+        fichiers = resultat["fichiers"]
+        total = resultat["total"]
         if not fichiers:
+            if decalage_val > 0:
+                return "C'est fini : plus aucun fichier au-delà de ceux déjà vus dans la bibliothèque."
             return "Bibliothèque vide pour l'instant."
         lignes = []
         for f in fichiers:
@@ -666,7 +724,17 @@ def gerer_document_bibliotheque(
             if f.get("url_publique"):
                 ligne += f" -- {f['url_publique']}"
             lignes.append(ligne)
-        return "\n".join(lignes)
+        reste = total is not None and total > decalage_val + len(fichiers)
+        resultat_txt = "\n".join(lignes)
+        if reste:
+            resultat_txt += (
+                f"\n\n(Il en reste d'autres -- tu peux rappeler \"lister\" avec "
+                f"decalage={decalage_val + len(fichiers)} si rien de pertinent ici, sans redemander "
+                f"à l'étudiant.)"
+            )
+        else:
+            resultat_txt += "\n\n(C'est fini : plus rien au-delà de cette liste.)"
+        return resultat_txt
 
     if action == "ajouter_lien":
         url_val = (url or "").strip()

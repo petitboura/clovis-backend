@@ -257,6 +257,131 @@ def chercher_bibliotheque(question: str, user_id: str, match_count: int = 5) -> 
         return []
 
 
+def chercher_bibliotheque_combinee(
+    question: str,
+    user_id: str,
+    type_fichier: str = "",
+    nom_dossier: str = "",
+    match_count: int = 8,
+) -> list:
+    """
+    Recherche COMBINÉE dans la bibliothèque personnelle (05/09/2026,
+    demande Bourama : "chercher" ne matchait QUE le contenu vectorisé
+    (texte), donc ratait un fichier trouvable par son nom, son type ou
+    son dossier -- poussant le modèle à appeler "lister" (exhaustif,
+    coûteux) à la place d'une recherche ciblée). Combine dans un seul
+    appel :
+    - recherche sémantique sur le contenu déjà vectorisé (comme
+      chercher_bibliotheque) ;
+    - recherche mot-clé sur nom_fichier et description (ILIKE) ;
+    - filtre optionnel `type_fichier` (mot libre, ex "pdf"/"image"/
+      "audio" -- matché en ILIKE sur type_mime, donc "pdf" matche
+      "application/pdf") ;
+    - filtre optionnel `nom_dossier` (ILIKE sur le nom du dossier,
+      restreint aux dossiers de CET utilisateur, via
+      fichiers_dossiers_bibliotheque).
+    Résultats fusionnés et dédupliqués par fichier_id (un même fichier
+    trouvé par plusieurs voies n'apparaît qu'une fois, priorité au
+    résultat sémantique -- il porte l'extrait de contenu le plus utile),
+    plafonnés à `match_count`. Chaque résultat garde la forme attendue
+    par formater_source_bibliotheque (nom_fichier/url_publique/
+    type_mime/page_debut/timestamp_debut) : les résultats mot-clé/type/
+    dossier n'ont pas d'extrait de contenu réel, `contenu` y est donc
+    synthétisé (description ou juste le nom) pour rester affichable de
+    la même façon qu'un résultat sémantique.
+    """
+    if not user_id:
+        logging.error("chercher_bibliotheque_combinee appelé sans user_id : renvoie vide.")
+        return []
+
+    resultats: list[dict] = []
+    vus: set[str] = set()
+
+    def _ajouter(r: dict, cle: str) -> None:
+        if cle and cle not in vus:
+            vus.add(cle)
+            resultats.append(r)
+
+    # 1) Sémantique (contenu déjà vectorisé) -- inchangé, priorité la
+    # plus haute car porte le meilleur extrait.
+    if question.strip():
+        for r in chercher_bibliotheque(question, user_id=user_id, match_count=match_count):
+            _ajouter(r, r.get("fichier_id"))
+
+    if len(resultats) >= match_count:
+        return resultats[:match_count]
+
+    # 2) Mot-clé / type / dossier, sur les métadonnées du fichier.
+    requete = supabase.table("fichiers_uploades").select("*").eq("niveau", "utilisateur").eq("user_id", user_id)
+
+    if nom_dossier.strip():
+        try:
+            dossiers = (
+                supabase.table("dossiers_bibliotheque")
+                .select("id")
+                .eq("user_id", user_id)
+                .ilike("nom", f"%{nom_dossier.strip()}%")
+                .execute()
+                .data
+                or []
+            )
+            dossier_ids = [d["id"] for d in dossiers]
+            if not dossier_ids:
+                fichier_ids_dossier = []
+            else:
+                liens = (
+                    supabase.table("fichiers_dossiers_bibliotheque")
+                    .select("fichier_id")
+                    .in_("dossier_id", dossier_ids)
+                    .execute()
+                    .data
+                    or []
+                )
+                fichier_ids_dossier = [l["fichier_id"] for l in liens]
+        except Exception as e:
+            logging.error(f"ERREUR filtre nom_dossier (chercher_bibliotheque_combinee) : {e}")
+            fichier_ids_dossier = []
+        if not fichier_ids_dossier:
+            # Dossier demandé introuvable/vide : inutile de continuer le
+            # filtre métadonnées, il ne peut rien renvoyer de cohérent.
+            requete = None
+        else:
+            requete = requete.in_("id", fichier_ids_dossier)
+
+    if requete is not None:
+        if type_fichier.strip():
+            requete = requete.ilike("type_mime", f"%{type_fichier.strip()}%")
+        if question.strip():
+            # Un seul ILIKE OR sur nom_fichier/description (syntaxe
+            # PostgREST : "or=(colonne.ilike.%v%,colonne.ilike.%v%)").
+            motif = f"%{question.strip()}%"
+            requete = requete.or_(f"nom_fichier.ilike.{motif},description.ilike.{motif}")
+        try:
+            fichiers = requete.order("created_at", desc=True).limit(match_count).execute().data or []
+        except Exception as e:
+            logging.error(f"ERREUR recherche métadonnées (chercher_bibliotheque_combinee) : {e}")
+            fichiers = []
+        for f in fichiers:
+            if len(resultats) >= match_count:
+                break
+            _ajouter(
+                {
+                    "contenu": f.get("description") or f"Fichier : {f.get('nom_fichier')}",
+                    "fichier_id": f["id"],
+                    "nom_fichier": f.get("nom_fichier"),
+                    "url_publique": f.get("url_publique"),
+                    "type_mime": f.get("type_mime"),
+                    "page_debut": None,
+                    "page_fin": None,
+                    "timestamp_debut": None,
+                    "timestamp_fin": None,
+                },
+                f["id"],
+            )
+
+    return resultats[:match_count]
+
+
 def chercher_bibliotheque_publique(question: str, fichier_ids: list[str], match_count: int = 5) -> list:
     """
     Recherche sémantique à travers un ENSEMBLE de fichiers précis, pas un

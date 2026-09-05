@@ -147,7 +147,7 @@ def lire_document_catalogue_public(fichier_id: str) -> str | None:
     return "\n\n".join(ligne["contenu"] for ligne in res.data)
 
 
-def lister_catalogue_public(limite: int = 15) -> dict:
+def lister_catalogue_public(limite: int = 15, decalage: int = 0) -> dict:
     """
     Liste les documents les PLUS RÉCENTS du catalogue public (table
     bibliotheque_publique, statut "publie"), sans recherche par contenu
@@ -162,9 +162,13 @@ def lister_catalogue_public(limite: int = 15) -> dict:
     N'IMPORTE QUI peut ajouter un document au catalogue public : jamais
     de liste exhaustive ici (demande explicite de Bourama : "on sait
     jamais il peut y avoir énormément"), toujours plafonnée à `limite`
-    entrées, les plus récentes en premier. Renvoie aussi le compte total
-    réel (`total`), pour que l'appelant puisse dire "sur X au total" si
-    `total` dépasse `limite`.
+    entrées par appel, les plus récentes en premier. Renvoie aussi le
+    compte total réel (`total`), pour que l'appelant puisse dire "sur X
+    au total" si `total` dépasse `limite`.
+
+    `decalage` (05/09/2026, demande Bourama : permettre au modèle de
+    voir la page suivante sans réintervention de l'étudiant) : entrées à
+    sauter, pour paginer par lots de `limite`.
     """
     try:
         comptage = (
@@ -183,7 +187,7 @@ def lister_catalogue_public(limite: int = 15) -> dict:
         .select("id, nom, description, url_publique")
         .eq("statut", "publie")
         .order("created_at", desc=True)
-        .limit(limite)
+        .range(decalage, decalage + limite - 1)
         .execute()
     )
     return {"documents": res.data or [], "total": total}
