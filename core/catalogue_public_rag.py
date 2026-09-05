@@ -202,12 +202,25 @@ def chercher_catalogue_public(question: str, match_count: int = 5) -> list:
     à citer/paraphraser dans une réponse (voir lire_document_
     catalogue_public pour la lecture intégrale, sur demande explicite
     de l'utilisateur uniquement).
+
+    Fallback mots-clés (2026-09-05, demande Bourama : "la recherche du
+    catalogue public ne marche pas" -- cause réelle : quota journalier
+    Gemini épuisé, 429 RESOURCE_EXHAUSTED sur embed_content, voir
+    ERREUR VECTORISATION plus bas) : si la vectorisation de la question
+    échoue (quota, panne réseau...) OU si l'appel RPC sémantique échoue,
+    on bascule sur chercher_catalogue_public_mots_cles (recherche plein
+    texte Postgres, aucun appel à un modèle externe, ne peut jamais
+    échouer pour la même raison). Seule LA RECHERCHE change selon ce
+    qui est disponible -- l'appelant (trouver_catalogue_public côté
+    serveur_mcp_generation.py) reçoit toujours la même forme de
+    résultat et décide seul de quoi en faire, sans savoir quel circuit
+    a répondu.
     """
     try:
         vecteur = vectoriser(question, task_type="RETRIEVAL_QUERY")
     except Exception as e:
-        logging.error(f"ERREUR VECTORISATION catalogue public (Gemini) : {e}")
-        return []
+        logging.warning(f"Recherche sémantique catalogue public indisponible (Gemini), bascule sur la recherche par mots-clés : {e}")
+        return chercher_catalogue_public_mots_cles(question, match_count)
 
     try:
         return supabase.rpc(
@@ -215,5 +228,36 @@ def chercher_catalogue_public(question: str, match_count: int = 5) -> list:
             {"query_embedding": vecteur, "match_count": match_count},
         ).execute().data or []
     except Exception as e:
-        logging.error(f"ERREUR SUPABASE RPC recherche_catalogue_public : {e}")
+        logging.error(f"ERREUR SUPABASE RPC recherche_catalogue_public, bascule sur la recherche par mots-clés : {e}")
+        return chercher_catalogue_public_mots_cles(question, match_count)
+
+
+def chercher_catalogue_public_mots_cles(question: str, match_count: int = 5) -> list:
+    """
+    Recherche de secours (2026-09-05, demande Bourama) : recherche
+    plein texte (mots-clés, full-text search PostgreSQL natif, RPC
+    recherche_catalogue_public_mots_cles) sur nom+description+contenu
+    déjà vectorisé -- prend le relais de chercher_catalogue_public
+    quand la recherche sémantique (embeddings Gemini) est indisponible.
+    Aucun appel à un modèle externe ici : ne peut jamais échouer pour
+    la même raison (quota, panne réseau Gemini) que le circuit
+    sémantique.
+
+    Moins fine qu'une recherche sémantique (correspondance de mots,
+    pas de compréhension du sens) mais couvre EN PLUS tous les
+    documents dont la vectorisation a échoué (aucun chunk indexé,
+    donc invisibles pour la recherche sémantique) : la recherche porte
+    aussi sur nom/description directement en base, indépendamment de
+    tout chunk. Même forme de retour que chercher_catalogue_public
+    (liste de {fichier_id, nom, description, url_publique, type_mime,
+    similarite}) -- l'appelant n'a rien à savoir sur lequel des deux
+    circuits a répondu.
+    """
+    try:
+        return supabase.rpc(
+            "recherche_catalogue_public_mots_cles",
+            {"p_question": question, "match_count": match_count},
+        ).execute().data or []
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE RPC recherche_catalogue_public_mots_cles : {e}")
         return []
