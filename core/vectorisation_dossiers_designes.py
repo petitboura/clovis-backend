@@ -50,7 +50,7 @@ from datetime import datetime, timedelta, timezone
 from supabase import create_client
 
 sys.path.append(os.path.dirname(__file__))
-from embeddings import vectoriser, decouper_texte, est_erreur_quota_gemini  # noqa: E402
+from embeddings import activer_pause_quota_gemini, decouper_texte, est_en_pause_quota_gemini, est_erreur_quota_gemini, vectoriser  # noqa: E402
 from description_multimedia import decrire_image_bibliotheque, transcrire_audio_bibliotheque  # noqa: E402
 
 BUCKET_DOSSIERS_DESIGNES = "bibliotheque"  # meme bucket que la bibliotheque perso, sous-dossier "dossiers_designes/" (voir api/dossiers_designes.py)
@@ -60,19 +60,6 @@ TAILLE_MAX_CHUNKS_PAR_DOCUMENT = 400  # meme plafond que bibliotheque_rag.py
 # Reessai automatique a froid, SANS plafond de tentatives (voir docstring
 # du module) -- seul un delai separe deux tentatives successives.
 COOLDOWN_REESSAI = timedelta(minutes=15)
-
-# Ajoute le 05/09/2026, demande Bourama : SEULE exception au "sans
-# plafond" ci-dessus -- un quota Gemini epuise (quotidien) ne se
-# regenere pas en 15 minutes, donc retenter selon COOLDOWN_REESSAI ne
-# fait que marteler l'API pour rien jusqu'au reset de Google. Des qu'un
-# quota est detecte (voir est_erreur_quota_gemini), tentatives_
-# vectorisation est force a cette sentinelle -- jamais atteignable par
-# un compteur d'echecs normal qui incremente de 1 -- et
-# relancer_echecs_a_froid exclut alors ce fichier de tout reessai
-# automatique futur. Les echecs "normaux" (fichier casse, etc.)
-# continuent, eux, a retenter indefiniment comme avant : seul le cas
-# quota est concerne.
-SENTINELLE_QUOTA_EPUISE = 10**9
 
 EXTENSIONS_TEXTE_BRUT = {
     "txt", "md", "csv", "json", "py", "js", "ts", "tsx", "jsx", "html", "css",
@@ -244,8 +231,14 @@ def traiter_file_attente_une_fois() -> int:
     Traite jusqu'a TAILLE_LOT fichiers "en_attente", du plus ancien au
     plus recent. PAS de reessai rapproche (voir docstring du module) :
     un echec passe direct en "echec", relancer_echecs_a_froid ci-dessous
-    s'en charge ensuite. Renvoie le nombre de fichiers traites.
+    s'en charge ensuite. Renvoie le nombre de fichiers traites. Ne fait
+    RIEN (renvoie 0 sans meme interroger Supabase) si la porte est
+    fermee (pause quota Gemini en cours, voir embeddings.py -- coupe-
+    circuit GLOBAL partage avec file_attente_vectorisation.py, meme
+    quota Google).
     """
+    if est_en_pause_quota_gemini():
+        return 0
     try:
         lignes = (
             supabase.table("fichiers_dossier_designe")
@@ -260,6 +253,14 @@ def traiter_file_attente_une_fois() -> int:
         return 0
 
     for ligne in lignes:
+        # Coupe-circuit GLOBAL (ajoute le 05/09/2026, demande Bourama) :
+        # si un fichier -- ici ou dans une AUTRE file, bibliotheque
+        # perso/publique comprise, meme quota Google partage -- a deja
+        # tape le quota Gemini il y a moins de 24h, on n'essaie meme
+        # plus les fichiers suivants de CE lot ; ils restent
+        # "en_attente" tels quels.
+        if est_en_pause_quota_gemini():
+            break
         fichier_id = ligne["id"]
         maintenant_iso = datetime.now(timezone.utc).isoformat()
         try:
@@ -273,8 +274,14 @@ def traiter_file_attente_une_fois() -> int:
         except Exception as e:
             tentatives = (ligne.get("tentatives_vectorisation") or 0) + 1
             if est_erreur_quota_gemini(str(e)):
-                tentatives = SENTINELLE_QUOTA_EPUISE
-                logging.error(f"QUOTA GEMINI épuisé (dossiers designes, fichier_id={fichier_id}) : plus aucun réessai automatique. {e}")
+                # Quota Gemini epuise (quotidien) : ferme la porte pour
+                # TOUTES les files pendant 24h (voir embeddings.py). Ce
+                # fichier reste "echec" normal, sans exclusion
+                # permanente -- passe les 24h, il repart tout seul via
+                # relancer_echecs_a_froid, comme prevu par la politique
+                # "sans plafond" du module.
+                activer_pause_quota_gemini()
+                logging.error(f"QUOTA GEMINI épuisé (dossiers designes, fichier_id={fichier_id}) : pause de 24h, plus aucun fichier tenté d'ici là.")
             else:
                 logging.error(f"ERREUR vectorisation (dossiers designes, fichier_id={fichier_id}, tentative {tentatives}) : {e}")
             try:
@@ -286,6 +293,10 @@ def traiter_file_attente_une_fois() -> int:
                 }).eq("id", fichier_id).execute()
             except Exception as e2:
                 logging.error(f"ERREUR mise a jour statut echec (dossiers designes, fichier_id={fichier_id}) : {e2}")
+            if est_erreur_quota_gemini(str(e)):
+                # Ne pas tenter les fichiers suivants de CE lot non plus
+                # (voir commentaire en tête de boucle).
+                break
 
     return len(lignes)
 
@@ -309,9 +320,16 @@ def chercher_dossiers_designes(question: str, user_id: str, match_count: int = 5
         logging.error("chercher_dossiers_designes appele sans user_id : renvoie vide.")
         return []
 
+    if est_en_pause_quota_gemini():
+        # Porte fermee (pause quota Gemini en cours, voir embeddings.py) --
+        # inutile de tenter un appel qu'on sait deja voue a l'echec.
+        return []
+
     try:
         vecteur = vectoriser(question, task_type="RETRIEVAL_QUERY")
     except Exception as e:
+        if est_erreur_quota_gemini(str(e)):
+            activer_pause_quota_gemini()
         logging.error(f"ERREUR VECTORISATION dossiers designes (Gemini) : {e}")
         return []
 
@@ -352,20 +370,22 @@ def formater_source_dossier_designe(r: dict) -> str | None:
 
 def relancer_echecs_a_froid() -> int:
     """
-    Reessai automatique a froid, SANS plafond pour les echecs normaux
-    (voir docstring du module) -- seul le cooldown separe deux
-    tentatives. SEULE exception : un fichier dont tentatives_vectorisation
-    a ete force a SENTINELLE_QUOTA_EPUISE (quota Gemini detecte, voir
-    traiter_file_attente_une_fois) est exclu ici et ne repart plus jamais
-    tout seul.
+    Reessai automatique a froid, SANS plafond pour les echecs (voir
+    docstring du module) -- seul le cooldown separe deux tentatives. Ne
+    fait RIEN tant que la porte est fermee (pause quota Gemini en cours,
+    voir embeddings.py) -- pas de sens a relancer des fichiers pour
+    qu'ils retapent immediatement le meme quota epuise ; passe la pause
+    (24h), reprise 100% normale, aucune exclusion permanente par
+    fichier.
     """
+    if est_en_pause_quota_gemini():
+        return 0
     seuil = (datetime.now(timezone.utc) - COOLDOWN_REESSAI).isoformat()
     try:
         resultat = (
             supabase.table("fichiers_dossier_designe")
             .update({"statut_vectorisation": "en_attente"})
             .eq("statut_vectorisation", "echec")
-            .lt("tentatives_vectorisation", SENTINELLE_QUOTA_EPUISE)
             .lt("derniere_tentative_vectorisation_a", seuil)
             .execute()
         )

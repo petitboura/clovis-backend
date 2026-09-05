@@ -79,7 +79,7 @@ from catalogue_public_rag import (  # noqa: E402
     indexer_transcription_catalogue_public,
 )
 from description_multimedia import decrire_image_bibliotheque, transcrire_audio_bibliotheque  # noqa: E402
-from embeddings import est_erreur_quota_gemini  # noqa: E402
+from embeddings import activer_pause_quota_gemini, est_en_pause_quota_gemini, est_erreur_quota_gemini  # noqa: E402
 
 BUCKET_BIBLIOTHEQUE = "bibliotheque"
 MAX_TENTATIVES = 3
@@ -244,8 +244,13 @@ def _traiter_lot(table: str, colonnes: str, fonction_vectorisation, filtre_nivea
     par sécurité supplémentaire, même si aucun autre niveau n'est censé
     passer à "en_attente" (voir docstring du module : agent/plateforme
     non concernés par ce chantier). Renvoie le nombre de fichiers traités
-    (succès + échecs confondus).
+    (succès + échecs confondus). Ne fait RIEN (renvoie 0 sans même
+    interroger Supabase) si la porte est fermée (pause quota Gemini en
+    cours, voir embeddings.py) -- inutile d'aller chercher des fichiers
+    pour n'en traiter aucun juste après.
     """
+    if est_en_pause_quota_gemini():
+        return 0
     try:
         requete = supabase.table(table).select(colonnes).eq("statut_vectorisation", "en_attente")
         if filtre_niveau:
@@ -256,6 +261,14 @@ def _traiter_lot(table: str, colonnes: str, fonction_vectorisation, filtre_nivea
         return 0
 
     for ligne in lignes:
+        # Ajouté le 05/09/2026, demande Bourama : coupe-circuit GLOBAL --
+        # si un fichier (ici ou dans une AUTRE file, dossiers designes
+        # compris -- même quota Google partagé) a déjà tapé le quota
+        # Gemini il y a moins de 24h, "la porte est fermée" : on
+        # n'essaie même plus les fichiers suivants de CE lot, on les
+        # laisse "en_attente" tels quels.
+        if est_en_pause_quota_gemini():
+            break
         fichier_id = ligne["id"]
         maintenant_iso = datetime.now(timezone.utc).isoformat()
         try:
@@ -269,17 +282,15 @@ def _traiter_lot(table: str, colonnes: str, fonction_vectorisation, filtre_nivea
         except Exception as e:
             tentatives = (ligne.get("tentatives_vectorisation") or 0) + 1
             if est_erreur_quota_gemini(str(e)):
-                # Ajouté le 05/09/2026, demande Bourama : quota Gemini
-                # épuisé (quotidien) -- passe DIRECTEMENT en "echec" ET
-                # au-delà de MAX_TENTATIVES_AUTO, pour que
-                # relancer_echecs_a_froid ci-dessous ne le reprenne
-                # plus JAMAIS automatiquement (seul le bouton "Réessayer"
-                # manuel reste possible). Continuer à retenter toutes les
-                # 15 min n'a aucun sens contre un quota qui ne se
-                # régénère qu'une fois par jour.
+                # Quota Gemini épuisé (quotidien) : ferme la porte pour
+                # TOUTES les files pendant 24h (voir embeddings.py) et
+                # laisse ce fichier "echec" normal, comme n'importe quel
+                # autre échec -- pas d'exclusion permanente : passé les
+                # 24h, il repart tout seul via relancer_echecs_a_froid,
+                # comme prévu.
+                activer_pause_quota_gemini()
                 nouveau_statut = "echec"
-                tentatives = MAX_TENTATIVES_AUTO
-                logging.error(f"QUOTA GEMINI épuisé ({table}, fichier_id={fichier_id}) : plus aucun réessai automatique. {e}")
+                logging.error(f"QUOTA GEMINI épuisé ({table}, fichier_id={fichier_id}) : pause de 24h, plus aucun fichier tenté d'ici là.")
             else:
                 # MAX_TENTATIVES (retries rapprochés dans ce même passage)
                 # -- au-delà, "echec" ; relancer_echecs_a_froid ci-dessous
@@ -296,6 +307,11 @@ def _traiter_lot(table: str, colonnes: str, fonction_vectorisation, filtre_nivea
                 }).eq("id", fichier_id).execute()
             except Exception as e2:
                 logging.error(f"ERREUR mise à jour statut échec ({table}, fichier_id={fichier_id}) : {e2}")
+            if est_erreur_quota_gemini(str(e)):
+                # Ne pas tenter les fichiers suivants de CE lot non plus
+                # (voir commentaire en tête de boucle) -- "personne
+                # d'autre n'essaie" dès le premier échec quota.
+                break
 
     return len(lignes)
 
@@ -312,8 +328,13 @@ def _relancer_echecs_a_froid_table(table: str) -> int:
     """
     Repasse à "en_attente" les fichiers "echec" de `table` dont le
     cooldown est écoulé et qui n'ont pas dépassé MAX_TENTATIVES_AUTO --
-    voir docstring du module. Renvoie le nombre de fichiers relancés.
+    voir docstring du module. Renvoie le nombre de fichiers relancés. Ne
+    fait RIEN tant que la porte est fermée (pause quota Gemini, voir
+    embeddings.py) -- pas de sens à relancer des fichiers pour qu'ils
+    retapent immédiatement le même quota épuisé.
     """
+    if est_en_pause_quota_gemini():
+        return 0
     seuil = (datetime.now(timezone.utc) - COOLDOWN_AUTO_REESSAI).isoformat()
     try:
         resultat = (
