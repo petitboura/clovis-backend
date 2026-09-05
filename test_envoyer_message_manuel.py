@@ -3,7 +3,8 @@ Test manuel de l'outil IA envoyer_message (tâche E, 04/08/2026).
 
 Objectif : vérifier en conditions aussi réelles que possible, sans base
 Supabase accessible depuis ce bac à sable, les deux choses que le
-commentaire "NON TESTÉ EN CONDITIONS RÉELLES" (core/serveur_mcp_generation.py)
+commentaire "NON TESTÉ EN CONDITIONS RÉELLES" (core/outils_memoire_profil.py,
+deplace depuis core/serveur_mcp_generation.py le 05/09/2026)
 signalait comme point d'incertitude :
 
   1. `ctx.request_context.request.query_params.get("user_id")` fonctionne
@@ -28,7 +29,7 @@ sys.path.append("core")  # même pattern que le reste du code (voir api/agents.p
 
 from starlette.requests import Request  # noqa: E402
 
-import core.serveur_mcp_generation as smg  # noqa: E402
+import core.outils_memoire_profil as smg  # noqa: E402 (envoyer_message deplace ici le 05/09/2026)
 from mcp.server.mcpserver.context import Context  # noqa: E402
 from mcp.server.context import ServerRequestContext  # noqa: E402
 
