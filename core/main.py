@@ -439,7 +439,12 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     # (simplification du 14/08, plus de vrai système multi-agents côté
     # produit malgré le code partagé avec djiguigne-backend).
     if agent_id == "clovis":
-        outils_forces_contexte.append("gerer_document_bibliotheque")
+        # DÉSACTIVÉ TEMPORAIREMENT (05/09/2026, demande Bourama) : pour
+        # libérer du budget tokens pendant les tests d'explorer_dossier/
+        # gerer_dossier_telephone. Description de gerer_document_bibliotheque
+        # = ~8500 caractères à elle seule -- à réactiver dès les tests
+        # terminés (voir conversation du 05/09/2026 pour le contexte).
+        # outils_forces_contexte.append("gerer_document_bibliotheque")
         if natif:
             # Paire indissociable (voir règle "monde téléphone" dans
             # _router_outils) : explorer_dossier a besoin des noms
