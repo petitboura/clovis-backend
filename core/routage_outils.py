@@ -152,6 +152,113 @@ def _separer_appels_garder_outils(appels):
     return appels_normaux, list(dict.fromkeys(noms_a_garder))
 
 
+NOM_OUTIL_DEMANDER_OUTILS = "demander_outils"
+
+
+def _outil_demander_outils():
+    """
+    Outil interne (chantier "demander_outils", 05/09/2026, demande
+    Bourama) : comme _outil_garder_outils juste au-dessus, jamais un vrai
+    outil MCP, jamais route via table_routage, jamais compte dans le
+    budget d'aller-retours ni dans la detection de repetition (voir
+    _separer_appels_demander_outils juste en dessous). Permet au grand
+    modele de demander, EN PLEIN MILIEU de sa reponse en cours, un outil
+    qui existe reellement dans le catalogue de Clovis mais qui ne fait
+    pas partie de ce qui lui a ete propose ce tour-ci (ni outils forces
+    de contexte, ni gardes du tour precedent, ni suggeres par le routeur
+    automatique -- voir _outils_deja_en_main juste en dessous).
+
+    Contrairement a _outil_garder_outils, PAS de liste fermee en enum :
+    le modele ne connait pas les noms exacts des outils qu'il n'a pas, il
+    decrit son besoin en langage libre. C'est l'etape 3 (branchement,
+    dans _agent_groq) qui compare ensuite ce texte par recherche
+    mots-cles (voir recherche_outils.rechercher_outils_pertinents) au
+    reste du catalogue complet deja recupere ailleurs (voir
+    mcp_tools.lister_outils_autorises_pour_agent) -- cette fonction-ci ne
+    fait que decrire l'outil, aucune recherche.
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": NOM_OUTIL_DEMANDER_OUTILS,
+            "description": (
+                "Demande un outil dont tu as besoin MAINTENANT pour "
+                "continuer ta reponse en cours, mais qui ne fait pas "
+                "partie des outils qui te sont proposes ce tour-ci. "
+                "Decris en une phrase claire ce que tu cherches a faire "
+                "(jamais un nom d'outil que tu devinerais). Si un outil "
+                "correspondant existe dans le catalogue de Clovis, il "
+                "t'est ajoute immediatement et tu peux l'appeler dans la "
+                "foulee, sans attendre le prochain message de "
+                "l'utilisateur. Si rien ne correspond, on te le dit "
+                "clairement -- adapte-toi alors plutot que de rester "
+                "bloque en silence. A utiliser seulement quand tu es "
+                "reellement bloque par l'absence d'un outil, pas "
+                "systematiquement au debut de chaque tache."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "besoin": {
+                        "type": "string",
+                        "description": (
+                            "Description libre, en une phrase, de ce que "
+                            "tu cherches a faire (ex : \"un outil pour "
+                            "envoyer un email\"), pas un nom d'outil."
+                        ),
+                    }
+                },
+                "required": ["besoin"],
+            },
+        },
+    }
+
+
+def _separer_appels_demander_outils(appels):
+    """
+    Sort les appels a l'outil interne demander_outils (voir
+    _outil_demander_outils) du reste des appels normaux -- meme principe
+    que _separer_appels_garder_outils : jamais envoyes a
+    table_routage/_traiter_appels, jamais comptes dans le budget ni la
+    detection de repetition. Renvoie (appels_normaux, besoins), besoins
+    etant la liste (dans l'ordre) des textes libres "besoin" de tous les
+    appels demander_outils de ce lot -- rare qu'il y en ait plus d'un
+    dans le meme lot, mais couvert. Un besoin vide ou illisible est
+    ignore silencieusement plutot que de faire planter le tour.
+    """
+    appels_normaux = []
+    besoins = []
+    for appel in appels:
+        if appel["name"] == NOM_OUTIL_DEMANDER_OUTILS:
+            try:
+                arguments = json.loads(appel["arguments"] or "{}")
+                besoin = (arguments.get("besoin") or "").strip()
+                if besoin:
+                    besoins.append(besoin)
+            except Exception as e:
+                logging.error(f"ERREUR arguments demander_outils illisibles : {e}")
+        else:
+            appels_normaux.append(appel)
+    return appels_normaux, besoins
+
+
+def _outils_deja_en_main(outils_mcp):
+    """
+    Ensemble des noms d'outils que le modele a deja disponibles ce
+    tour-ci -- outils forces de contexte, gardes du tour precedent et
+    suggeres par le routeur sont deja tous fusionnes en amont dans
+    outils_mcp au moment ou main.py le construit (voir _fusionner_outils
+    dans main.py), donc un simple passage sur outils_mcp suffit ici, pas
+    besoin de recalculer la fusion. Si un appel demander_outils precedent
+    dans ce meme tour a deja ajoute des outils a outils_mcp, ils sont
+    aussi dans cet ensemble -- pas de risque de les redemander deux fois.
+
+    Ne fait aucune recherche elle-meme (voir etape 3) : sert seulement a
+    savoir quoi exclure du catalogue complet avant de chercher dedans.
+    """
+    return {o["function"]["name"] for o in (outils_mcp or [])}
+
+
 def _router_outils(message_utilisateur, outils_disponibles, historique=None):
     """
     Bouton Outils, couche de suggestion automatique (2026-07-28, demande
