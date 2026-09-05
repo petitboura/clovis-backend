@@ -1695,14 +1695,14 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
         liste_outils_actifs = ", ".join(outil_force)
         system_final += (
             "\n\n<outils_actifs>\n"
-            f"{liste_outils_actifs} est/sont disponible(s) pour ce message, présélectionné(s) par "
-            "précaution -- leur présence ne t'oblige pas à les appeler, ignore-les si tes connaissances "
-            "suffisent déjà. Mais s'ils sont vraiment utiles, utilise-les : leur présence prime alors sur "
-            "tes limitations par défaut, donc ne refuse pas une tâche qu'ils permettent. Appelle-les "
-            "uniquement via le vrai mécanisme d'appel d'outil de l'API ; le texte de ta réponse ne doit "
-            "jamais contenir de pseudo-syntaxe d'appel (TOOL_CODE, nom_outil(...), nom_outil{...}, "
-            "call:nom_outil{...}). Si plusieurs de ces outils couvrent bibliothèque perso, publique et web, "
-            "priorité : perso, puis publique, puis web.\n"
+            f"{liste_outils_actifs} est/sont disponible(s) pour ce message. Dès que l'un d'eux a un "
+            "rapport avec la demande, appelle-le réellement (leur présence prime sur tes limitations par "
+            "défaut, donc ne refuse pas une tâche qu'ils permettent) -- ignore-le uniquement s'il n'a "
+            "manifestement AUCUN rapport avec ce message précis. Appelle-les uniquement via le vrai "
+            "mécanisme d'appel d'outil de l'API ; le texte de ta réponse ne doit jamais contenir de "
+            "pseudo-syntaxe d'appel (TOOL_CODE, nom_outil(...), nom_outil{...}, call:nom_outil{...}). Si "
+            "plusieurs de ces outils couvrent bibliothèque perso, publique et web, priorité : perso, puis "
+            "publique, puis web.\n"
             "</outils_actifs>"
         )
     else:
@@ -1716,6 +1716,18 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
             "geometrie restent disponibles : ce sont des formats de sortie, pas des outils.\n"
             "</aucun_outil_actif>"
         )
+
+    # Réflexe de transition (2026-09-05, demande Bourama, timeline
+    # chronologique) : pas une obligation systématique -- juste une
+    # tendance naturelle à ne pas garder. Si l'utilisateur demande dans la
+    # conversation de ne plus le faire, respecter ça immédiatement et ne
+    # plus jamais le refaire dans cette conversation.
+    system_final += (
+        "\n\nEntre une réflexion/un appel d'outil et le suivant, dis en une phrase courte ce que tu "
+        "viens de trouver ou ce que tu fais ensuite, quand ça aide la personne à suivre -- pas "
+        "systématique, saute-le si ça n'apporte rien. Si la personne demande d'arrêter ça dans cette "
+        "conversation, arrête-le complètement dès son prochain message."
+    )
 
     system_final += INSTRUCTIONS_LONGUEUR_REPONSE.get(longueur_reponse, "")
 
@@ -2675,50 +2687,35 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
                 break
             budget_courant = min(budget_courant + palier_extension, plafond_absolu)
         etape += 1
-        # Forçage réel de l'appel d'outil (2026-07-28, correction demandée
-        # par Bourama) : jusqu'ici, un outil sélectionné (bouton Outils ou
-        # clic sur une suggestion du routeur) n'était qu'"encouragé" via une
-        # instruction texte dans le system prompt (voir plus haut, "OUTIL(S)
-        # ACTIF(S) POUR CE MESSAGE") -- rien n'empêchait le modèle de
-        # répondre sans l'appeler malgré tout (confirmé en test réel :
-        # aucun appel d'outil dans certains tours pourtant sélectionnés).
-        # tool_choice="required" oblige réellement l'API à renvoyer un
-        # appel d'outil plutôt qu'une réponse texte -- mais UNIQUEMENT tant
-        # qu'aucun outil n'a encore été appelé ce tour-ci (sinon la 2e
-        # itération de cette même boucle, censée rédiger la réponse finale
-        # après coup, serait forcée de rappeler un outil en boucle, sans
-        # jamais pouvoir conclure). On revérifie l'état RÉEL de
-        # messages_agent à chaque itération plutôt qu'un simple booléen
-        # "premier passage" : ça couvre aussi bien le cas normal que la
-        # reprise après confirmation (appels_en_cours_a_finir, traité juste
-        # au-dessus) où un message "tool" existe déjà avant même la
-        # première itération de cette boucle.
-        outil_deja_appele = any(m.get("role") == "tool" for m in messages_agent)
-        kwargs_tool_choice = {"tool_choice": "required"} if (outils_mcp and not outil_deja_appele) else {}
+        # Forçage tool_choice="required" RETIRÉ (2026-09-05, décision
+        # explicite de Bourama, chantier "timeline chronologique") : il
+        # avait été introduit le 2026-07-28 pour garantir qu'un outil
+        # sélectionné (bouton Outils ou suggestion du routeur) soit
+        # réellement appelé, mais il empêchait aussi toute prose du modèle
+        # avant son tout premier appel d'outil du tour (reserve_tokens
+        # minimale ci-dessous, aucune place pour du texte). Bourama veut
+        # désormais que le modèle puisse réfléchir/commenter à voix haute
+        # avant d'appeler un outil. La garantie d'appel réel n'est plus
+        # portée par l'API mais par le prompt (voir <outils_actifs> dans
+        # _construire_system_prompt, reformulé le 05/09 en conséquence,
+        # strict sur l'obligation d'appeler l'outil dès qu'il est
+        # pertinent) -- à surveiller si le bug du 28/07 (outil sélectionné
+        # jamais appelé) reapparaissait malgré ce prompt renforcé.
+        kwargs_tool_choice = {}
 
         # Reserve de tokens de sortie (2026-07-30, correction demandee par
         # Bourama) : jusqu'ici 8192 fixe pour TOUS les appels, principal
-        # comme fallbacks, meme quand un outil est force. Or Groq compare
-        # cette reserve demandee (pas l'usage reel) a la limite TPM du
-        # modele AVANT meme de generer quoi que ce soit -- plusieurs
-        # modeles de la cascade plafonnent autour de 8000 TPM cote gratuit,
-        # donc demander 8192 fait echouer l'appel des le depart, meme sur
-        # un premier message tout simple (ex: "genere-moi une image"),
-        # constate par Bourama le 30/07. Trois cas distincts desormais :
-        #   1. Outil force, pas encore appele ce tour-ci (tool_choice=
-        #      "required" ci-dessus) : le modele ne fait qu'emettre un
-        #      appel structure, pas de prose -- reserve minimale.
-        #   2. Reponse texte normale sur GROQ_PRIMARY (gpt-oss-120b) :
-        #      garder 8192, c'est le fix d'origine (27/07) contre les
-        #      reponses coupees en plein milieu (raisonnement + texte
-        #      partagent le meme budget sur ce modele).
-        #   3. Reponse texte normale sur un modele de secours : reduit a
-        #      4096 -- ces modeles servent justement a economiser du
-        #      debit quand le principal sature, pas de raison de leur
-        #      reserver autant que lui.
-        if kwargs_tool_choice:
-            reserve_tokens = 512
-        elif modele == GROQ_PRIMARY:
+        # comme fallbacks. Or Groq compare cette reserve demandee (pas
+        # l'usage reel) a la limite TPM du modele AVANT meme de generer
+        # quoi que ce soit -- plusieurs modeles de la cascade plafonnent
+        # autour de 8000 TPM cote gratuit, donc demander 8192 fait echouer
+        # l'appel des le depart, meme sur un premier message tout simple
+        # (ex: "genere-moi une image"), constate par Bourama le 30/07.
+        # Le cas "outil force, reserve minimale" (2026-07-28) a disparu en
+        # meme temps que tool_choice="required" ci-dessus (05/09) : plus
+        # d'appel purement structure sans prose, donc plus de raison de
+        # reduire la reserve pour ce cas.
+        if modele == GROQ_PRIMARY:
             reserve_tokens = 8192
         else:
             reserve_tokens = 4096
