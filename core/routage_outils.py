@@ -536,7 +536,7 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
 
     try:
         outils_suggeres = _appeler_et_parser(
-            MODELE_ROUTEUR_OUTILS, avec_reasoning_effort=True, avec_outils_desactives=False
+            MODELE_ROUTEUR_OUTILS, avec_reasoning_effort=False, avec_outils_desactives=True
         )
         logging.info(f"Routeur d'outils -> suggérés : {outils_suggeres or '(aucun)'}")
         return outils_suggeres
@@ -544,7 +544,7 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         logging.warning(f"Routeur d'outils ({MODELE_ROUTEUR_OUTILS}) en echec, repli sur {MODELE_ROUTEUR_OUTILS_REPLI} : {e_principal}")
         try:
             outils_suggeres = _appeler_et_parser(
-                MODELE_ROUTEUR_OUTILS_REPLI, avec_reasoning_effort=False, avec_outils_desactives=True
+                MODELE_ROUTEUR_OUTILS_REPLI, avec_reasoning_effort=True, avec_outils_desactives=False
             )
             logging.info(f"Routeur d'outils (repli) -> suggérés : {outils_suggeres or '(aucun)'}")
             return outils_suggeres

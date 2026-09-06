@@ -118,32 +118,34 @@ MODELE_PROFIL = "openai/gpt-oss-20b"  # 17/08 : llama-3.1-8b-instant decommissio
 # simple (pas besoin de raisonnement) -- un petit modèle rapide et open
 # source plutôt que MODELE_PROFIL/MODELE_RESUME (llama-3.3-70b-versatile).
 #
-# 17/08 : gemma2-9b-it (choisi le 15/08 pour ses 15 000 TPM) a été
-# décommissionné par Groq -- constaté en prod (400 "model_decommissioned"
-# à CHAQUE appel, donc plus AUCUNE suggestion automatique possible, quelle
-# que soit la question, le fail-safe de _router_outils renvoyant
-# systématiquement une liste vide). Remplacé par openai/gpt-oss-20b, la
-# recommandation officielle actuelle de Groq -- 8 000 TPM sur le tier
-# gratuit (moins que les 15 000 de gemma2-9b-it, mais suffisant pour le
-# catalogue actuel, ~31 outils, Notion/GitHub déjà exclus, voir plus bas
-# _tache_routeur), et surtout un modèle qui existe encore.
-MODELE_ROUTEUR_OUTILS = "openai/gpt-oss-20b"
-
-# Repli du routeur d'outils (06/09/2026, demande Bourama) : quand
-# MODELE_ROUTEUR_OUTILS (8 000 TPM sur le tier gratuit) est rate-limite,
-# on retente avec groq/compound-mini qui a un budget bien plus large
-# (70 000 TPM). ATTENTION, compound-mini n'est pas un modele de chat
-# classique -- c'est un systeme agentique qui peut decider tout seul
-# d'appeler un outil integre (recherche web, code). Deux consequences :
+# 06/09/2026, demande Bourama : passe de openai/gpt-oss-20b a
+# groq/compound-mini comme modele PRINCIPAL -- 70 000 TPM sur le tier
+# gratuit contre 8 000 pour gpt-oss-20b, marge bien plus confortable pour
+# ce routeur appele a chaque message. ATTENTION, compound-mini n'est pas
+# un modele de chat classique -- c'est un systeme agentique qui peut
+# decider tout seul d'appeler un outil integre (recherche web, code).
+# Deux consequences geree dans _router_outils :
 # 1) reasoning_effort n'est documente que pour GPT-OSS/Qwen3, pas pour
 #    compound -- ne JAMAIS le lui envoyer (voir MODELES_AVEC_REASONING_EFFORT
-#    plus bas, qui ne le liste pas exprès).
+#    plus bas, qui ne le liste pas expres).
 # 2) response_format=json_object est incompatible avec l'appel d'outils
 #    cote Groq -- il faut donc desactiver ses outils integres via
-#    compound_custom.tools.enabled_tools=[] pour ce repli, sinon risque
-#    d'erreur ou de vraie recherche web declenchee pour un simple
-#    routage (lent, hors sujet). Voir l'appel dans _router_outils.
-MODELE_ROUTEUR_OUTILS_REPLI = "groq/compound-mini"
+#    compound_custom.tools.enabled_tools=[], sinon risque d'erreur ou de
+#    vraie recherche web declenchee pour un simple routage (lent, hors
+#    sujet).
+# Pas encore verifie en conditions reelles (pas d'acces reseau direct a
+# l'API Groq depuis l'environnement de dev) -- a surveiller dans les logs
+# Railway ("Routeur d'outils -> suggérés"), avec repli automatique sur
+# gpt-oss-20b (MODELE_ROUTEUR_OUTILS_REPLI) en cas d'echec.
+MODELE_ROUTEUR_OUTILS = "groq/compound-mini"
+
+# Repli du routeur d'outils (06/09/2026, demande Bourama) : si
+# MODELE_ROUTEUR_OUTILS (compound-mini) echoue, on retombe sur
+# openai/gpt-oss-20b -- moins de marge TPM (8 000 contre 70 000) mais
+# modele de raisonnement classique deja eprouve en prod depuis le 17/08
+# (voir l'historique ci-dessus : gemma2-9b-it decommissionne, remplace
+# par gpt-oss-20b).
+MODELE_ROUTEUR_OUTILS_REPLI = "openai/gpt-oss-20b"
 
 # D'apres la doc Groq (console.groq.com/docs/reasoning), le parametre
 # reasoning_effort n'est reconnu que par certains modeles (GPT-OSS 20B/120B,
