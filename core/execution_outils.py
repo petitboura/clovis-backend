@@ -204,6 +204,58 @@ def _sources_bibliotheque_depuis_texte(resultat_brut):
     return sources
 
 
+def _images_depuis_json_generique(resultat_brut):
+    """
+    Meme principe que _sources_depuis_json_generique juste au-dessus,
+    mais pour une galerie d'images (evenement SSE "images", voir
+    ChatIA.tsx/GalerieImagesBulle.tsx) : tout outil qui renvoie un JSON
+    de la forme {"images": [{"titre", "url", "miniature"}, ...]} voit sa
+    galerie affichee automatiquement -- couvre rechercher_image
+    aujourd'hui (voir core/outils_generation_media.py), et n'importe
+    quel outil FUTUR qui renverrait la meme forme, sans toucher a ce
+    fichier.
+
+    Cle "images" DELIBEREMENT distincte de "results" (utilisee par
+    _sources_depuis_json_generique) : les deux detecteurs tournent sur
+    CHAQUE resultat d'outil, un tool qui renverrait "results" ne doit
+    jamais se retrouver aussi affiche comme galerie, et inversement.
+
+    Best-effort : jamais d'exception qui remonte -- une galerie est un
+    bonus, jamais un prerequis pour repondre.
+    """
+    try:
+        donnees = json.loads(resultat_brut)
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+    resultats = donnees.get("images") if isinstance(donnees, dict) else None
+    if not isinstance(resultats, list):
+        return []
+
+    images = []
+    for r in resultats:
+        if isinstance(r, dict) and r.get("url"):
+            images.append({
+                "titre": r.get("titre") or r["url"],
+                "url": r["url"],
+                "miniature": r.get("miniature") or r["url"],
+                "credit": r.get("credit"),
+            })
+    return images
+
+
+def _extraire_images(appel, resultat_brut):
+    """
+    Construit la galerie ({"titre", "url", "miniature", "credit"}) d'un
+    appel d'outil pour l'evenement SSE "images". Un seul cas aujourd'hui
+    (detection generique par forme de JSON), garde comme fonction a part
+    -- meme structure que _extraire_sources -- pour pouvoir y ajouter
+    plus tard un cas particulier a resultat texte brut, sans toucher a
+    _traiter_appels.
+    """
+    return _images_depuis_json_generique(resultat_brut)
+
+
 def _extraire_sources(appel, resultat_brut):
     """
     Construit les sources ({"titre", "url"}) d'un appel d'outil pour
@@ -427,7 +479,14 @@ def _traiter_appels(appels, messages_agent, table_routage, compteur_sources=None
                 # que la source elle-meme (SourcesBulle.tsx) est deja
                 # cliquable et correctement nommee.
                 sources = _extraire_sources(appel, resultat)
-                urls_deja_sourcees = {s["url"] for s in sources}
+                # Calculé ici (pas plus bas) pour pouvoir exclure les URLs
+                # d'image de la detection generique fichiers_generes juste
+                # en dessous -- sans ça, une URL d'image (ex. .jpg)
+                # matchait AUSSI la regex generique de fichier telecharge,
+                # et s'affichait deux fois (galerie + chip "Fichier
+                # genere").
+                images = _extraire_images(appel, resultat)
+                urls_deja_sourcees = {s["url"] for s in sources} | {i["url"] for i in images}
                 fichiers_generes = [
                     f for f in _extraire_fichiers_generes(resultat)
                     if f["url"] not in urls_deja_sourcees
@@ -461,6 +520,22 @@ def _traiter_appels(appels, messages_agent, table_routage, compteur_sources=None
                     # tavily_*/notion-search via _sources_depuis_json_generique,
                     # gerer_depot_github via _sources_github_depuis_arguments,
                     # et tout futur outil sourcé sans changement ici).
+                # Galerie d'images (01/09, demande Bourama : recherche
+                # d'image affichée en vraie galerie plutôt qu'en simple
+                # lien markdown dans le texte) -- pas de numérotation ici
+                # (une image n'est pas une source à citer). Le modèle est
+                # prévenu de ne pas recopier les URLs dans sa réponse : la
+                # galerie s'affiche déjà toute seule (évite le doublon
+                # décrit dans outils_generation_media.py pour les images
+                # générées).
+                if images:
+                    yield {"type": "images", "images": images}
+                    contenu_pour_modele = (
+                        f"{contenu_pour_modele}\n\n[{len(images)} image(s) trouvée(s) "
+                        f"et déjà affichée(s) à l'utilisateur dans une galerie -- ne "
+                        f"recopie AUCUNE de ces URLs dans ta réponse, décris-les "
+                        f"juste brièvement en texte si besoin.]"
+                    )
                 messages_agent.append({
                     "role": "tool",
                     "tool_call_id": appel["id"],

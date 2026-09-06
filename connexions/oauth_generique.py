@@ -134,6 +134,37 @@ SERVICES = {
         "scopes": "repo",
         "token_headers": {"Accept": "application/json"},
     },
+    # Google Drive (01/09/2026) -- se connecte au serveur MCP Drive
+    # OFFICIEL de Google (drivemcp.googleapis.com/mcp/v1, voir
+    # core/registre_outils.py), pas une intégration API Drive maison.
+    # Nécessite un client OAuth Google Cloud créé manuellement par
+    # Bourama (console Google Cloud -- API Drive activée, écran de
+    # consentement, identifiant client OAuth type "Application Web",
+    # URI de redirection = URL_RETOUR_APP), avec GOOGLE_DRIVE_CLIENT_ID
+    # / GOOGLE_DRIVE_CLIENT_SECRET sur Railway.
+    #
+    # Scopes documentés par Google pour ce serveur MCP précis :
+    # drive.readonly (lecture) + drive.file (fichiers créés/ouverts par
+    # l'app) -- jamais un accès complet au Drive.
+    #
+    # "extra_auth_params" (access_type=offline + prompt=consent) :
+    # sans ça, Google NE RENVOIE PAS de refresh_token -- sinon la
+    # connexion redeviendrait "morte" au bout d'une heure sans jamais
+    # pouvoir se rafraîchir toute seule. include_granted_scopes=true
+    # pour ne pas perdre un scope Google déjà accordé ailleurs (ex. si
+    # une connexion Google login existe un jour, voir core/auth.py).
+    "google_drive": {
+        "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
+        "token_endpoint": "https://oauth2.googleapis.com/token",
+        "client_id_env": "GOOGLE_DRIVE_CLIENT_ID",
+        "client_secret_env": "GOOGLE_DRIVE_CLIENT_SECRET",
+        "scopes": "https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.file",
+        "extra_auth_params": {
+            "access_type": "offline",
+            "prompt": "consent",
+            "include_granted_scopes": "true",
+        },
+    },
 }
 
 
@@ -187,6 +218,12 @@ def demarrer_connexion(service, user_id, agent_id):
     }
     if config.get("scopes"):
         params["scope"] = config["scopes"]
+    # Paramètres additionnels propres à certains fournisseurs (ex. Google
+    # a besoin de access_type=offline + prompt=consent pour renvoyer un
+    # refresh_token -- voir SERVICES["google_drive"] ci-dessus). Absent
+    # pour les autres services, comportement inchangé.
+    if config.get("extra_auth_params"):
+        params.update(config["extra_auth_params"])
 
     return f"{config['authorization_endpoint']}?{urlencode(params)}"
 

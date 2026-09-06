@@ -9,6 +9,7 @@ déplacement de code.
 """
 
 import logging
+import json
 
 from core.generation_signature import (
     envoyer_pour_signature as _envoyer_pour_signature,
@@ -27,6 +28,7 @@ from core.generation_3d import (
     modele_3d_disponible,
 )
 from core.generation_images import generer_image as _generer_image, image_generation_disponible
+from core.recherche_image import rechercher_images as _rechercher_images
 
 from core.outils_generation_commun import mcp_generation, Context, _sauvegarder_generation_bibliotheque
 
@@ -215,3 +217,41 @@ def generer_image(prompt: str, ctx: Context = None) -> str:
     except Exception as e:
         logging.error(f"ERREUR outil generation : {e}")
         return "Erreur : la génération de l'image a échoué, réessaie."
+
+
+# Ajouté le 01/09/2026 (demande Bourama) : RECHERCHE d'image EXISTANTE
+# sur le web, à ne pas confondre avec generer_image ci-dessus (qui EN
+# CRÉE une nouvelle). Cascade Pixabay -> Pexels gérée dans
+# core/recherche_image.py -- gratuit, jamais de génération de coûts.
+#
+# Différence volontaire avec generer_image : PAS de sauvegarde
+# automatique en bibliothèque (_sauvegarder_generation_bibliotheque)
+# -- une image trouvée par une recherche n'est pas un contenu créé par
+# l'utilisateur/pour lui comme une génération, l'enregistrer
+# systématiquement remplirait la bibliothèque d'images non voulues à
+# chaque recherche. À revoir avec Bourama si ce n'est pas le comportement
+# souhaité.
+#
+# Format de retour DÉLIBÉRÉMENT différent des autres outils texte :
+# JSON {"images": [...]}, détecté génériquement par
+# _images_depuis_json_generique (core/execution_outils.py) pour afficher
+# une vraie galerie côté frontend (GalerieImagesBulle.tsx) -- voir ce
+# fichier pour le detail. Ne PAS transformer ce retour en texte
+# descriptif : la détection générique se base sur cette forme précise.
+@mcp_generation.tool()
+def rechercher_image(requete: str) -> str:
+    """
+    Cherche des images déjà existantes sur le web à partir de mots-clés
+    (photos, illustrations, schémas...) et les affiche directement à
+    l'utilisateur dans une galerie. Renvoie un JSON listant les images
+    trouvées -- ne recopie JAMAIS les URLs de ce résultat dans ta
+    réponse (déjà affichées), décris-les juste brièvement si besoin.
+    """
+    try:
+        images = _rechercher_images(requete)
+        if not images:
+            return "Aucune image trouvée pour cette recherche."
+        return json.dumps({"images": images}, ensure_ascii=False)
+    except Exception as e:
+        logging.error(f"ERREUR outil recherche image : {e}")
+        return "Erreur : la recherche d'image a échoué, réessaie."

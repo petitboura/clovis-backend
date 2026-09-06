@@ -67,6 +67,9 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     - {"type": "sources", "sources": [{"titre": "...", "url": "..."}]} -> resultats d'une
       recherche web (Tavily) utilisee pour repondre. Peut etre emis plusieurs fois dans le
       meme echange (plusieurs recherches) -- l'appelant accumule/fusionne, ne remplace pas.
+    - {"type": "images", "images": [{"titre": "...", "url": "...", "miniature": "...", "credit": "..."}]}
+      -> (01/09) resultats d'une recherche d'image (rechercher_image), affiches en galerie
+      cote frontend (GalerieImagesBulle.tsx) plutot qu'en simple lien texte.
     - {"type": "reponse", "texte": "..."}        -> morceau de la reponse finale (streaming)
     - {"type": "fichiers_generes", "nom_outil": "...", "fichiers": [{"url": "...", "nom": "..."}]}
       -> (28/07) emis des qu'un outil produit un fichier telechargeable (detecte par

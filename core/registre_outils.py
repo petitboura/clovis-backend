@@ -94,6 +94,27 @@ def _headers_notion(get_secret, user_id, agent_id):
     return {"Authorization": f"Bearer {token}"}
 
 
+def _url_google_drive(get_secret, user_id, agent_id):
+    # Serveur MCP Drive OFFICIEL de Google (tiers externe, comme Notion),
+    # pas un serveur interne -- voir connexions/oauth_generique.py pour
+    # le detail (client OAuth a creer manuellement dans Google Cloud
+    # Console, scopes drive.readonly + drive.file). Encore en
+    # "Developer Preview" cote Google au 01/09/2026.
+    return "https://drivemcp.googleapis.com/mcp/v1"
+
+
+def _headers_google_drive(get_secret, user_id, agent_id):
+    # Meme principe que _headers_notion, mais scope par user_id ET
+    # service ("google_drive") -- voir connexions/oauth_generique.py,
+    # ce fichier gere plusieurs services generiques (Github, Drive...)
+    # contrairement a connexions/notion.py qui n'en gere qu'un seul.
+    from connexions.oauth_generique import obtenir_token_valide as _token_generique
+    token = _token_generique("google_drive", user_id)
+    if not token:
+        return None
+    return {"Authorization": f"Bearer {token}"}
+
+
 SERVEURS_MCP = [
     {"nom": "wolfram", "url_builder": _url_wolfram},
     {
@@ -155,6 +176,36 @@ SERVEURS_MCP = [
         # ils sont tous dans OUTILS_SENSIBLES plus bas, donc TOUJOURS
         # interrompus pour confirmation utilisateur avant execution.
     },
+    {
+        "nom": "google_drive",
+        "url_builder": _url_google_drive,
+        "headers_builder": _headers_google_drive,
+        "necessite_utilisateur": True,
+        # Tri demande par Bourama le 01/09 (meme raison que la
+        # desactivation de Notion cote web : trop d'outils MCP, les
+        # etudiants n'en utilisent qu'une petite partie). Sur les 8
+        # outils du Drive MCP officiel de Google, 7 retenus -- tout sauf
+        # get_file_permissions (voir qui a acces a un fichier, jamais
+        # utile a un etudiant).
+        #
+        # NOMS D'OUTILS NON VERIFIES EN CONDITIONS REELLES (comme
+        # d'habitude pour un tiers externe, voir Pollinations dans
+        # generation_images.py) -- ceux ci-dessous viennent de la
+        # documentation Google (developers.google.com/workspace/drive/
+        # api/reference/mcp), a reverifier au premier vrai test : si un
+        # nom ne correspond pas exactement a celui expose par le serveur
+        # MCP, cet outil precis restera simplement invisible (aucun
+        # risque de planter le reste), a corriger ici le cas echeant.
+        "outils_autorises": [
+            "search_files",
+            "read_file_content",
+            "download_file_content",
+            "list_recent_files",
+            "get_file_metadata",
+            "create_file",
+            "copy_file",
+        ],
+    },
 ]
 
 # Outils qui MODIFIENT reellement quelque chose chez l'utilisateur (creation,
@@ -175,6 +226,12 @@ OUTILS_SENSIBLES = {
     "notion-create-view",
     "notion-update-view",
     "notion-create-attachment",
+    # Google Drive (01/09) -- ÉCRIVENT réellement dans le Drive de
+    # l'utilisateur (creation/copie de fichier), meme logique que les
+    # outils d'ecriture Notion/GitHub ci-dessus : TOUJOURS interrompus
+    # pour confirmation avant execution.
+    "create_file",
+    "copy_file",
     # ÉCRIT réellement sur un dépôt GitHub (voir
     # core/serveur_mcp_github.py, gerer_depot_github action
     # "modifier_fichier", consolidé le 26/08, ex modifier_fichier_depot_github) :
@@ -271,6 +328,12 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "tavily_map": {"label": "Cartographie d'un site", "icone": "Map", "onglet": "rechercher"},
     "tavily_research": {"label": "Recherche approfondie", "icone": "BookOpen", "onglet": "rechercher"},
     "chercher_fichier": {"label": "Recherche d'un fichier", "icone": "FolderSearch", "onglet": "rechercher"},
+    # Ajouté 01/09 -- recherche d'IMAGE existante sur le web (galerie),
+    # à ne pas confondre avec generer_image ci-dessus (qui en crée une
+    # nouvelle). Icône "ImageSearch" NON VÉRIFIÉE dans cette version de
+    # lucide-react (0.383.0) -- repli automatique sur Wrench sinon, voir
+    # resoudreIcone (clovis-frontend/lib/outils.ts).
+    "rechercher_image": {"label": "Recherche d'image", "icone": "ImageSearch", "onglet": "rechercher"},
     # gerer_document_bibliotheque (consolidé le 26/08, ex 12 outils
     # séparés -- consulter_bibliotheque, consulter_bibliotheque_publique,
     # lister/ajouter/supprimer/classer/déclasser/ranger/retirer/lire_entier,
@@ -320,6 +383,19 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "notion-create-attachment": {"label": "Ajout d'une pièce jointe Notion", "icone": "Paperclip", "onglet": "action_app", "appli": "notion"},
     "notion-create-view": {"label": "Création d'une vue Notion", "icone": "PanelsTopLeft", "onglet": "action_app", "appli": "notion"},
     "notion-update-view": {"label": "Modification d'une vue Notion", "icone": "SlidersHorizontal", "onglet": "action_app", "appli": "notion"},
+
+    # --- Action dans l'app : Google Drive ---
+    # Noms d'outils NON VÉRIFIÉS en conditions réelles, voir le
+    # commentaire "outils_autorises" du serveur google_drive plus haut
+    # dans ce fichier -- si un nom ne correspond pas, seul son libellé
+    # reste invisible, rien d'autre ne casse.
+    "search_files": {"label": "Recherche d'un fichier Drive", "icone": "FolderSearch", "onglet": "action_app", "appli": "google_drive"},
+    "read_file_content": {"label": "Lecture d'un fichier Drive", "icone": "FileText", "onglet": "action_app", "appli": "google_drive"},
+    "download_file_content": {"label": "Téléchargement d'un fichier Drive", "icone": "Download", "onglet": "action_app", "appli": "google_drive"},
+    "list_recent_files": {"label": "Fichiers Drive récents", "icone": "Clock", "onglet": "action_app", "appli": "google_drive"},
+    "get_file_metadata": {"label": "Infos d'un fichier Drive", "icone": "Info", "onglet": "action_app", "appli": "google_drive"},
+    "create_file": {"label": "Création d'un fichier Drive", "icone": "FilePlus", "onglet": "action_app", "appli": "google_drive"},
+    "copy_file": {"label": "Copie d'un fichier Drive", "icone": "Copy", "onglet": "action_app", "appli": "google_drive"},
 
     # --- Utilitaires ---
     #

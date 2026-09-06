@@ -540,6 +540,12 @@ def _capturer_reponse(generateur, accumulateur, meta=None):
             })
         elif meta is not None and event["type"] == "sources" and meta.get("outils"):
             meta["outils"][-1]["sources"] = event["sources"]
+        elif meta is not None and event["type"] == "images" and meta.get("outils"):
+            # Même principe que "sources" juste au-dessus, pour que la
+            # galerie survive à la réouverture d'une conversation (sans
+            # ça, elle ne serait visible qu'en direct pendant le
+            # streaming -- voir docstring de cette fonction).
+            meta["outils"][-1]["images"] = event["images"]
         yield event
 
 
