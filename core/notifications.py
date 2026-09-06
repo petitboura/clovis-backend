@@ -4,8 +4,8 @@ cloche dans le header, web + mobile). Voir migration
 notifications_ajout_types_clovis_et_colonnes_affichage (Supabase) pour
 le contexte complet -- la table notifications existait deja pour un
 usage "plateforme createur" (follow/comment/rating/...) jamais expose
-dans l'app, ce module ne touche QUE les 4 nouveaux types demandes par
-Bourama :
+dans l'app, ce module ne touche QUE les types demandes par Bourama
+depuis :
 - rappel_echu : voir core/notifications_push.py::traiter_rappels_echus
 - action_ia_terminee : voir core/actions_appareil_mobile.py::marquer_resultat
 - document_recu_code : voir core/codes_partage.py (entrer_code et
@@ -14,6 +14,9 @@ Bourama :
   en langage naturel, voir api/notifications.py::envoyer_message_systeme
 - audit_hebdomadaire_corrections : voir core/audit_hebdomadaire_corrections.py
   (Partie 8, 06/09/2026)
+- correction_traitee (Partie 5, 06/09/2026, chantier "confiance
+  pedagogique") : voir
+  core/corrections_pedagogiques.py::enregistrer_correction_prof
 
 creer_notification() fait deux choses a chaque appel : (1) insert en
 base (persistant, visible au prochain chargement du panneau) ; (2) tente
@@ -29,7 +32,7 @@ import logging
 from api.auth import supabase
 from core.canal_temps_reel import notifier_utilisateur
 
-TYPES_VALIDES = {"rappel_echu", "action_ia_terminee", "document_recu_code", "message_systeme", "audit_hebdomadaire_corrections"}
+TYPES_VALIDES = {"rappel_echu", "action_ia_terminee", "document_recu_code", "message_systeme", "audit_hebdomadaire_corrections", "correction_traitee"}
 
 
 def creer_notification(user_id: str, type_notif: str, titre: str, contenu: str | None = None, lien: str | None = None) -> dict | None:
