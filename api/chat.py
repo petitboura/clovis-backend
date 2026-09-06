@@ -27,6 +27,7 @@ from typing import List, Optional, Literal
 
 from api.auth import utilisateur_optionnel, supabase
 from core.limitation_debit import limiteur
+from core.restriction_mineur import acces_chat_bloque_pour_mineur
 from main import chat as chat_generateur  # core/main.py:chat()
 from fournisseurs_llm import modele_id_est_autorise
 
@@ -206,6 +207,14 @@ def _evenements_sse(payload: EnvoyerMessagePayload, user_id: Optional[str]):
     yield "data: [DONE]\n\n"
 
 
+def _evenement_bloque(texte: str):
+    """Même forme d'événement que le message d'erreur générique de
+    _evenements_sse ci-dessus -- le frontend l'affiche déjà comme un
+    message clair, pas une erreur technique brute (Partie 7)."""
+    yield f"data: {json.dumps({'type': 'reponse', 'texte': texte})}\n\n"
+    yield "data: [DONE]\n\n"
+
+
 @router.post("")
 @limiteur.limit("20/minute")
 def envoyer_message(request: Request, payload: EnvoyerMessagePayload, utilisateur=Depends(utilisateur_optionnel)):
@@ -223,8 +232,22 @@ def envoyer_message(request: Request, payload: EnvoyerMessagePayload, utilisateu
     user_id=None si non connecté : chat() gère déjà ce cas (pas de
     mémoire long-terme persistée, pas d'événement "meta" -- voir sa
     docstring), donc rien de spécial à faire ici.
+
+    Partie 7 (06/09, Point 3) : un utilisateur mineur (profiles.est_majeur
+    = false explicitement) sans aucun code rattaché a l'accès bloqué --
+    vérifié ici, avant même de démarrer le générateur de chat(), pour ne
+    jamais consommer un appel LLM pour une réponse qui sera de toute
+    façon rejetée.
     """
     user_id = utilisateur.id if utilisateur else None
+    if user_id and acces_chat_bloque_pour_mineur(user_id):
+        return StreamingResponse(
+            _evenement_bloque(
+                "L'accès au chat est réservé aux comptes mineurs ayant reçu un code de leur professeur ou établissement. Entre un code dans \"Mon espace\" pour continuer."
+            ),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
     return StreamingResponse(
         _evenements_sse(payload, user_id),
         media_type="text/event-stream",

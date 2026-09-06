@@ -150,22 +150,31 @@ class MonStatutReponse(BaseModel):
 
     est_createur: bool = False
     agents_administres: List[AgentDuCreateur] = Field(default_factory=list)
+    # Partie 7 (06/09/2026) : None = jamais renseigné (traité comme
+    # majeur, voir core/restriction_mineur.py), pas de valeur par
+    # défaut à False ici -- distinct de "a explicitement dit non".
+    est_majeur: Optional[bool] = None
 
 
 @router.get("/moi/statut", response_model=MonStatutReponse)
 def mon_statut(utilisateur=Depends(utilisateur_courant)):
     try:
         profil = (
-            supabase.table("profiles").select("est_createur").eq("user_id", utilisateur.id).maybe_single().execute()
+            supabase.table("profiles")
+            .select("est_createur, est_majeur")
+            .eq("user_id", utilisateur.id)
+            .maybe_single()
+            .execute()
         )
     except Exception as e:
-        logging.error(f"ERREUR SUPABASE (lecture est_createur {utilisateur.id}) : {e}")
+        logging.error(f"ERREUR SUPABASE (lecture statut {utilisateur.id}) : {e}")
         profil = None
     est_createur = bool((profil.data or {}).get("est_createur")) if profil and profil.data else False
+    est_majeur = (profil.data or {}).get("est_majeur") if profil and profil.data else None
 
     agents_administres = _agents_administres_de(utilisateur.id)
 
-    return MonStatutReponse(est_createur=est_createur, agents_administres=agents_administres)
+    return MonStatutReponse(est_createur=est_createur, agents_administres=agents_administres, est_majeur=est_majeur)
 
 
 @router.get("/{user_id}", response_model=ProfilDetailPublic)
@@ -296,6 +305,13 @@ class MettreAJourProfilPayload(BaseModel):
     # le choix (redevenir None) -- None seul veut dire "champ omis, ne
     # rien changer", donc il fallait un moyen distinct de forcer le vide.
     premier_agent_id: Optional[str] = None
+    # Partie 7 (06/09/2026, demande Bourama, plan confiance pédagogique,
+    # Point 3) : question posée dans Paramètres (voir EspaceParametres.tsx),
+    # jamais à l'inscription (09/08 : "tu es normal tant que tu n'entres
+    # pas un code" -- forcer cette question pour tout le monde à la
+    # création du compte contredirait cette décision). None = champ omis,
+    # ne rien changer -- reste NULL tant que jamais répondu.
+    est_majeur: Optional[bool] = None
 
 
 @router.patch("/me", response_model=ProfilPublic)
@@ -349,6 +365,8 @@ def mettre_a_jour_mon_profil(
         ligne["notifications_proactives_actives"] = payload.notifications_proactives_actives
     if payload.premier_agent_id is not None:
         ligne["premier_agent_id"] = payload.premier_agent_id.strip() or None
+    if payload.est_majeur is not None:
+        ligne["est_majeur"] = payload.est_majeur
 
     try:
         deja_existant = (
@@ -429,7 +447,7 @@ def mettre_a_jour_mon_profil(
         cible_id=utilisateur.id,
         details={
             "champs_modifies": [
-                c for c in ("nom_affiche", "bio", "avatar_url", "premier_agent_id") if c in ligne
+                c for c in ("nom_affiche", "bio", "avatar_url", "premier_agent_id", "est_majeur") if c in ligne
             ]
         },
         request=request,
