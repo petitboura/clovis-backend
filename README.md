@@ -41,6 +41,14 @@ core/
   catalogue_public_rag.py      RAG sur le catalogue de la bibliothèque publique
   dossiers_catalogue_public.py dossiers du catalogue public
   codes_partage.py             codes de partage (remplace l'ancien système d'invitations)
+  programme_notions.py         structure de notions et avancement (Partie 1, "confiance pédagogique") —
+                                arborescence libre rattachée à un code, indépendante de l'ancien
+                                "Programme" désactivé
+  generation_notions_llm.py    génération d'une structure de notions depuis un document (Partie 1),
+                                séparé du CRUD, ne persiste rien en base
+  avancement_notions_ia.py     résolution en langage naturel au-dessus de programme_notions.py (Partie 3) :
+                                retrouver un code/une notion par son nom, créer à la volée, règle de
+                                comportement héritée par niveau
   file_attente_vectorisation.py file d'attente de vectorisation en arrière-plan
   calcul_symbolique.py         calcul symbolique via SymPy — pas de clé API, pas de service externe
   description_multimedia.py    description automatique d'image (vision) et transcription automatique
@@ -49,8 +57,9 @@ core/
   erreurs.py                   messages d'erreur centralisés, orientés utilisateur (miroir de lib/erreurs.ts)
   generation_*.py              outils de génération : images, documents, audio, vidéo, 3D, code, site,
                                 LaTeX, signature (Lumin), archives (zip), données (JSON/XML)
-  serveur_mcp_generation.py    serveur MCP interne (32 outils : génération, bibliothèque, mémoire,
-                                comportements, exploration de dossier mobile...), monté directement dans l'app
+  serveur_mcp_generation.py    serveur MCP interne (36 outils : génération, bibliothèque, mémoire,
+                                comportements, exploration de dossier mobile, avancement des notions...),
+                                monté directement dans l'app
   serveur_mcp_github.py        serveur MCP interne pour le connecteur GitHub
   serveur_mcp_espace.py        serveur MCP PUBLIC "Mon espace" — connecteur externe (Claude, etc.) exposé
                                 à l'utilisateur, authentifié par OAuth 2.1
@@ -86,6 +95,8 @@ api/
   agents.py                    configuration/édition de l'agent Clovis (system prompt, documents,
                                 bibliothèque, administrateurs) — pas de création/suppression/vitrine
                                 publique par agent (retiré le 14/08, une seule IA fixe)
+  programme_notions.py         endpoints CRUD + génération de la structure de notions (Partie 1),
+                                enregistré sous /api/notions/{code_id}/...
   roles.py                     hiérarchie de rôles (nous/établissement/enseignant/étudiant)
   permissions_hierarchie.py    "qui a le droit de toucher à l'agent de qui", réutilisé par agents.py
   invitations_clovis.py        invitation d'autres personnes par message/code

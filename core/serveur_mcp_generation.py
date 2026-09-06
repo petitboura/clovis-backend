@@ -31,6 +31,9 @@ uniquement un déplacement de code :
     de connaissance, matière active
   - outils_mobile.py             : dossiers désignés et exploration sur
     le téléphone de l'étudiant
+  - outils_avancement_notions.py : avancement des notions (Partie 1) en
+    langage naturel + règle de comportement (Partie 3, chantier
+    "confiance pédagogique")
 """
 
 # RAPPEL NON NEGOCIABLE (Bourama, 18/08) -- POUR NE PAS OUBLIER :
@@ -63,3 +66,4 @@ import core.outils_bibliotheque  # noqa: F401
 import core.outils_memoire_profil  # noqa: F401
 import core.outils_comportements_connaissance  # noqa: F401
 import core.outils_mobile  # noqa: F401
+import core.outils_avancement_notions  # noqa: F401
