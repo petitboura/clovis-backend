@@ -12,6 +12,8 @@ Bourama :
   propager_fichier_range_dossier)
 - message_systeme : jamais automatique -- Bourama le declenche lui-meme
   en langage naturel, voir api/notifications.py::envoyer_message_systeme
+- audit_hebdomadaire_corrections : voir core/audit_hebdomadaire_corrections.py
+  (Partie 8, 06/09/2026)
 
 creer_notification() fait deux choses a chaque appel : (1) insert en
 base (persistant, visible au prochain chargement du panneau) ; (2) tente
@@ -27,7 +29,7 @@ import logging
 from api.auth import supabase
 from core.canal_temps_reel import notifier_utilisateur
 
-TYPES_VALIDES = {"rappel_echu", "action_ia_terminee", "document_recu_code", "message_systeme"}
+TYPES_VALIDES = {"rappel_echu", "action_ia_terminee", "document_recu_code", "message_systeme", "audit_hebdomadaire_corrections"}
 
 
 def creer_notification(user_id: str, type_notif: str, titre: str, contenu: str | None = None, lien: str | None = None) -> dict | None:

@@ -48,6 +48,7 @@ from api.bibliotheque_publique import router as bibliotheque_publique_router
 from api.dossiers_catalogue_public import router as dossiers_catalogue_public_router
 from api.signalements import router as signalements_router
 from api.corrections_pedagogiques import router as corrections_pedagogiques_router
+from api.audit_hebdomadaire_corrections import router as audit_hebdomadaire_corrections_router
 from api.contenu_legal import router as contenu_legal_router
 from api.codes_partage import router_mes_codes, router_rattachements
 from api.mode_actif_conversation import router_mode_actif
@@ -59,6 +60,7 @@ from api.dossiers_designes import router as dossiers_designes_router
 from core.serveur_mcp_generation import mcp_generation
 from core.notifications_push import traiter_rappels_echus, un_canal_push_disponible
 from core.proactivite import verifier_relances_proactives
+from core.audit_hebdomadaire_corrections import verifier_audits_hebdomadaires
 from core.file_attente_vectorisation import remettre_en_attente_bloques, traiter_file_attente_une_fois, relancer_echecs_a_froid
 # 04/09/2026, demande Bourama : vectorisation en masse des fichiers d'un
 # dossier désigné (téléphone) -- module DÉDIÉ, distinct de la file
@@ -120,6 +122,21 @@ async def _boucle_planificateur_proactivite():
                 logging.info(f"Planificateur proactivité : {envoyees} relance(s) envoyée(s).")
         except Exception as e:
             logging.error(f"ERREUR boucle planificateur proactivité : {e}")
+        await asyncio.sleep(6 * 60 * 60)
+
+
+async def _boucle_planificateur_audit_corrections():
+    # Audit hebdomadaire (Partie 8, 06/09/2026) : cadence réelle portée
+    # par audits_hebdomadaires_corrections (persistée), pas par cette
+    # boucle -- un passage toutes les 6h suffit largement à respecter un
+    # délai de 7 jours sans dérive notable, même en cas de redémarrage.
+    while True:
+        try:
+            envoyes = verifier_audits_hebdomadaires()
+            if envoyes:
+                logging.info(f"Planificateur audit corrections : {envoyes} audit(s) envoyé(s).")
+        except Exception as e:
+            logging.error(f"ERREUR boucle planificateur audit corrections : {e}")
         await asyncio.sleep(6 * 60 * 60)
 
 
@@ -282,6 +299,7 @@ async def _lifespan(app: FastAPI):
         tache_reessai_echecs_dossiers_designes = asyncio.create_task(_boucle_reessai_echecs_dossiers_designes())
         tache_description_skills = asyncio.create_task(_boucle_description_skills())
         tache_reessai_echecs_description = asyncio.create_task(_boucle_reessai_echecs_description())
+        tache_audit_corrections = asyncio.create_task(_boucle_planificateur_audit_corrections())
         yield
         if tache_planificateur:
             tache_planificateur.cancel()
@@ -293,6 +311,7 @@ async def _lifespan(app: FastAPI):
         tache_reessai_echecs_dossiers_designes.cancel()
         tache_description_skills.cancel()
         tache_reessai_echecs_description.cancel()
+        tache_audit_corrections.cancel()
 
 
 app = FastAPI(title="Clovis API", version="0.1.0", lifespan=_lifespan)
@@ -570,6 +589,7 @@ app.include_router(bibliotheque_publique_router)
 app.include_router(dossiers_catalogue_public_router)
 app.include_router(signalements_router)
 app.include_router(corrections_pedagogiques_router)
+app.include_router(audit_hebdomadaire_corrections_router)
 app.include_router(contenu_legal_router)
 app.include_router(router_mes_codes)
 app.include_router(router_rattachements)
