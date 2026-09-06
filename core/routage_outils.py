@@ -5,7 +5,7 @@
 import json
 import logging
 from groq import Groq
-from constantes_agent import get_secret, supabase, MODELE_ROUTEUR_OUTILS, DELAI_MAX_PAR_APPEL
+from constantes_agent import get_secret, supabase, MODELE_ROUTEUR_OUTILS, MODELE_ROUTEUR_OUTILS_REPLI, DELAI_MAX_PAR_APPEL
 
 def _resume_description_outil(description, max_caracteres=200):
     """
@@ -500,12 +500,16 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         "comme listés ci-dessus, liste vide si rien n'est pertinent)."
     )
 
-    try:
+    def _appeler_et_parser(model, avec_reasoning_effort, avec_outils_desactives):
         client_groq = Groq(api_key=get_secret("GROQ_API_KEY"), max_retries=0)
-        completion = client_groq.chat.completions.create(
-            model=MODELE_ROUTEUR_OUTILS,
+        kwargs = dict(
+            model=model,
             messages=[{"role": "user", "content": prompt_routeur}],
             response_format={"type": "json_object"},
+            max_completion_tokens=500,
+            timeout=DELAI_MAX_PAR_APPEL,
+        )
+        if avec_reasoning_effort:
             # 18/08 : MODELE_ROUTEUR_OUTILS (openai/gpt-oss-20b) est un
             # modele de raisonnement -- sans reasoning_effort explicite, il
             # tourne par defaut en "medium" (doc Groq), et ce raisonnement
@@ -517,17 +521,35 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
             # d'entree -- reduire le catalogue n'y changeait donc rien).
             # reasoning_effort="low" limite ce raisonnement, et 500 (au
             # lieu de 200) laisse une marge de securite pour le JSON final.
-            reasoning_effort="low",
-            max_completion_tokens=500,
-            timeout=DELAI_MAX_PAR_APPEL,
-        )
+            kwargs["reasoning_effort"] = "low"
+        if avec_outils_desactives:
+            # Voir MODELE_ROUTEUR_OUTILS_REPLI dans constantes_agent.py :
+            # compound-mini est agentique, il faut lui interdire d'appeler
+            # ses outils integres pour ce simple routage (json_object est
+            # sinon incompatible avec l'appel d'outils cote Groq).
+            kwargs["compound_custom"] = {"tools": {"enabled_tools": []}}
+
+        completion = client_groq.chat.completions.create(**kwargs)
         brut = completion.choices[0].message.content.strip()
         suggestion = json.loads(brut)
-        outils_suggeres = [n for n in suggestion.get("outils", []) if n in noms_valides]
+        return [n for n in suggestion.get("outils", []) if n in noms_valides]
+
+    try:
+        outils_suggeres = _appeler_et_parser(
+            MODELE_ROUTEUR_OUTILS, avec_reasoning_effort=True, avec_outils_desactives=False
+        )
         logging.info(f"Routeur d'outils -> suggérés : {outils_suggeres or '(aucun)'}")
         return outils_suggeres
-    except Exception as e:
-        logging.error(f"ERREUR routeur outils : {e}")
-        return []
+    except Exception as e_principal:
+        logging.warning(f"Routeur d'outils ({MODELE_ROUTEUR_OUTILS}) en echec, repli sur {MODELE_ROUTEUR_OUTILS_REPLI} : {e_principal}")
+        try:
+            outils_suggeres = _appeler_et_parser(
+                MODELE_ROUTEUR_OUTILS_REPLI, avec_reasoning_effort=False, avec_outils_desactives=True
+            )
+            logging.info(f"Routeur d'outils (repli) -> suggérés : {outils_suggeres or '(aucun)'}")
+            return outils_suggeres
+        except Exception as e_repli:
+            logging.error(f"ERREUR routeur outils (principal + repli) : {e_principal} / {e_repli}")
+            return []
 
 
