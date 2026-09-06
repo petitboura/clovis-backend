@@ -54,6 +54,7 @@ from api.appareils_mobiles import router as appareils_mobiles_router
 from api.canal_temps_reel import router as canal_temps_reel_router
 from api.webhooks_github import router as webhooks_github_router
 from api.dossiers_designes import router as dossiers_designes_router
+from api.programme_notions import router as programme_notions_router
 from core.serveur_mcp_generation import mcp_generation
 from core.notifications_push import traiter_rappels_echus, un_canal_push_disponible
 from core.proactivite import verifier_relances_proactives
@@ -575,6 +576,7 @@ app.include_router(appareils_mobiles_router)
 app.include_router(canal_temps_reel_router)
 app.include_router(dossiers_designes_router)
 app.include_router(webhooks_github_router)
+app.include_router(programme_notions_router)
 
 
 @app.get("/health")
