@@ -126,6 +126,16 @@ MESSAGES_FR: dict[str, str] = {
     "LE_NOM_DE_L_AGENT_EST": "Le nom de l'agent est obligatoire.",
     "LE_TITRE_NE_PEUT_PAS_ETRE": "Le titre ne peut pas être vide.",
     "MATIERE_INCONNUE": "Matière inconnue.",
+    # Structure des notions et avancement (Partie 1, 06/09/2026) --
+    # préfixe "NOTION_PROGRAMME_" pour ne jamais se confondre avec les
+    # codes "NOTION_..." plus bas, qui concernent l'intégration Notion
+    # (l'application tierce), sujet totalement différent.
+    "NOTION_PROGRAMME_CODE_INTROUVABLE": "Ce code de partage est introuvable.",
+    "NOTION_PROGRAMME_INTROUVABLE": "Cette notion est introuvable.",
+    "NOTION_PROGRAMME_NOM_MANQUANT": "Donne un nom à cette notion.",
+    "NOTION_PROGRAMME_STATUT_INVALIDE": "Statut de notion invalide.",
+    "NOTION_PROGRAMME_FUSION_INVALIDE": "Cette fusion n'est pas possible.",
+    "NOTION_PROGRAMME_GENERATION_ECHEC": "Échec de la génération de la structure, réessaie.",
     "NOTIFICATIONS_PUSH_INDISPONIBLE": "Les notifications push ne sont pas encore activées.",
     "NOTION_URL_AUTORISATION_INDISPONIBLE": "Connexion à Notion indisponible pour le moment.",
     "NOTION_CONNEXION_ECHEC": "Connexion à Notion impossible.",

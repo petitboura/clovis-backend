@@ -493,6 +493,13 @@ REGISTRE_AFFICHAGE_OUTILS = {
     # n'existe aucun outil MCP de ce nom.
     "consulter_skills_chapitres_matiere": {"label": "Consultation des skills des chapitres", "icone": "ScrollText", "onglet": None},
 
+    # --- Confiance pédagogique : avancement des notions (Partie 3,
+    # 06/09/2026) --- onglet=None, même logique que les blocs
+    # "Programme adaptatif"/"Bibliothèque" plus haut : outils que le
+    # modèle appelle lui-même en autonomie, jamais des boutons cliqués.
+    "gerer_avancement_notions": {"label": "Avancement du programme", "icone": "ListChecks", "onglet": None},
+    "consulter_avancement_notion": {"label": "Consultation de l'avancement", "icone": "BookOpen", "onglet": None},
+
     # --- Actions sur le téléphone de l'étudiant (26/08/2026) ---
     # onglet=None, même logique que les blocs "Programme adaptatif"/
     # "Bibliothèque" plus haut : outils que le modèle appelle lui-même en
