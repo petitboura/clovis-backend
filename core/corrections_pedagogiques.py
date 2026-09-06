@@ -45,6 +45,7 @@ from core.comportements_etudiants import ajouter_comportement as _ajouter_compor
 from core.generalisation_correction_pedagogique import (
     generaliser_correction_pedagogique as _generaliser_correction_pedagogique,
 )
+from core.mode_actif_conversation import obtenir_mode_actif as _obtenir_mode_actif
 
 
 def get_secret(key):
@@ -87,13 +88,44 @@ def _ligne_publique(ligne: dict) -> dict:
     }
 
 
-def resoudre_prof_actif(etudiant_id: str) -> str | None:
-    """Prof (propriétaire de code) actuellement rattaché à cet élève :
-    None si aucun rattachement actif. Un élève n'a jamais plus d'un prof
-    actif en pratique à ce stade (confirmé par Bourama) : s'il y en
-    avait malgré tout plusieurs (état incohérent), on prend le plus
-    ancien plutôt que de bloquer le signalement, et on le signale dans
-    les logs pour investigation."""
+def resoudre_prof_actif(etudiant_id: str, conversation_id: str | None = None) -> str | None:
+    """Prof (propriétaire de code) auquel rattacher un signalement.
+
+    Utilise en priorité le mode actif choisi par l'élève pour CETTE
+    conversation (core/mode_actif_conversation.py, Partie 6, poussé en
+    parallèle le 06/09, exactement le mécanisme anticipé par sa propre
+    docstring : "pour la résolution du bon scope de comportement"). Un
+    élève peut avoir plusieurs codes rattachés, mais un seul est actif
+    pour une conversation donnée (confirmé par Bourama, 06/09) : il n'y
+    a donc jamais d'ambiguïté une fois le mode actif connu.
+
+    Repli (aucune conversation_id fournie, ou aucun mode actif choisi
+    pour cette conversation) : prend le rattachement actif le plus
+    ancien de cet élève, tous codes confondus, ne bloque jamais un
+    signalement pour cette raison, mais journalise le cas s'il y a
+    plusieurs rattachements possibles (état ambigu, à ne pas deviner
+    silencieusement)."""
+    if conversation_id:
+        try:
+            mode = _obtenir_mode_actif(conversation_id, etudiant_id)
+        except Exception as e:
+            logging.error(f"ERREUR lecture mode actif ({conversation_id}, {etudiant_id}) : {e}")
+            mode = None
+        if mode and mode.get("rattachement_id"):
+            try:
+                res_mode = (
+                    supabase.table("rattachements_codes")
+                    .select("codes_partage!inner(proprietaire_id)")
+                    .eq("id", mode["rattachement_id"])
+                    .maybe_single()
+                    .execute()
+                )
+            except Exception as e:
+                logging.error(f"ERREUR SUPABASE (résolution du rattachement actif {mode['rattachement_id']}) : {e}")
+                res_mode = None
+            if res_mode and res_mode.data and res_mode.data.get("codes_partage"):
+                return res_mode.data["codes_partage"]["proprietaire_id"]
+
     try:
         res = (
             supabase.table("rattachements_codes")
@@ -112,8 +144,8 @@ def resoudre_prof_actif(etudiant_id: str) -> str | None:
         return None
     if len(lignes) > 1:
         logging.warning(
-            f"Élève {etudiant_id} rattaché à plusieurs profs actifs à la fois "
-            f"({len(lignes)}), cas non géré, prise du plus ancien rattachement."
+            f"Élève {etudiant_id} rattaché à plusieurs profs actifs sans mode actif choisi pour "
+            f"cette conversation ({len(lignes)}), prise du plus ancien rattachement."
         )
     return lignes[0]["codes_partage"]["proprietaire_id"]
 
@@ -158,7 +190,7 @@ def creer_correction(
     if type_ not in TYPES_VALIDES:
         raise ValueError("TYPE_INVALIDE")
 
-    prof_id = resoudre_prof_actif(etudiant_id)
+    prof_id = resoudre_prof_actif(etudiant_id, conversation_id)
     contexte = _capturer_contexte(conversation_id, reponse_message_id)
 
     ligne_a_inserer = {
