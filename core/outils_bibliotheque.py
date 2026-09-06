@@ -35,6 +35,10 @@ from core.catalogue_public_rag import (
     lire_document_catalogue_public as _lire_document_catalogue_public,
     lister_catalogue_public as _lister_catalogue_public,
 )
+from core.file_attente_vectorisation import (
+    vectoriser_maintenant_publique as _vectoriser_maintenant_publique,
+    supabase as _supabase,
+)
 from core.dossiers_bibliotheque import (
     _proprietaire_dossier,
     creer_dossier as _creer_dossier,
@@ -287,6 +291,32 @@ def gerer_document_bibliotheque(
             return "Erreur : la recherche dans le catalogue public a échoué, réessaie."
         if not resultats:
             return "Rien de pertinent trouvé dans le catalogue public pour cette question."
+
+        # 06/09/2026, demande Bourama (chantier vectorisation à la
+        # demande) : un document trouvé ici est une VRAIE correspondance
+        # (recherche_catalogue_public_mots_cles cherche déjà dans
+        # nom/description/texte_brut en secours de la recherche
+        # sémantique) -- s'il n'est pas encore "pret", on le vectorise
+        # MAINTENANT pour que la PROCHAINE recherche le retrouve
+        # instantanément par le sens. N'affecte jamais cette réponse-ci
+        # (déjà trouvée par nom/description, jamais par contenu ici) ;
+        # best-effort, une erreur ne doit jamais casser la réponse.
+        # Plafond de 3, jamais tout le catalogue d'un coup.
+        try:
+            ids_a_verifier = [r["fichier_id"] for r in resultats if r.get("fichier_id")][:3]
+            if ids_a_verifier:
+                statuts = (
+                    _supabase.table("bibliotheque_publique")
+                    .select("id, statut_vectorisation")
+                    .in_("id", ids_a_verifier)
+                    .execute()
+                ).data or []
+                for s in statuts:
+                    if s.get("statut_vectorisation") not in ("pret", "en_cours"):
+                        _vectoriser_maintenant_publique(s["id"])
+        except Exception as e:
+            logging.error(f"ERREUR vectorisation à la demande (trouver_catalogue_public) : {e}")
+
         lignes = []
         for r in resultats:
             ligne = f"- {r['nom']}"

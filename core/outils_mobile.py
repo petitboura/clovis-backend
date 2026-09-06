@@ -35,6 +35,7 @@ from core.vectorisation_dossiers_designes import (
     formater_source_dossier_designe as _formater_source_dossier_designe,
     chercher_fichiers_dossier_designe_par_metadonnees as _chercher_fichiers_par_metadonnees,
     formater_resultat_metadonnees_dossier_designe as _formater_resultat_metadonnees,
+    vectoriser_maintenant as _vectoriser_maintenant,
     CATEGORIES_TYPE_FICHIER as _CATEGORIES_TYPE_FICHIER,
 )
 from core.bibliotheque_fichiers import enregistrer_fichier as _enregistrer_fichier
@@ -499,6 +500,38 @@ async def explorer_dossier(
                 r for r in resultats_vectorises_bruts
                 if r.get("dossier_nom") == dossier_nom
             ]
+
+            # 06/09/2026, demande Bourama (chantier vectorisation à la
+            # demande) : un fichier trouvé par métadonnées (donc une
+            # VRAIE correspondance, chercher_fichiers_par_metadonnees a
+            # déjà filtré par mot_cle) mais pas encore "pret" est
+            # vectorisé MAINTENANT -- seulement lui, jamais tout le
+            # dossier -- puis re-cherché pour renvoyer son contenu réel
+            # dès cette réponse, pas seulement au tour suivant. Plafond
+            # de 3 par appel (pas de recherche "chercher_par_contenu"
+            # qui déclenche 50 vectorisations d'un coup).
+            candidats_a_vectoriser = [
+                r["id"] for r in resultats_metadonnees
+                if r.get("statut_vectorisation") not in ("pret", "en_cours")
+            ][:3]
+            if candidats_a_vectoriser:
+                await to_thread.run_sync(
+                    lambda: [_vectoriser_maintenant(fid) for fid in candidats_a_vectoriser]
+                )
+                resultats_vectorises_apres = await to_thread.run_sync(
+                    _chercher_dossiers_designes, terme_recherche, user_id
+                )
+                resultats_vectorises = [
+                    r for r in resultats_vectorises_apres
+                    if r.get("dossier_nom") == dossier_nom
+                ]
+                # Statuts rafraichis pour l'affichage metadonnees ci-dessous
+                # (sinon un fichier tout juste vectorise s'affiche encore
+                # "pas encore indexe").
+                resultats_metadonnees = await to_thread.run_sync(
+                    _chercher_fichiers_par_metadonnees,
+                    user_id, dossier_nom, terme_recherche, type_fichier or None, chemin,
+                )
 
             if resultats_vectorises or resultats_metadonnees:
                 blocs = []

@@ -62,7 +62,13 @@ from core.serveur_mcp_generation import mcp_generation
 from core.notifications_push import traiter_rappels_echus, un_canal_push_disponible
 from core.proactivite import verifier_relances_proactives
 from core.audit_hebdomadaire_corrections import verifier_audits_hebdomadaires
-from core.file_attente_vectorisation import remettre_en_attente_bloques, traiter_file_attente_une_fois, relancer_echecs_a_froid
+from core.file_attente_vectorisation import (
+    remettre_en_attente_bloques,
+    traiter_file_attente_une_fois,
+    relancer_echecs_a_froid,
+    traiter_extractions_texte_publique_une_fois,
+    relancer_echecs_extraction_a_froid_publique,
+)
 # 04/09/2026, demande Bourama : vectorisation en masse des fichiers d'un
 # dossier désigné (téléphone) -- module DÉDIÉ, distinct de la file
 # d'attente ci-dessus (bibliothèque perso/publique), voir docstring de
@@ -72,6 +78,8 @@ from core.vectorisation_dossiers_designes import (
     remettre_en_attente_bloques as remettre_en_attente_bloques_dossiers_designes,
     traiter_file_attente_une_fois as traiter_file_attente_dossiers_designes_une_fois,
     relancer_echecs_a_froid as relancer_echecs_a_froid_dossiers_designes,
+    traiter_extractions_texte_une_fois as traiter_extractions_texte_dossiers_designes_une_fois,
+    relancer_echecs_extraction_a_froid as relancer_echecs_extraction_a_froid_dossiers_designes,
 )
 # 04/09/2026, demande Bourama : description manquante des skills importés
 # (.md) générée en arrière-plan, sans bloquer l'upload -- voir docstring
@@ -199,6 +207,35 @@ async def _boucle_reessai_echecs_dossiers_designes():
         await asyncio.sleep(5 * 60)
 
 
+async def _boucle_extraction_texte_dossiers_designes():
+    """
+    06/09/2026, chantier vectorisation à la demande : extraction GRATUITE
+    du texte (pdf/word/excel/texte) des dossiers désignés, distincte de
+    la vraie vectorisation -- voir docstring de core/vectorisation_
+    dossiers_designes.py. Aucun appel Gemini/Groq ici, même rythme que
+    les autres files.
+    """
+    while True:
+        try:
+            traites = await to_thread.run_sync(traiter_extractions_texte_dossiers_designes_une_fois)
+        except Exception as e:
+            logging.error(f"ERREUR boucle extraction texte dossiers désignés : {e}")
+            traites = 0
+        await asyncio.sleep(2 if traites > 0 else 5)
+
+
+async def _boucle_reessai_echecs_extraction_dossiers_designes():
+    """Réessai automatique à froid des échecs d'extraction de texte (dossiers désignés) -- même mécanisme que _boucle_reessai_echecs_dossiers_designes."""
+    while True:
+        try:
+            relances = await to_thread.run_sync(relancer_echecs_extraction_a_froid_dossiers_designes)
+            if relances:
+                logging.info(f"Réessai auto à froid (extraction texte dossiers désignés) : {relances} fichier(s) remis en file.")
+        except Exception as e:
+            logging.error(f"ERREUR boucle réessai à froid extraction dossiers désignés : {e}")
+        await asyncio.sleep(5 * 60)
+
+
 async def _boucle_description_skills():
     """
     File d'attente de génération de description manquante pour les
@@ -226,6 +263,35 @@ async def _boucle_reessai_echecs_description():
                 logging.info(f"Réessai auto à froid (description skills) : {relances} skill(s) remis en file.")
         except Exception as e:
             logging.error(f"ERREUR boucle réessai à froid description skills : {e}")
+        await asyncio.sleep(5 * 60)
+
+
+async def _boucle_extraction_texte_publique():
+    """
+    06/09/2026, chantier vectorisation à la demande : extraction GRATUITE
+    du texte (pdf/word/excel/texte) du catalogue public, distincte de la
+    vraie vectorisation -- voir docstring de core/file_attente_
+    vectorisation.py. Aucun appel Gemini/Groq ici, même rythme que
+    _boucle_vectorisation.
+    """
+    while True:
+        try:
+            traites = await to_thread.run_sync(traiter_extractions_texte_publique_une_fois)
+        except Exception as e:
+            logging.error(f"ERREUR boucle extraction texte publique : {e}")
+            traites = 0
+        await asyncio.sleep(2 if traites > 0 else 5)
+
+
+async def _boucle_reessai_echecs_extraction_publique():
+    """Réessai automatique à froid des échecs d'extraction de texte (catalogue public) -- même mécanisme que _boucle_reessai_echecs."""
+    while True:
+        try:
+            relances = await to_thread.run_sync(relancer_echecs_extraction_a_froid_publique)
+            if relances:
+                logging.info(f"Réessai auto à froid (extraction texte publique) : {relances} fichier(s) remis en file.")
+        except Exception as e:
+            logging.error(f"ERREUR boucle réessai à froid extraction publique : {e}")
         await asyncio.sleep(5 * 60)
 
 
@@ -296,8 +362,12 @@ async def _lifespan(app: FastAPI):
             tache_proactivite = asyncio.create_task(_boucle_planificateur_proactivite())
         tache_vectorisation = asyncio.create_task(_boucle_vectorisation())
         tache_reessai_echecs = asyncio.create_task(_boucle_reessai_echecs())
+        tache_extraction_texte_publique = asyncio.create_task(_boucle_extraction_texte_publique())
+        tache_reessai_echecs_extraction_publique = asyncio.create_task(_boucle_reessai_echecs_extraction_publique())
         tache_vectorisation_dossiers_designes = asyncio.create_task(_boucle_vectorisation_dossiers_designes())
         tache_reessai_echecs_dossiers_designes = asyncio.create_task(_boucle_reessai_echecs_dossiers_designes())
+        tache_extraction_texte_dossiers_designes = asyncio.create_task(_boucle_extraction_texte_dossiers_designes())
+        tache_reessai_echecs_extraction_dossiers_designes = asyncio.create_task(_boucle_reessai_echecs_extraction_dossiers_designes())
         tache_description_skills = asyncio.create_task(_boucle_description_skills())
         tache_reessai_echecs_description = asyncio.create_task(_boucle_reessai_echecs_description())
         tache_audit_corrections = asyncio.create_task(_boucle_planificateur_audit_corrections())
@@ -308,8 +378,12 @@ async def _lifespan(app: FastAPI):
             tache_proactivite.cancel()
         tache_vectorisation.cancel()
         tache_reessai_echecs.cancel()
+        tache_extraction_texte_publique.cancel()
+        tache_reessai_echecs_extraction_publique.cancel()
         tache_vectorisation_dossiers_designes.cancel()
         tache_reessai_echecs_dossiers_designes.cancel()
+        tache_extraction_texte_dossiers_designes.cancel()
+        tache_reessai_echecs_extraction_dossiers_designes.cancel()
         tache_description_skills.cancel()
         tache_reessai_echecs_description.cancel()
         tache_audit_corrections.cancel()

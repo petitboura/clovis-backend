@@ -37,6 +37,7 @@ from api.auth import utilisateur_courant
 from core.erreurs import erreur_api
 from core.file_attente_vectorisation import (
     necessite_vectorisation_fichier_publique,
+    necessite_extraction_texte_publique,
     necessite_vectorisation_note,
     reinitialiser_pour_reessai,
 )
@@ -224,7 +225,19 @@ async def ajouter_a_bibliotheque_publique(
                 # retirée) se faisait ici, de façon synchrone et
                 # bloquante -- long sur un gros fichier ou un upload en
                 # masse.
-                "statut_vectorisation": "en_attente" if necessite_vectorisation_fichier_publique(fichier.content_type) else "pret",
+                # 06/09/2026, demande Bourama : seule l'image garde une
+                # vraie vectorisation automatique ; pdf/word/excel/texte
+                # reçoivent une extraction de texte gratuite automatique
+                # (statut_extraction_texte) ; audio/vidéo/inconnu restent
+                # entièrement à la demande (voir docstring de
+                # core/file_attente_vectorisation.py).
+                **(
+                    {"statut_vectorisation": "en_attente", "statut_extraction_texte": "non_applicable"}
+                    if necessite_vectorisation_fichier_publique(fichier.content_type)
+                    else {"statut_vectorisation": "a_la_demande", "statut_extraction_texte": "en_attente"}
+                    if necessite_extraction_texte_publique(fichier.content_type)
+                    else {"statut_vectorisation": "a_la_demande", "statut_extraction_texte": "non_applicable"}
+                ),
                 # 02/09/2026, demande Bourama : 3 filtres optionnels à la
                 # publication (voir core/listes_bibliotheque_publique.py).
                 "pays": normaliser_et_enregistrer("pays", pays),

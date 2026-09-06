@@ -3,6 +3,24 @@ Cree le 04/09/2026, Bourama : vectorisation automatique en arriere-plan
 de tout le contenu (hormis video) d'un dossier designe sur le telephone
 (dossiers_designes_mobile.py), transfere via api/dossiers_designes.py.
 
+MIS A JOUR le 06/09/2026 (demande Bourama, meme chantier applique aussi
+a la bibliotheque publique -- voir core/file_attente_vectorisation.py) :
+la VRAIE vectorisation automatique a la designation est retiree pour
+tout sauf l'image. A la place :
+- Image : inchange, vraie vectorisation automatique des la designation.
+- PDF / Word / Excel / texte brut : EXTRACTION GRATUITE du texte brut
+  des la designation (necessite_extraction_texte ci-dessous, statut
+  dedie statut_extraction_texte), cherchable par mot-cle immediatement
+  (voir chercher_fichiers_dossier_designe_par_metadonnees). La VRAIE
+  vectorisation (sens) n'a lieu qu'A LA DEMANDE, quand l'exploration en
+  direct (core/outils_mobile.py::explorer_dossier) trouve une vraie
+  correspondance sur ce fichier precis -- voir vectoriser_maintenant.
+- Audio / Video : plus rien d'automatique du tout (ni extraction ni
+  vectorisation). Tout a la demande (vectoriser_maintenant), y compris
+  la video desormais ACCEPTEE a la designation (l'interdiction du
+  04/09 etait uniquement due au cout de la vectorisation automatique,
+  qui disparait ici -- voir api/dossiers_designes.py).
+
 Module DEDIE, distinct de core/file_attente_vectorisation.py (bibliotheque
 perso/publique) -- meme inspiration (file d'attente, statuts, robustesse
 au redemarrage) mais PAS le meme module, pour ne rien risquer sur le
@@ -17,6 +35,9 @@ ailleurs dans le projet (aucune logique dupliquee pour rien) :
   pour ne pas creer de dependance croisee entre circuits)
 - Image : core/description_multimedia.py::decrire_image_bibliotheque
 - Audio : core/description_multimedia.py::transcrire_audio_bibliotheque
+- Video : core/description_multimedia.py::transcrire_et_decrire_video_bibliotheque
+  (transcription + description de frames -- 06/09, briques reutilisees
+  de la video de chat, jamais branchees avant a une recherche future)
 - Word (.docx) / Excel (.xlsx) : memes fonctions que api/uploads.py
   (_extraire_texte_docx/_extraire_texte_xlsx), dupliquees ici sur des
   bytes -- meme convention de duplication volontaire deja assumee entre
@@ -37,7 +58,8 @@ reessai est AUTOMATIQUE A FROID (apres COOLDOWN_REESSAI), et SANS
 PLAFOND -- contrairement a MAX_TENTATIVES_AUTO de la bibliotheque perso,
 un fichier repart indefiniment tant qu'il echoue, jusqu'a reussir. Pas de
 bouton "reessayer" manuel pour l'instant (pas demande ici, a ajouter si
-besoin).
+besoin). Meme politique reprise pour la nouvelle file d'extraction de
+texte (statut_extraction_texte).
 """
 
 import io
@@ -51,7 +73,7 @@ from supabase import create_client
 
 sys.path.append(os.path.dirname(__file__))
 from embeddings import activer_pause_quota_gemini, decouper_texte, est_en_pause_quota_gemini, est_erreur_quota_gemini, vectoriser  # noqa: E402
-from description_multimedia import decrire_image_bibliotheque, transcrire_audio_bibliotheque  # noqa: E402
+from description_multimedia import decrire_image_bibliotheque, transcrire_audio_bibliotheque, transcrire_et_decrire_video_bibliotheque  # noqa: E402
 
 BUCKET_DOSSIERS_DESIGNES = "bibliotheque"  # meme bucket que la bibliotheque perso, sous-dossier "dossiers_designes/" (voir api/dossiers_designes.py)
 TAILLE_LOT = 5  # meme garde-fou que file_attente_vectorisation.py -- un passage ne tourne jamais indefiniment
@@ -66,6 +88,9 @@ EXTENSIONS_TEXTE_BRUT = {
     "xml", "yaml", "yml", "java", "c", "cpp", "kt", "sh", "log",
 }
 
+TYPES_MIME_WORD = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+TYPES_MIME_EXCEL = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
 
 def _get_secret(cle):
     return os.environ.get(cle)
@@ -78,31 +103,34 @@ def _extension(nom_fichier: str) -> str:
     return nom_fichier.rsplit(".", 1)[-1].lower() if "." in (nom_fichier or "") else ""
 
 
-def necessite_vectorisation(type_mime: str | None, nom_fichier: str) -> bool:
+def necessite_vectorisation(type_mime: str | None) -> bool:
     """
-    Tout est vectorise HORMIS la video (exclue explicitement par Bourama,
-    trop couteux -- voir echange du 04/09). Le reste ("tout hormis
-    video", demande explicite) : pdf, image, audio, docx, xlsx, texte
-    brut. Un type totalement inconnu (ni mime reconnu ni extension texte
-    brut) n'est pas vectorise -- pas d'erreur pour autant, juste "pret"
-    directement (voir api/dossiers_designes.py).
+    06/09/2026 : seule l'IMAGE declenche encore une vraie vectorisation
+    automatique a la designation (cout Gemini vision par image jugee
+    acceptable par Bourama, contrairement au reste). Tout le reste passe
+    par necessite_extraction_texte (gratuit, pdf/word/excel/texte) ou
+    reste totalement en attente d'une demande explicite (audio/video).
     """
-    if not type_mime:
-        return _extension(nom_fichier) in EXTENSIONS_TEXTE_BRUT
-    if type_mime.startswith("video/"):
-        return False
+    return bool(type_mime) and type_mime.startswith("image/")
+
+
+def necessite_extraction_texte(type_mime: str | None, nom_fichier: str) -> bool:
+    """
+    06/09/2026 : pdf/word/excel/texte brut recoivent une extraction de
+    texte GRATUITE (aucun appel Gemini/Groq) des la designation, pour
+    etre cherchables par mot-cle immediatement -- voir
+    chercher_fichiers_dossier_designe_par_metadonnees. La vraie
+    vectorisation (sens) de ce texte reste a la demande (voir
+    vectoriser_maintenant).
+    """
     if type_mime == "application/pdf":
         return True
-    if type_mime.startswith("image/"):
+    if type_mime in (TYPES_MIME_WORD, TYPES_MIME_EXCEL):
         return True
-    if type_mime.startswith("audio/"):
+    if type_mime == "text/plain" or (not type_mime and _extension(nom_fichier) in EXTENSIONS_TEXTE_BRUT):
         return True
-    if type_mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        return True
-    if type_mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-        return True
-    if type_mime == "text/plain" or _extension(nom_fichier) in EXTENSIONS_TEXTE_BRUT:
-        return True
+    if type_mime is None:
+        return _extension(nom_fichier) in EXTENSIONS_TEXTE_BRUT
     return False
 
 
@@ -188,11 +216,20 @@ def _vectoriser_fichier(ligne: dict) -> None:
             texte = (segment.get("text") or "").strip()
             if texte:
                 _indexer_texte(texte, fichier_id, user_id, timestamp_debut=segment.get("start"), timestamp_fin=segment.get("end"))
-    elif type_mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+    elif type_mime.startswith("video/"):
+        resultat = transcrire_et_decrire_video_bibliotheque(contenu, nom_fichier, extension or "mp4")
+        for segment in (resultat or {}).get("segments_audio") or []:
+            texte = (segment.get("text") or "").strip()
+            if texte:
+                _indexer_texte(texte, fichier_id, user_id, timestamp_debut=segment.get("start"), timestamp_fin=segment.get("end"))
+        for description in (resultat or {}).get("descriptions_frames") or []:
+            if description.strip():
+                _indexer_texte(description, fichier_id, user_id)
+    elif type_mime == TYPES_MIME_WORD:
         texte = _extraire_texte_docx_bytes(contenu)
         if texte.strip():
             _indexer_texte(texte, fichier_id, user_id)
-    elif type_mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+    elif type_mime == TYPES_MIME_EXCEL:
         texte = _extraire_texte_xlsx_bytes(contenu)
         if texte.strip():
             _indexer_texte(texte, fichier_id, user_id)
@@ -213,17 +250,158 @@ def extraire_pages_pdf_bytes(contenu: bytes) -> list[str]:
     return pages
 
 
+def _extraire_texte_pour_extraction(type_mime: str | None, extension: str, contenu: bytes) -> str:
+    """
+    Extraction GRATUITE (aucun appel Gemini/Groq) pour pdf/word/excel/texte
+    brut -- voir necessite_extraction_texte. Reutilise les memes fonctions
+    que la vraie vectorisation (extraire_pages_pdf_bytes,
+    _extraire_texte_docx_bytes, _extraire_texte_xlsx_bytes) mais assemble
+    le texte en UN SEUL bloc (pas de decoupage par page ici, juste pour la
+    recherche par mot-cle -- le decoupage/embedding reel n'a lieu qu'a la
+    demande, voir vectoriser_maintenant).
+    """
+    if type_mime == "application/pdf":
+        return "\n\n".join(extraire_pages_pdf_bytes(contenu))
+    if type_mime == TYPES_MIME_WORD:
+        return _extraire_texte_docx_bytes(contenu)
+    if type_mime == TYPES_MIME_EXCEL:
+        return _extraire_texte_xlsx_bytes(contenu)
+    return contenu.decode("utf-8", errors="ignore")
+
+
 def remettre_en_attente_bloques() -> None:
     """Appelee une fois au demarrage du process -- voir docstring de file_attente_vectorisation.py::remettre_en_attente_bloques (meme raison : Railway redeploie a chaque push)."""
     try:
         supabase.table("fichiers_dossier_designe").update({"statut_vectorisation": "en_attente"}).eq(
             "statut_vectorisation", "en_cours"
         ).execute()
+        supabase.table("fichiers_dossier_designe").update({"statut_extraction_texte": "en_attente"}).eq(
+            "statut_extraction_texte", "en_cours"
+        ).execute()
     except Exception as e:
         logging.error(f"ERREUR remise en attente au demarrage (dossiers designes) : {e}")
 
 
-COLONNES = "id, user_id, chemin_stockage, nom_fichier, type_mime, tentatives_vectorisation"
+COLONNES = "id, user_id, chemin_stockage, nom_fichier, type_mime, tentatives_vectorisation, statut_vectorisation"
+COLONNES_EXTRACTION = "id, chemin_stockage, nom_fichier, type_mime, tentatives_vectorisation"
+
+
+def traiter_extractions_texte_une_fois() -> int:
+    """
+    06/09/2026 : pendant GRATUITE distincte de traiter_file_attente_une_fois
+    -- extrait le texte brut de pdf/word/excel/texte des la designation
+    (statut_extraction_texte = "en_attente"), AUCUN appel Gemini/Groq donc
+    AUCUN coupe-circuit quota ici. Meme garde-fou TAILLE_LOT qu'ailleurs.
+    """
+    try:
+        lignes = (
+            supabase.table("fichiers_dossier_designe")
+            .select(COLONNES_EXTRACTION)
+            .eq("statut_extraction_texte", "en_attente")
+            .order("created_at")
+            .limit(TAILLE_LOT)
+            .execute()
+        ).data or []
+    except Exception as e:
+        logging.error(f"ERREUR lecture file d'attente extraction (dossiers designes) : {e}")
+        return 0
+
+    for ligne in lignes:
+        fichier_id = ligne["id"]
+        try:
+            supabase.table("fichiers_dossier_designe").update({"statut_extraction_texte": "en_cours"}).eq("id", fichier_id).execute()
+            contenu = _telecharger(ligne["chemin_stockage"])
+            texte = _extraire_texte_pour_extraction(ligne["type_mime"], _extension(ligne["nom_fichier"]), contenu)
+            supabase.table("fichiers_dossier_designe").update({
+                "texte_brut": texte or None,
+                "statut_extraction_texte": "fait",
+            }).eq("id", fichier_id).execute()
+        except Exception as e:
+            logging.error(f"ERREUR extraction texte (dossiers designes, fichier_id={fichier_id}) : {e}")
+            try:
+                supabase.table("fichiers_dossier_designe").update({"statut_extraction_texte": "echec"}).eq("id", fichier_id).execute()
+            except Exception as e2:
+                logging.error(f"ERREUR mise a jour statut echec extraction (dossiers designes, fichier_id={fichier_id}) : {e2}")
+
+    return len(lignes)
+
+
+def relancer_echecs_extraction_a_froid() -> int:
+    """Meme politique que relancer_echecs_a_froid ci-dessous, pour l'extraction de texte -- pas de coupe-circuit quota ici (aucun appel externe)."""
+    seuil = (datetime.now(timezone.utc) - COOLDOWN_REESSAI).isoformat()
+    try:
+        resultat = (
+            supabase.table("fichiers_dossier_designe")
+            .update({"statut_extraction_texte": "en_attente"})
+            .eq("statut_extraction_texte", "echec")
+            .lt("created_at", seuil)
+            .execute()
+        )
+        return len(resultat.data or [])
+    except Exception as e:
+        logging.error(f"ERREUR reessai automatique a froid extraction (dossiers designes) : {e}")
+        return 0
+
+
+def vectoriser_maintenant(fichier_id: str) -> bool:
+    """
+    06/09/2026, demande Bourama : VRAIE vectorisation A LA DEMANDE d'UN
+    SEUL fichier precis, appelee depuis l'exploration en direct
+    (core/outils_mobile.py::explorer_dossier) quand ce fichier correspond
+    vraiment a la recherche -- jamais tout un dossier d'un coup. Idempotent
+    : si deja "pret", ne refait rien et renvoie True directement.
+
+    Renvoie True si le fichier est desormais vectorise (ou l'etait deja),
+    False en cas d'echec (statut passe a "echec", repris ensuite par
+    relancer_echecs_a_froid comme n'importe quel autre echec).
+    """
+    try:
+        ligne = (
+            supabase.table("fichiers_dossier_designe")
+            .select(COLONNES)
+            .eq("id", fichier_id)
+            .single()
+            .execute()
+        ).data
+    except Exception as e:
+        logging.error(f"ERREUR lecture fichier pour vectorisation a la demande (dossiers designes, fichier_id={fichier_id}) : {e}")
+        return False
+
+    if not ligne:
+        return False
+    if ligne.get("statut_vectorisation") == "pret":
+        return True
+
+    if est_en_pause_quota_gemini():
+        return False
+
+    maintenant_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        supabase.table("fichiers_dossier_designe").update({"statut_vectorisation": "en_cours"}).eq("id", fichier_id).execute()
+        _vectoriser_fichier(ligne)
+        supabase.table("fichiers_dossier_designe").update({
+            "statut_vectorisation": "pret",
+            "erreur_vectorisation": None,
+            "derniere_tentative_vectorisation_a": maintenant_iso,
+        }).eq("id", fichier_id).execute()
+        return True
+    except Exception as e:
+        tentatives = (ligne.get("tentatives_vectorisation") or 0) + 1
+        if est_erreur_quota_gemini(str(e)):
+            activer_pause_quota_gemini()
+            logging.error(f"QUOTA GEMINI épuisé (vectorisation à la demande, dossiers designes, fichier_id={fichier_id}) : pause de 24h.")
+        else:
+            logging.error(f"ERREUR vectorisation à la demande (dossiers designes, fichier_id={fichier_id}, tentative {tentatives}) : {e}")
+        try:
+            supabase.table("fichiers_dossier_designe").update({
+                "statut_vectorisation": "echec",
+                "tentatives_vectorisation": tentatives,
+                "erreur_vectorisation": str(e)[:500],
+                "derniere_tentative_vectorisation_a": maintenant_iso,
+            }).eq("id", fichier_id).execute()
+        except Exception as e2:
+            logging.error(f"ERREUR mise a jour statut echec (vectorisation à la demande, dossiers designes, fichier_id={fichier_id}) : {e2}")
+        return False
 
 
 def traiter_file_attente_une_fois() -> int:
@@ -403,7 +581,9 @@ def chercher_fichiers_dossier_designe_par_metadonnees(
     ENCORE vectorises (n'importe quel statut_vectorisation).
 
     - mot_cle : sous-chaine insensible a la casse cherchee dans
-      nom_fichier UNIQUEMENT (jamais le contenu). None/vide = pas de filtre.
+      nom_fichier OU texte_brut (06/09 : texte deja extrait gratuitement
+      pour pdf/word/excel/texte, voir necessite_extraction_texte).
+      None/vide = pas de filtre.
     - type_fichier : categorie EXACTE parmi CATEGORIES_TYPE_FICHIER
       ci-dessus. None/vide = pas de filtre. Une valeur hors de cette liste
       est ignoree ici (la validation stricte, avec message d'erreur, est
@@ -429,7 +609,7 @@ def chercher_fichiers_dossier_designe_par_metadonnees(
         .eq("dossier_nom", dossier_nom)
     )
     if mot_cle:
-        requete = requete.ilike("nom_fichier", f"%{mot_cle}%")
+        requete = requete.or_(f"nom_fichier.ilike.%{mot_cle}%,texte_brut.ilike.%{mot_cle}%")
     if type_fichier and type_fichier in CATEGORIES_TYPE_FICHIER:
         valeur = CATEGORIES_TYPE_FICHIER[type_fichier]
         if type_fichier in _CATEGORIES_TYPE_FICHIER_PREFIXE:

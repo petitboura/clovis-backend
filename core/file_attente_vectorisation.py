@@ -57,6 +57,23 @@ proposée à l'utilisateur = supprimer + réajouter) -- deux mécanismes :
   le fichier à "en_attente" immédiatement, sans attendre le cooldown --
   toujours disponible tant que le fichier est en échec, même après avoir
   épuisé le plafond automatique.
+
+MIS A JOUR le 06/09/2026 (demande Bourama, même chantier que
+core/vectorisation_dossiers_designes.py) : la bibliothèque PUBLIQUE
+(bibliotheque_publique) uniquement -- la privée (fichiers_uploades) est
+explicitement HORS SCOPE ici, inchangée -- perd la vraie vectorisation
+automatique à l'ajout pour tout sauf l'image :
+- Image : inchangé, vraie vectorisation automatique.
+- PDF / Word / Excel / texte : EXTRACTION GRATUITE du texte à l'ajout
+  (necessite_extraction_texte_publique, colonne texte_brut, statut
+  dédié statut_extraction_texte), cherchable par mot-clé immédiatement
+  (recherche_catalogue_public_mots_cles cherche déjà dans texte_brut).
+  La vraie vectorisation reste à la demande (vectoriser_maintenant_
+  publique), déclenchée depuis core/outils_bibliotheque.py quand
+  l'action "trouver_catalogue_public" trouve une vraie correspondance.
+- Audio / Vidéo : plus rien d'automatique, tout à la demande (y compris
+  la vidéo désormais, réutilise les briques ffmpeg/Whisper/Gemini de
+  core/description_multimedia.py::transcrire_et_decrire_video_bibliotheque).
 """
 
 import logging
@@ -77,8 +94,9 @@ from catalogue_public_rag import (  # noqa: E402
     indexer_pdf_catalogue_public,
     indexer_texte_catalogue_public,
     indexer_transcription_catalogue_public,
+    extraire_pages_pdf as extraire_pages_pdf_catalogue_public,
 )
-from description_multimedia import decrire_image_bibliotheque, transcrire_audio_bibliotheque  # noqa: E402
+from description_multimedia import decrire_image_bibliotheque, transcrire_audio_bibliotheque, transcrire_et_decrire_video_bibliotheque  # noqa: E402
 from embeddings import activer_pause_quota_gemini, est_en_pause_quota_gemini, est_erreur_quota_gemini  # noqa: E402
 
 BUCKET_BIBLIOTHEQUE = "bibliotheque"
@@ -94,6 +112,9 @@ TAILLE_LOT = 5  # fichiers traités par passage, par bibliothèque -- garde-fou 
 # le bouton "Réessayer" manuel (reinitialiser_pour_reessai) reste possible.
 COOLDOWN_AUTO_REESSAI = timedelta(minutes=15)
 MAX_TENTATIVES_AUTO = MAX_TENTATIVES + 3
+
+TYPES_MIME_WORD = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+TYPES_MIME_EXCEL = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 def _get_secret(cle):
@@ -111,6 +132,11 @@ def necessite_vectorisation_fichier_privee(type_mime: str | None) -> bool:
     envoyé comme fichier via cette route n'a jamais été vectorisé ici
     (seule la note tapée directement, route /texte, l'est -- voir
     necessite_vectorisation_note) : comportement inchangé.
+
+    HORS SCOPE du chantier du 06/09 (extraction gratuite + vectorisation
+    à la demande) -- Bourama a confirmé que ce chantier ne concerne QUE
+    les dossiers désignés (téléphone) et la bibliothèque publique,
+    jamais cette bibliothèque privée manuelle. Comportement inchangé.
     """
     if not type_mime:
         return False
@@ -119,25 +145,56 @@ def necessite_vectorisation_fichier_privee(type_mime: str | None) -> bool:
 
 def necessite_vectorisation_fichier_publique(type_mime: str | None) -> bool:
     """
-    Types vectorisés à l'ajout d'un FICHIER dans la bibliothèque
-    PUBLIQUE (route POST /api/bibliotheque-publique) -- EXACTEMENT comme
-    l'ancien _indexer_catalogue_public : pdf/image/audio, ET text/plain
-    (contrairement à la privée -- asymétrie déjà présente avant ce
-    chantier, volontairement conservée telle quelle).
+    06/09/2026 : seule l'IMAGE déclenche encore une vraie vectorisation
+    automatique à l'ajout dans la bibliothèque PUBLIQUE (voir docstring
+    du module). pdf/word/excel/texte passent par
+    necessite_extraction_texte_publique (gratuit) ; audio/vidéo restent
+    entièrement à la demande.
     """
-    if not type_mime:
-        return False
-    return (
-        type_mime == "application/pdf"
-        or type_mime.startswith("image/")
-        or type_mime.startswith("audio/")
-        or type_mime == "text/plain"
-    )
+    return bool(type_mime) and type_mime.startswith("image/")
+
+
+def necessite_extraction_texte_publique(type_mime: str | None) -> bool:
+    """
+    06/09/2026 : pdf/word/excel/texte reçoivent une extraction de texte
+    GRATUITE (aucun appel Gemini/Groq) dès l'ajout dans la bibliothèque
+    PUBLIQUE, pour être cherchables par mot-clé immédiatement (voir
+    recherche_catalogue_public_mots_cles, colonne texte_brut). La vraie
+    vectorisation (sens) de ce texte reste à la demande.
+    """
+    return type_mime in ("application/pdf", TYPES_MIME_WORD, TYPES_MIME_EXCEL, "text/plain")
 
 
 def necessite_vectorisation_note() -> bool:
     """Une note de texte tapée directement (routes /texte, privée ET publique) est toujours vectorisée -- comportement inchangé."""
     return True
+
+
+def _extraire_texte_docx_bytes(contenu: bytes) -> str:
+    """Même logique que core/vectorisation_dossiers_designes.py::_extraire_texte_docx_bytes, dupliquée volontairement (pas de dépendance croisée entre circuits)."""
+    import io
+    import docx
+
+    document = docx.Document(io.BytesIO(contenu))
+    morceaux = [p.text for p in document.paragraphs]
+    for table in document.tables:
+        for ligne in table.rows:
+            morceaux.append("\t".join(cellule.text for cellule in ligne.cells))
+    return "\n".join(morceaux)
+
+
+def _extraire_texte_xlsx_bytes(contenu: bytes) -> str:
+    """Même logique que core/vectorisation_dossiers_designes.py::_extraire_texte_xlsx_bytes, dupliquée volontairement."""
+    import io
+    import openpyxl
+
+    classeur = openpyxl.load_workbook(io.BytesIO(contenu), data_only=True)
+    morceaux = []
+    for feuille in classeur.worksheets:
+        morceaux.append(f"--- Feuille : {feuille.title} ---")
+        for ligne in feuille.iter_rows(values_only=True):
+            morceaux.append("\t".join("" if v is None else str(v) for v in ligne))
+    return "\n".join(morceaux)
 
 
 def _telecharger(chemin_stockage: str) -> bytes:
@@ -216,8 +273,53 @@ def _vectoriser_publique(ligne: dict) -> None:
         segments_audio = transcrire_audio_bibliotheque(contenu, ligne["nom_fichier"])
         if segments_audio:
             indexer_transcription_catalogue_public(segments_audio, fichier_id=fichier_id)
+    elif type_mime.startswith("video/"):
+        # 06/09/2026 : vidéo A LA DEMANDE uniquement (voir docstring du
+        # module) -- réutilise les mêmes briques que la vidéo de chat.
+        extension = (ligne.get("nom_fichier") or "").rsplit(".", 1)[-1].lower() or "mp4"
+        resultat = transcrire_et_decrire_video_bibliotheque(contenu, ligne["nom_fichier"], extension)
+        for segment in (resultat or {}).get("segments_audio") or []:
+            texte = (segment.get("text") or "").strip()
+            if texte:
+                indexer_texte_catalogue_public(texte, fichier_id=fichier_id, timestamp_debut=segment.get("start"), timestamp_fin=segment.get("end"))
+        for description in (resultat or {}).get("descriptions_frames") or []:
+            if description.strip():
+                indexer_texte_catalogue_public(description, fichier_id=fichier_id)
+    elif type_mime == TYPES_MIME_WORD:
+        texte = _extraire_texte_docx_bytes(contenu)
+        if texte.strip():
+            indexer_texte_catalogue_public(texte, fichier_id=fichier_id)
+    elif type_mime == TYPES_MIME_EXCEL:
+        texte = _extraire_texte_xlsx_bytes(contenu)
+        if texte.strip():
+            indexer_texte_catalogue_public(texte, fichier_id=fichier_id)
     elif type_mime == "text/plain":
         indexer_texte_catalogue_public(contenu.decode("utf-8", errors="ignore"), fichier_id=fichier_id)
+
+
+def _extraire_texte_pour_extraction_publique(type_mime: str | None, contenu: bytes) -> str:
+    """
+    Extraction GRATUITE (aucun appel Gemini/Groq) pour pdf/word/excel/
+    texte du catalogue public -- voir necessite_extraction_texte_publique.
+    Assemble le texte en un seul bloc (pas de découpage par page ici,
+    juste pour la recherche par mot-clé).
+    """
+    if type_mime == "application/pdf":
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(contenu)
+            chemin_temp = tmp.name
+        try:
+            return "\n\n".join(extraire_pages_pdf_catalogue_public(chemin_temp))
+        finally:
+            try:
+                os.remove(chemin_temp)
+            except OSError:
+                pass
+    if type_mime == TYPES_MIME_WORD:
+        return _extraire_texte_docx_bytes(contenu)
+    if type_mime == TYPES_MIME_EXCEL:
+        return _extraire_texte_xlsx_bytes(contenu)
+    return contenu.decode("utf-8", errors="ignore")
 
 
 def remettre_en_attente_bloques() -> None:
@@ -229,6 +331,132 @@ def remettre_en_attente_bloques() -> None:
             ).execute()
         except Exception as e:
             logging.error(f"ERREUR remise en attente au démarrage ({table}) : {e}")
+    # statut_extraction_texte n'existe que sur bibliotheque_publique
+    # (colonne absente de fichiers_uploades, hors scope -- voir docstring
+    # du module).
+    try:
+        supabase.table("bibliotheque_publique").update({"statut_extraction_texte": "en_attente"}).eq(
+            "statut_extraction_texte", "en_cours"
+        ).execute()
+    except Exception as e:
+        logging.error(f"ERREUR remise en attente au démarrage (extraction texte, bibliotheque_publique) : {e}")
+
+
+COLONNES_EXTRACTION_PUBLIQUE = "id, chemin_stockage, nom_fichier, type_mime"
+
+
+def traiter_extractions_texte_publique_une_fois() -> int:
+    """
+    06/09/2026 : pendante GRATUITE distincte de traiter_file_attente_
+    une_fois -- extrait le texte brut de pdf/word/excel/texte du
+    catalogue public dès l'ajout (statut_extraction_texte="en_attente"),
+    AUCUN appel Gemini/Groq donc AUCUN coupe-circuit quota ici.
+    """
+    try:
+        lignes = (
+            supabase.table("bibliotheque_publique")
+            .select(COLONNES_EXTRACTION_PUBLIQUE)
+            .eq("statut_extraction_texte", "en_attente")
+            .order("created_at")
+            .limit(TAILLE_LOT)
+            .execute()
+        ).data or []
+    except Exception as e:
+        logging.error(f"ERREUR lecture file d'attente extraction (bibliotheque_publique) : {e}")
+        return 0
+
+    for ligne in lignes:
+        fichier_id = ligne["id"]
+        try:
+            supabase.table("bibliotheque_publique").update({"statut_extraction_texte": "en_cours"}).eq("id", fichier_id).execute()
+            contenu = _telecharger(ligne["chemin_stockage"])
+            texte = _extraire_texte_pour_extraction_publique(ligne["type_mime"], contenu)
+            supabase.table("bibliotheque_publique").update({
+                "texte_brut": texte or None,
+                "statut_extraction_texte": "fait",
+            }).eq("id", fichier_id).execute()
+        except Exception as e:
+            logging.error(f"ERREUR extraction texte (bibliotheque_publique, fichier_id={fichier_id}) : {e}")
+            try:
+                supabase.table("bibliotheque_publique").update({"statut_extraction_texte": "echec"}).eq("id", fichier_id).execute()
+            except Exception as e2:
+                logging.error(f"ERREUR mise à jour statut échec extraction (bibliotheque_publique, fichier_id={fichier_id}) : {e2}")
+
+    return len(lignes)
+
+
+def relancer_echecs_extraction_a_froid_publique() -> int:
+    """Même politique que relancer_echecs_a_froid ci-dessous, pour l'extraction de texte publique -- pas de coupe-circuit quota ici (aucun appel externe)."""
+    seuil = (datetime.now(timezone.utc) - COOLDOWN_AUTO_REESSAI).isoformat()
+    try:
+        resultat = (
+            supabase.table("bibliotheque_publique")
+            .update({"statut_extraction_texte": "en_attente"})
+            .eq("statut_extraction_texte", "echec")
+            .lt("created_at", seuil)
+            .execute()
+        )
+        return len(resultat.data or [])
+    except Exception as e:
+        logging.error(f"ERREUR réessai automatique à froid extraction (bibliotheque_publique) : {e}")
+        return 0
+
+
+def vectoriser_maintenant_publique(fichier_id: str) -> bool:
+    """
+    06/09/2026, demande Bourama : VRAIE vectorisation A LA DEMANDE d'UN
+    SEUL document du catalogue public, appelée depuis
+    core/outils_bibliotheque.py quand l'action "trouver_catalogue_public"
+    trouve une vraie correspondance sur un document pas encore
+    vectorisé -- jamais tout le catalogue d'un coup. Idempotent : si
+    déjà "pret", ne refait rien et renvoie True directement.
+    """
+    try:
+        ligne = (
+            supabase.table("bibliotheque_publique")
+            .select("id, chemin_stockage, nom_fichier, type_mime, tentatives_vectorisation, statut_vectorisation")
+            .eq("id", fichier_id)
+            .single()
+            .execute()
+        ).data
+    except Exception as e:
+        logging.error(f"ERREUR lecture fichier pour vectorisation à la demande (bibliotheque_publique, fichier_id={fichier_id}) : {e}")
+        return False
+
+    if not ligne:
+        return False
+    if ligne.get("statut_vectorisation") == "pret":
+        return True
+    if est_en_pause_quota_gemini():
+        return False
+
+    maintenant_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        supabase.table("bibliotheque_publique").update({"statut_vectorisation": "en_cours"}).eq("id", fichier_id).execute()
+        _vectoriser_publique(ligne)
+        supabase.table("bibliotheque_publique").update({
+            "statut_vectorisation": "pret",
+            "erreur_vectorisation": None,
+            "derniere_tentative_vectorisation_a": maintenant_iso,
+        }).eq("id", fichier_id).execute()
+        return True
+    except Exception as e:
+        tentatives = (ligne.get("tentatives_vectorisation") or 0) + 1
+        if est_erreur_quota_gemini(str(e)):
+            activer_pause_quota_gemini()
+            logging.error(f"QUOTA GEMINI épuisé (vectorisation à la demande, bibliotheque_publique, fichier_id={fichier_id}) : pause de 24h.")
+        else:
+            logging.error(f"ERREUR vectorisation à la demande (bibliotheque_publique, fichier_id={fichier_id}, tentative {tentatives}) : {e}")
+        try:
+            supabase.table("bibliotheque_publique").update({
+                "statut_vectorisation": "echec",
+                "tentatives_vectorisation": tentatives,
+                "erreur_vectorisation": str(e)[:500],
+                "derniere_tentative_vectorisation_a": maintenant_iso,
+            }).eq("id", fichier_id).execute()
+        except Exception as e2:
+            logging.error(f"ERREUR mise à jour statut échec (vectorisation à la demande, bibliotheque_publique, fichier_id={fichier_id}) : {e2}")
+        return False
 
 
 COLONNES_PRIVEE = "id, user_id, chemin_stockage, nom_fichier, type_mime, tentatives_vectorisation"

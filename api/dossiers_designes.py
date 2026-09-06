@@ -7,6 +7,18 @@ serveur (core/vectorisation_dossiers_designes.py), independamment de
 l'etat du telephone (ferme, hors ligne, eteint -- voir demande explicite
 de Bourama).
 
+MIS A JOUR le 06/09/2026 (demande Bourama) : la video est desormais
+ACCEPTEE ici -- l'interdiction du 04/09 n'existait que parce que TOUT
+etait vectorise automatiquement (cout juge trop eleve pour la video).
+Depuis ce chantier, seule l'image garde une vraie vectorisation
+automatique ; pdf/word/excel/texte recoivent une extraction de texte
+GRATUITE automatique ; audio ET video ne recoivent plus RIEN
+d'automatique -- tout (y compris la vraie vectorisation de la video,
+transcription + description de frames) se fait desormais A LA DEMANDE
+(core/vectorisation_dossiers_designes.py::vectoriser_maintenant, appele
+depuis core/outils_mobile.py::explorer_dossier). La raison du refus
+disparait donc pour la video comme pour l'audio.
+
 Distinct de api/bibliotheque_utilisateur.py (ajout manuel a "Mon espace")
 : ici c'est TOUT le contenu d'un dossier designe (core/dossiers_designes_
 mobile.py), envoye automatiquement par le plugin natif (DossiersPlugin),
@@ -23,7 +35,7 @@ from postgrest.exceptions import APIError
 
 from api.auth import utilisateur_courant, supabase
 from core.erreurs import erreur_api
-from core.vectorisation_dossiers_designes import BUCKET_DOSSIERS_DESIGNES, necessite_vectorisation
+from core.vectorisation_dossiers_designes import BUCKET_DOSSIERS_DESIGNES, necessite_extraction_texte, necessite_vectorisation
 
 router = APIRouter(prefix="/api/dossiers-designes", tags=["dossiers-designes"])
 
@@ -39,16 +51,11 @@ async def uploader_fichier_dossier_designe(
     utilisateur=Depends(utilisateur_courant),
 ):
     """
-    Stocke le fichier immediatement et renvoie -- la vectorisation part
-    en file d'attente (core/vectorisation_dossiers_designes.py), traitee
-    en arriere-plan par le process serveur, jamais par cette requete.
-    Video explicitement refusee (jamais vectorisee, cout trop eleve --
-    voir echange avec Bourama du 04/09) : a filtrer cote app avant meme
-    d'envoyer, mais revalide ici par securite.
+    Stocke le fichier immediatement et renvoie -- tout traitement
+    (extraction de texte gratuite ou vraie vectorisation) part en file
+    d'attente ou attend une demande explicite (voir docstring du
+    module), jamais traite par cette requete.
     """
-    if (fichier.content_type or "").startswith("video/"):
-        raise erreur_api(400, "VIDEO_NON_ACCEPTEE_ICI")
-
     try:
         chemin_liste = json.loads(chemin)
         if not isinstance(chemin_liste, list):
@@ -77,7 +84,20 @@ async def uploader_fichier_dossier_designe(
         raise erreur_api(500, "ECHEC_DU_TRANSFERT")
 
     url_publique = supabase.storage.from_(BUCKET_DOSSIERS_DESIGNES).get_public_url(chemin_stockage)
-    statut_vectorisation = "en_attente" if necessite_vectorisation(type_mime, nom_fichier) else "pret"
+
+    # Categorisation (06/09) : image = vraie vectorisation auto ;
+    # pdf/word/excel/texte = extraction gratuite auto + vraie
+    # vectorisation a la demande ; audio/video/inconnu = tout a la
+    # demande, rien d'automatique.
+    if necessite_vectorisation(type_mime):
+        statut_vectorisation = "en_attente"
+        statut_extraction_texte = "non_applicable"
+    elif necessite_extraction_texte(type_mime, nom_fichier):
+        statut_vectorisation = "a_la_demande"
+        statut_extraction_texte = "en_attente"
+    else:
+        statut_vectorisation = "a_la_demande"
+        statut_extraction_texte = "non_applicable"
 
     ligne = {
         "user_id": utilisateur.id,
@@ -91,6 +111,7 @@ async def uploader_fichier_dossier_designe(
         "url_publique": url_publique,
         "hash_contenu": hash_contenu,
         "statut_vectorisation": statut_vectorisation,
+        "statut_extraction_texte": statut_extraction_texte,
         "tentatives_vectorisation": 0,
         "erreur_vectorisation": None,
         "derniere_tentative_vectorisation_a": None,
@@ -120,11 +141,13 @@ async def progression_dossier(
     utilisateur=Depends(utilisateur_courant),
 ):
     """
-    Avancement de la vectorisation d'un dossier designe -- destine a la
-    barre de progression cote app (a brancher, voir echange avec Bourama
-    du 04/09, "etape 5"). Compte simplement les statuts en base : rien a
-    calculer cote serveur au fil de l'eau, la file d'attente met deja
-    chaque ligne a jour en continu.
+    Avancement du TRAITEMENT AUTOMATIQUE d'un dossier designe (image
+    vectorisee, pdf/word/excel/texte extraits) -- destine a la barre de
+    progression cote app (voir echange avec Bourama du 04/09, "etape 5").
+    "a_la_demande" (06/09 : audio/video/pdf-word-excel-texte en attente
+    d'une recherche en direct) compte comme "pret" ici : aucun traitement
+    automatique supplementaire ne les concerne, la barre ne doit pas
+    rester bloquee dessus.
     """
     try:
         lignes = (
@@ -140,7 +163,7 @@ async def progression_dossier(
         raise erreur_api(500, "ECHEC_LECTURE_PROGRESSION")
 
     total = len(lignes)
-    prets = sum(1 for l in lignes if l["statut_vectorisation"] == "pret")
+    prets = sum(1 for l in lignes if l["statut_vectorisation"] in ("pret", "a_la_demande"))
     echecs = sum(1 for l in lignes if l["statut_vectorisation"] == "echec")
     en_cours = total - prets - echecs
 
