@@ -46,6 +46,7 @@ from core.generalisation_correction_pedagogique import (
     generaliser_correction_pedagogique as _generaliser_correction_pedagogique,
 )
 from core.mode_actif_conversation import obtenir_mode_actif as _obtenir_mode_actif
+from core.notifications import creer_notification as _creer_notification
 
 
 def get_secret(key):
@@ -81,11 +82,40 @@ def _ligne_publique(ligne: dict) -> dict:
         "statut": ligne.get("statut", "nouveau"),
         "correction_texte": ligne.get("correction_texte"),
         "comportement_id": ligne.get("comportement_id"),
+        # Rempli par _enrichir_comportement_actif (lister_corrections_prof/
+        # obtenir_correction) -- None tant que non enrichi (ex: juste après
+        # creer_correction, avant tout comportement généré) ou si la
+        # correction n'a pas encore de comportement_id (type B, ou type A
+        # pas encore traité).
+        "comportement_actif": ligne.get("comportement_actif"),
         "notion_id": ligne.get("notion_id"),
         "statut_cascade": ligne.get("statut_cascade"),
         "created_at": ligne.get("created_at"),
         "updated_at": ligne.get("updated_at"),
     }
+
+
+def _enrichir_comportement_actif(lignes: list[dict]) -> list[dict]:
+    """Complète chaque ligne déjà passée par _ligne_publique avec l'état
+    actif/inactif RÉEL du comportement généré (Partie 5, 06/09/2026) --
+    corrections_pedagogiques ne duplique pas cette colonne, nécessaire
+    pour que le frontend affiche un bouton activer/désactiver cohérent
+    avec l'état réel plutôt que de le deviner. Un seul aller-retour
+    Supabase pour toute la liste (IN sur les ids), jamais un appel par
+    ligne."""
+    ids = [l["comportement_id"] for l in lignes if l.get("comportement_id")]
+    if not ids:
+        return lignes
+    try:
+        res = supabase.table("comportements_etudiants").select("id, actif").in_("id", ids).execute()
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture actif comportements des corrections) : {e}")
+        return lignes
+    actifs_par_id = {c["id"]: c.get("actif", True) for c in (res.data or [])}
+    for l in lignes:
+        if l.get("comportement_id"):
+            l["comportement_actif"] = actifs_par_id.get(l["comportement_id"])
+    return lignes
 
 
 def resoudre_prof_actif(etudiant_id: str, conversation_id: str | None = None) -> str | None:
@@ -229,7 +259,7 @@ def lister_corrections_prof(prof_id: str, type_: str | None = None, statut: str 
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (liste corrections du prof {prof_id}) : {e}")
         return []
-    return [_ligne_publique(l) for l in (res.data or [])]
+    return _enrichir_comportement_actif([_ligne_publique(l) for l in (res.data or [])])
 
 
 def lister_corrections_etudiant(etudiant_id: str, type_: str | None = None) -> list[dict]:
@@ -260,7 +290,7 @@ def obtenir_correction(correction_id: str) -> dict | None:
         return None
     if not res or not res.data:
         return None
-    return _ligne_publique(res.data)
+    return _enrichir_comportement_actif([_ligne_publique(res.data)])[0]
 
 
 def _correction_du_prof(correction_id: str, prof_id: str) -> dict | None:
@@ -334,7 +364,28 @@ def enregistrer_correction_prof(
         return None
     if not res.data:
         return None
-    return _ligne_publique(res.data[0])
+
+    # Notification élève (Partie 5, 06/09/2026) : best-effort, une
+    # notification manquée ne doit jamais faire échouer l'enregistrement
+    # de la correction elle-même (même principe que partout ailleurs où
+    # creer_notification est appelée, voir core/notifications.py).
+    # correction_texte tronqué (200 caractères) : pas de page dédiée
+    # élève pour relire la correction en entier pour l'instant, la
+    # notification elle-même porte donc l'essentiel du contenu utile.
+    try:
+        apercu = (correction_texte or "").strip()
+        if len(apercu) > 200:
+            apercu = apercu[:200].rstrip() + "…"
+        _creer_notification(
+            ligne["etudiant_id"],
+            "correction_traitee",
+            "Ta correction a été traitée",
+            apercu or None,
+        )
+    except Exception as e:
+        logging.error(f"ERREUR notification correction traitée {correction_id} : {e}")
+
+    return _enrichir_comportement_actif([_ligne_publique(res.data[0])])[0]
 
 
 def desactiver_activer_correction(correction_id: str, prof_id: str, actif: bool) -> dict | None:
@@ -395,7 +446,7 @@ def editer_correction(correction_id: str, prof_id: str, correction_texte: str) -
         return None
     if not res.data:
         return None
-    return _ligne_publique(res.data[0])
+    return _enrichir_comportement_actif([_ligne_publique(res.data[0])])[0]
 
 
 def dupliquer_correction(correction_id: str, prof_id: str) -> dict | None:
@@ -442,7 +493,7 @@ def dupliquer_correction(correction_id: str, prof_id: str) -> dict | None:
         return None
     if not res.data:
         return None
-    return _ligne_publique(res.data[0])
+    return _enrichir_comportement_actif([_ligne_publique(res.data[0])])[0]
 
 
 def supprimer_correction(correction_id: str, prof_id: str) -> bool:
