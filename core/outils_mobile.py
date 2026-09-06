@@ -9,6 +9,7 @@ déplacement de code.
 
 import logging
 import base64
+import anyio
 from collections import Counter
 from anyio import to_thread
 
@@ -32,6 +33,9 @@ from core.dossiers_designes_mobile import (
 from core.vectorisation_dossiers_designes import (
     chercher_dossiers_designes as _chercher_dossiers_designes,
     formater_source_dossier_designe as _formater_source_dossier_designe,
+    chercher_fichiers_dossier_designe_par_metadonnees as _chercher_fichiers_par_metadonnees,
+    formater_resultat_metadonnees_dossier_designe as _formater_resultat_metadonnees,
+    CATEGORIES_TYPE_FICHIER as _CATEGORIES_TYPE_FICHIER,
 )
 from core.bibliotheque_fichiers import enregistrer_fichier as _enregistrer_fichier
 
@@ -291,6 +295,7 @@ async def explorer_dossier(
     chemin: list[str] = None,
     terme_recherche: str = "",
     appareil_nom: str = "",
+    type_fichier: str = "",
 ) -> str:
     """
     Explore EN DIRECT le contenu d'un dossier désigné par l'étudiant sur
@@ -349,16 +354,32 @@ async def explorer_dossier(
       téléphone. Limite de taille : 50 Mo (plus large que "lire_fichier",
       qui lui doit rester lisible par le modèle -- ici le fichier n'est
       pas traité, juste transféré tel quel).
-    - "chercher_par_contenu" : cherche `terme_recherche` dans le CONTENU
-      des fichiers sous `dossier_nom` (pas dans leur nom, utilise
-      "chercher_par_nom" pour ça). Utilise cette action quand l'étudiant
-      décrit ce qu'il cherche sans en connaître le nom exact ("le cours
-      où on parle des dérivées"), ou juste après un "chercher_par_nom"
-      resté sans résultat si ça semble pertinent. Essaie D'ABORD la
-      recherche sémantique instantanée dans ce qui a déjà été vectorisé
-      en arrière-plan (04/09/2026) -- fonctionne même app fermée, renvoie
-      directement un extrait du contenu ET le lien du fichier. Si rien
-      n'y correspond (fichier pas encore vectorisé), bascule
+    - "chercher_par_contenu" : cherche `terme_recherche` sous `dossier_nom`
+      en combinant DEUX recherches qui tournent EN PARALLÈLE (ajouté le
+      06/09/2026, demande Bourama) :
+      1. Recherche sémantique instantanée dans ce qui a déjà été vectorisé
+         en arrière-plan (04/09/2026) -- comprend le SENS de
+         `terme_recherche`, fonctionne même app fermée, renvoie un extrait
+         du contenu ET le lien du fichier.
+      2. Recherche par métadonnées, INDÉPENDANTE de la précédente --
+         cherche `terme_recherche` comme sous-chaîne dans le NOM des
+         fichiers (pas leur contenu), avec deux filtres EXACTS
+         optionnels en plus : `type_fichier` (catégorie parmi
+         "pdf"/"image"/"audio"/"video"/"word"/"excel"/"texte", ex.
+         l'étudiant demande "les PDF de ce dossier") et `chemin` (sous-
+         dossier exact depuis la racine, même convention que
+         "ouvrir_sous_dossier" -- ex. l'étudiant précise un sous-dossier).
+         Ne nécessite AUCUNE vectorisation préalable : trouve aussi des
+         fichiers pas encore indexés. Choisis `type_fichier`/`chemin`
+         uniquement quand la demande de l'étudiant les précise vraiment,
+         ne les devine jamais.
+      Les résultats des deux recherches sont combinés dans la même
+      réponse. Utilise cette action dès que l'étudiant décrit ce qu'il
+      cherche sans en connaître le nom exact ("le cours où on parle des
+      dérivées"), précise un type ou un emplacement, ou juste après un
+      "chercher_par_nom" resté sans résultat si ça semble pertinent. Si
+      les DEUX recherches ne trouvent rien (cas possible : fichier pas
+      encore vectorisé ET nom différent du terme cherché), bascule
       automatiquement sur une lecture EN DIRECT de chaque fichier
       (nécessite l'app ouverte, peut prendre plus de temps si le dossier
       contient beaucoup de fichiers, c'est normal) : renvoie alors les
@@ -399,6 +420,12 @@ async def explorer_dossier(
     if action == "donner_fichier" and not chemin:
         return "Erreur : paramètre 'chemin' manquant pour l'action 'donner_fichier'."
 
+    if type_fichier and type_fichier not in _CATEGORIES_TYPE_FICHIER:
+        return (
+            f"Erreur : type_fichier \"{type_fichier}\" inconnu. Valeurs valides : "
+            + ", ".join(sorted(_CATEGORIES_TYPE_FICHIER)) + "."
+        )
+
     # Ajoute le 04/09/2026, Bourama : resout l'appareil PRECIS
     # proprietaire de "dossier_nom" AVANT toute question en direct --
     # meme raisonnement que gerer_dossier_telephone (action "executer"),
@@ -434,21 +461,46 @@ async def explorer_dossier(
             # de l'ancien outil séparé chercher_dossiers_designes ici,
             # même action plutôt que deux outils qui font presque la même
             # chose) -- instantanée, fonctionne même app fermée, lien
-            # déjà inclus dans chaque résultat. Ne tombe sur la lecture
-            # EN DIRECT (plus lente, app requise) que si rien n'y
-            # correspond, ex. fichier pas encore vectorisé.
+            # déjà inclus dans chaque résultat.
+            # 06/09/2026, demande Bourama : EN PLUS de ça, et EN
+            # PARALLÈLE (pas l'une après l'autre, pour rester rapide --
+            # voir règle perf du projet), une recherche par métadonnées
+            # (nom/type/emplacement), totalement indépendante de la
+            # recherche vectorielle ci-dessus. Ne tombe sur la lecture EN
+            # DIRECT (plus lente, app requise) que si les DEUX ne
+            # trouvent rien.
             # Meme correctif que _resoudre_appareil_cible plus haut :
-            # _chercher_dossiers_designes est SYNCHRONE (appel Supabase +
-            # appel Gemini embedding), offload sur un thread pour ne pas
-            # geler le event loop.
-            resultats_bruts = await to_thread.run_sync(
-                _chercher_dossiers_designes, terme_recherche, user_id
-            )
+            # les deux fonctions appelees sont SYNCHRONES (appels
+            # Supabase, + appel Gemini embedding pour la premiere),
+            # offload chacune sur un thread pour ne pas geler le event
+            # loop -- et les deux threads tournent en meme temps via un
+            # task group (anyio) plutot que l'un apres l'autre.
+            resultats_vectorises_bruts = []
+            resultats_metadonnees = []
+
+            async def _lancer_recherche_vectorielle():
+                nonlocal resultats_vectorises_bruts
+                resultats_vectorises_bruts = await to_thread.run_sync(
+                    _chercher_dossiers_designes, terme_recherche, user_id
+                )
+
+            async def _lancer_recherche_metadonnees():
+                nonlocal resultats_metadonnees
+                resultats_metadonnees = await to_thread.run_sync(
+                    _chercher_fichiers_par_metadonnees,
+                    user_id, dossier_nom, terme_recherche, type_fichier or None, chemin,
+                )
+
+            async with anyio.create_task_group() as groupe_taches:
+                groupe_taches.start_soon(_lancer_recherche_vectorielle)
+                groupe_taches.start_soon(_lancer_recherche_metadonnees)
+
             resultats_vectorises = [
-                r for r in resultats_bruts
+                r for r in resultats_vectorises_bruts
                 if r.get("dossier_nom") == dossier_nom
             ]
-            if resultats_vectorises:
+
+            if resultats_vectorises or resultats_metadonnees:
                 blocs = []
                 for r in resultats_vectorises:
                     bloc = r["contenu"]
@@ -456,10 +508,25 @@ async def explorer_dossier(
                     if source:
                         bloc += f"\n{source}"
                     blocs.append(bloc)
-                return "\n\n---\n\n".join(blocs)
-            # Rien trouve dans le deja-vectorise : bascule sur la
-            # lecture en direct, qui a besoin de l'appareil resolu
-            # au-dessus (jamais tente si l'ambiguite n'a pas ete levee).
+                reponse = "\n\n---\n\n".join(blocs)
+                if resultats_metadonnees:
+                    entete = (
+                        "Fichiers trouvés par nom/type/emplacement (contenu pas "
+                        "forcément déjà lu, utilise \"lire_fichier\" si besoin "
+                        "de le lire en entier) :\n"
+                    )
+                    lignes_metadonnees = "\n".join(
+                        f"- {_formater_resultat_metadonnees(r)}" for r in resultats_metadonnees
+                    )
+                    reponse = (
+                        f"{reponse}\n\n---\n\n{entete}{lignes_metadonnees}"
+                        if reponse else f"{entete}{lignes_metadonnees}"
+                    )
+                return reponse
+            # Rien trouve ni par le sens ni par nom/type/emplacement :
+            # bascule sur la lecture en direct, qui a besoin de
+            # l'appareil resolu au-dessus (jamais tente si l'ambiguite
+            # n'a pas ete levee).
             if erreur_resolution:
                 return f"Erreur : {erreur_resolution}"
             resultat = await _chercher_par_contenu(user_id, appareil_id_cible, dossier_nom, terme_recherche)

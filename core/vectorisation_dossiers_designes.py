@@ -368,6 +368,109 @@ def formater_source_dossier_designe(r: dict) -> str | None:
     return f"(Source : {r['nom_fichier']}{reperage}, dossier {emplacement}{lien}, {type_mime})"
 
 
+CATEGORIES_TYPE_FICHIER = {
+    "pdf": "application/pdf",
+    "image": "image/",
+    "audio": "audio/",
+    "video": "video/",
+    "word": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "texte": "text/plain",
+}
+# Categories dont la valeur ci-dessus est un PREFIXE (type_mime commencant
+# par .../) plutot qu'une valeur EXACTE -- pdf/word/excel/texte ont un seul
+# type_mime possible, image/audio/video en ont plusieurs (image/png,
+# image/jpeg, etc.), meme decoupage que necessite_vectorisation ci-dessus.
+_CATEGORIES_TYPE_FICHIER_PREFIXE = {"image", "audio", "video"}
+
+
+def chercher_fichiers_dossier_designe_par_metadonnees(
+    user_id: str,
+    dossier_nom: str,
+    mot_cle: str | None = None,
+    type_fichier: str | None = None,
+    chemin: list[str] | None = None,
+) -> list:
+    """
+    Recherche PAR METADONNEES (nom de fichier, type, emplacement) dans les
+    fichiers deja transferes d'un dossier designe -- ajoutee le 06/09/2026,
+    demande Bourama, INDEPENDANTE de chercher_dossiers_designes ci-dessus :
+    ne regarde jamais le contenu, uniquement les colonnes de
+    fichiers_dossier_designe. Les deux recherches tournent EN PARALLELE
+    (voir core/outils_mobile.py::explorer_dossier, action
+    "chercher_par_contenu"), jamais l'une apres l'autre. Aucun appel Gemini
+    ici : instantanee, gratuite, et fonctionne aussi sur des fichiers PAS
+    ENCORE vectorises (n'importe quel statut_vectorisation).
+
+    - mot_cle : sous-chaine insensible a la casse cherchee dans
+      nom_fichier UNIQUEMENT (jamais le contenu). None/vide = pas de filtre.
+    - type_fichier : categorie EXACTE parmi CATEGORIES_TYPE_FICHIER
+      ci-dessus. None/vide = pas de filtre. Une valeur hors de cette liste
+      est ignoree ici (la validation stricte, avec message d'erreur, est
+      faite en amont dans core/outils_mobile.py).
+    - chemin : sous-dossier EXACT depuis la racine du dossier designe
+      (liste ORDONNEE de noms, meme convention que la colonne `chemin` de
+      fichiers_dossier_designe -- jamais juste le dernier niveau). None =
+      pas de filtre sur l'emplacement (cherche a n'importe quelle
+      profondeur). Liste vide = uniquement les fichiers a la racine.
+
+    Renvoie une liste de {id, nom_fichier, type_mime, chemin, url_publique,
+    statut_vectorisation, dossier_nom} -- pas de `contenu` ici (aucun
+    contenu n'est lu par cette fonction).
+    """
+    if not user_id or not dossier_nom:
+        logging.error("chercher_fichiers_dossier_designe_par_metadonnees appele sans user_id/dossier_nom : renvoie vide.")
+        return []
+
+    requete = (
+        supabase.table("fichiers_dossier_designe")
+        .select("id, nom_fichier, type_mime, chemin, url_publique, statut_vectorisation, dossier_nom")
+        .eq("user_id", user_id)
+        .eq("dossier_nom", dossier_nom)
+    )
+    if mot_cle:
+        requete = requete.ilike("nom_fichier", f"%{mot_cle}%")
+    if type_fichier and type_fichier in CATEGORIES_TYPE_FICHIER:
+        valeur = CATEGORIES_TYPE_FICHIER[type_fichier]
+        if type_fichier in _CATEGORIES_TYPE_FICHIER_PREFIXE:
+            requete = requete.like("type_mime", f"{valeur}%")
+        else:
+            requete = requete.eq("type_mime", valeur)
+
+    try:
+        lignes = requete.execute().data or []
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE recherche metadonnees dossier designe (user_id={user_id}, dossier_nom={dossier_nom}) : {e}")
+        return []
+
+    if chemin is not None:
+        # Comparaison EXACTE cote Python (pas de filtre jsonb cote SQL ici,
+        # pour eviter tout risque de mismatch de serialisation jsonb via le
+        # client Supabase) -- meme approche pragmatique que le filtrage par
+        # dossier_nom deja fait cote Python sur les resultats de
+        # chercher_dossiers_designes, voir core/outils_mobile.py.
+        lignes = [ligne for ligne in lignes if (ligne.get("chemin") or []) == chemin]
+
+    return lignes
+
+
+def formater_resultat_metadonnees_dossier_designe(r: dict) -> str:
+    """
+    Meme role que formater_source_dossier_designe ci-dessus, mais pour un
+    resultat de chercher_fichiers_dossier_designe_par_metadonnees (fichier
+    trouve par nom/type/emplacement, pas par son contenu) : precise le
+    statut de vectorisation quand il n'est pas encore "pret", pour que
+    l'IA sache qu'elle ne peut pas (encore) lire ce fichier directement.
+    """
+    chemin = r.get("chemin") or []
+    emplacement = " / ".join([r["dossier_nom"], *chemin]) if chemin else r["dossier_nom"]
+    lien = f", {r['url_publique']}" if r.get("url_publique") else ""
+    type_mime = r.get("type_mime") or ""
+    statut = r.get("statut_vectorisation")
+    suffixe_statut = "" if statut == "pret" else f", pas encore indexé ({statut})"
+    return f"{r['nom_fichier']} (dossier {emplacement}, {type_mime}{lien}{suffixe_statut})"
+
+
 def relancer_echecs_a_froid() -> int:
     """
     Reessai automatique a froid, SANS plafond pour les echecs (voir
