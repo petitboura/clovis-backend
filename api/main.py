@@ -51,6 +51,7 @@ from api.corrections_pedagogiques import router as corrections_pedagogiques_rout
 from api.audit_hebdomadaire_corrections import router as audit_hebdomadaire_corrections_router
 from api.contenu_legal import router as contenu_legal_router
 from api.codes_partage import router_mes_codes, router_rattachements
+from api.etablissements import router_etablissements
 from api.mode_actif_conversation import router_mode_actif
 from api.outils_registre import router as outils_registre_router
 from api.appareils_mobiles import router as appareils_mobiles_router
@@ -570,10 +571,17 @@ app.include_router(dossiers_bibliotheque_router)
 # le 12/08 lors de l'isolation de ce service -- deja remplace cote Clovis
 # depuis le 09/08 par contenu_matiere_enseignant_router/etudiant_router
 # ci-dessous (meme metier : generer/entrer un code, sans notion de role).
-# api/roles.py et api/permissions_hierarchie.py restent sur disque, non
-# montes : core/serveur_mcp_generation.py et api/agents.py importent
-# encore quelques fonctions de ces fichiers (resoudre_destinataire_autorise,
-# _inserer_message, peut_modifier_comportement, peut_gerer_base_connaissances).
+# api/permissions_hierarchie.py reste sur disque et monte nulle part en
+# tant que router, mais reste importe par api/agents.py (peut_modifier_
+# comportement, peut_gerer_base_connaissances).
+# MAJ 06/09/2026 (Partie 9) : api/roles.py et api/invitations_clovis.py
+# deplaces vers _desactive_roles_hierarchie/api/ (voir LISEZ_MOI_NE_JAMAIS_
+# REUTILISER.md). resoudre_destinataire_autorise/_inserer_message, encore
+# utilisees par l'outil IA envoyer_message, extraites avant le deplacement
+# vers core/messagerie_directe.py -- aucun changement de comportement.
+# Nouveau systeme etablissement (rattachements multiples/modifiables,
+# separe de l'ancien) : voir core/etablissements.py, router juste en dessous.
+app.include_router(router_etablissements)
 app.include_router(contenu_matiere_enseignant_router)
 app.include_router(contenu_matiere_etudiant_router)
 app.include_router(contenu_matiere_liste_agents_router)

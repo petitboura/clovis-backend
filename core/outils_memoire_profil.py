@@ -17,7 +17,7 @@ outils generation/bibliotheque ci-dessus.
 import json
 import logging
 
-from api.roles import (
+from core.messagerie_directe import (
     resoudre_destinataire_autorise as _resoudre_destinataire_autorise,
     _inserer_message,
 )

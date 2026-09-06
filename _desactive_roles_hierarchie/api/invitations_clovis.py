@@ -1,4 +1,14 @@
 """
+⚠️ DÉSACTIVÉ (06/09/2026) -- voir LISEZ_MOI_NE_JAMAIS_REUTILISER.md dans ce
+dossier. Aucun app.include_router(...) ne branche ce router dans
+api/main.py, aucun endpoint ici n'est joignable.
+
+Le nouveau système établissement (Partie 9 du chantier confiance
+pédagogique, voir core/etablissements.py) est indépendant et ne réutilise
+rien de ce fichier ni de son schéma (profiles.role/etablissement_id/
+enseignant_id, migration 2026_08_04_roles_hierarchie.sql).
+
+--- Contenu original (2026-08-08) ---
 Invitations Clovis (2026-08-08, partie 4 du brief Clovis).
 
 Remplace le menu déroulant de POST /api/roles/choisir (api/roles.py) par
@@ -16,7 +26,7 @@ import logging
 import os
 import secrets
 import sys
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
@@ -24,7 +34,7 @@ from pydantic import BaseModel
 from api.auth import utilisateur_courant, supabase
 from api.journal import journaliser
 from api.permissions_hierarchie import _lire_profil_role
-from api.roles import AGENT_PAR_ROLE
+from _desactive_roles_hierarchie.api.roles import AGENT_PAR_ROLE
 from core.erreurs import erreur_api
 
 # Même sys.path que api/roles.py -- generer_id_depuis_nom vit dans

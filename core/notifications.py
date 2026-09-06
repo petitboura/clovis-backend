@@ -14,6 +14,10 @@ Bourama :
   en langage naturel, voir api/notifications.py::envoyer_message_systeme
 - audit_hebdomadaire_corrections : voir core/audit_hebdomadaire_corrections.py
   (Partie 8, 06/09/2026)
+- etablissement_publication / etablissement_demande_connexion /
+  etablissement_demande_acceptee : ajoutes le 06/09/2026 (Partie 9), voir
+  core/etablissements.py -- systeme etablissement independant de l'ancien
+  profiles.role/etablissement_id (migration 2026-08-04)
 
 creer_notification() fait deux choses a chaque appel : (1) insert en
 base (persistant, visible au prochain chargement du panneau) ; (2) tente
@@ -29,7 +33,12 @@ import logging
 from api.auth import supabase
 from core.canal_temps_reel import notifier_utilisateur
 
-TYPES_VALIDES = {"rappel_echu", "action_ia_terminee", "document_recu_code", "message_systeme", "audit_hebdomadaire_corrections"}
+TYPES_VALIDES = {
+    "rappel_echu", "action_ia_terminee", "document_recu_code", "message_systeme",
+    "audit_hebdomadaire_corrections",
+    # Système établissement (06/09/2026, Partie 9) -- voir core/etablissements.py
+    "etablissement_publication", "etablissement_demande_connexion", "etablissement_demande_acceptee",
+}
 
 
 def creer_notification(user_id: str, type_notif: str, titre: str, contenu: str | None = None, lien: str | None = None) -> dict | None:

@@ -190,6 +190,17 @@ MESSAGES_FR: dict[str, str] = {
     "ENSEIGNANT_ID_REQUIS_POUR_ETUDIANT": "Choisis ton enseignant pour continuer.",
     "ETABLISSEMENT_ID_REQUIS_POUR_ENSEIGNANT": "Choisis ton établissement pour continuer.",
     "ACTION_RESERVEE_A_CE_ROLE": "Cette action n'est pas disponible pour ton rôle.",
+    # Système établissement (2026-09-06, Partie 9 confiance pédagogique)
+    "ETABLISSEMENT_DEJA_DECLARE": "Ce compte est déjà déclaré comme établissement.",
+    "ETABLISSEMENT_NOM_REQUIS": "Donne un nom à ton établissement.",
+    "ETABLISSEMENT_PROFIL_INTROUVABLE": "Ce compte n'a pas encore de profil établissement.",
+    "RATTACHEMENT_INTROUVABLE": "Rattachement introuvable.",
+    "SEUL_ETABLISSEMENT_PEUT_ACCEPTER": "Seul l'établissement concerné peut accepter cette demande.",
+    "SEUL_ETABLISSEMENT_PEUT_LISTER_RATTACHEMENTS": "Seul l'établissement concerné peut voir cette liste.",
+    "PUBLICATION_INTROUVABLE": "Publication introuvable.",
+    "PUBLICATION_CONTENU_REQUIS": "Donne un contenu à publier.",
+    "SEUL_ETABLISSEMENT_PEUT_VALIDER": "Seul l'établissement concerné peut valider cette publication.",
+    "RATTACHEMENT_ACCEPTE_REQUIS_POUR_PUBLIER": "Tu dois être rattaché (et accepté) par cet établissement pour publier en son nom.",
     # Invitations Clovis (2026-08-08, partie 4)
     "AUCUNE_INVITATION_ACTIVE": "Aucun code actif pour l'instant, génère-en un.",
     "CODE_MANQUANT": "Entre un code pour continuer.",
