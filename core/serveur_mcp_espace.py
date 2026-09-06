@@ -1667,3 +1667,14 @@ def generer_image(prompt: str, ctx: Context) -> list[Image | str] | str:
         # rien, l'image reste consultable via l'URL.
         logging.error(f"ERREUR re-téléchargement image pour affichage (mcp_espace) : {e}")
         return url_telechargement
+
+
+# Corrections pédagogiques (Point 2, Partie 4, 06/09/2026) : outils
+# clovis_lister_corrections_prof / clovis_enregistrer_correction_prof,
+# déclarés dans un fichier séparé (core/outils_corrections_espace.py,
+# ce fichier-ci dépasse déjà 1600 lignes, voir règle transversale du
+# plan de travail sur la taille des fichiers) plutôt qu'ajoutés ici,
+# import en toute fin de fichier pour que `mcp_espace` soit déjà défini
+# au moment où ce module l'importe (même principe que les imports en
+# bas de core/serveur_mcp_generation.py).
+import core.outils_corrections_espace  # noqa: F401,E402

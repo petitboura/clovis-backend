@@ -31,6 +31,8 @@ uniquement un déplacement de code :
     de connaissance, matière active
   - outils_mobile.py             : dossiers désignés et exploration sur
     le téléphone de l'étudiant
+  - outils_corrections_pedagogiques.py : correction par le prof d'un
+    signalement de type A (Point 2, Partie 4, 06/09/2026)
 """
 
 # RAPPEL NON NEGOCIABLE (Bourama, 18/08) -- POUR NE PAS OUBLIER :
@@ -63,3 +65,4 @@ import core.outils_bibliotheque  # noqa: F401
 import core.outils_memoire_profil  # noqa: F401
 import core.outils_comportements_connaissance  # noqa: F401
 import core.outils_mobile  # noqa: F401
+import core.outils_corrections_pedagogiques  # noqa: F401
