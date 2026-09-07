@@ -58,6 +58,17 @@ class ProfilPublic(BaseModel):
     # convention "privée" que les deux champs au-dessus : False par
     # défaut pour un visiteur qui regarde le profil de quelqu'un d'autre.
     est_createur: bool = False
+    # 07/09/2026, demande Bourama : taille/position du popup mini du
+    # chat (desktop), déplaçable/redimensionnable, retrouvée sur
+    # n'importe quel appareil où ce compte se connecte (voir
+    # ChatFlottant.tsx côté frontend). None = jamais personnalisé, le
+    # frontend retombe alors sur la taille/position par défaut
+    # (centrée). Même convention "privée" que les champs juste au-dessus
+    # -- ne vaut la vraie valeur que pour le propriétaire.
+    popup_chat_x: Optional[int] = None
+    popup_chat_y: Optional[int] = None
+    popup_chat_largeur: Optional[int] = None
+    popup_chat_hauteur: Optional[int] = None
 
 
 class AgentDuCreateur(BaseModel):
@@ -228,7 +239,7 @@ def obtenir_profil_public(user_id: str, utilisateur=Depends(utilisateur_optionne
     try:
         profil = (
             supabase.table("profiles")
-            .select("user_id, nom_affiche, bio, avatar_url, notifications_proactives_actives, premier_agent_id, est_createur")
+            .select("user_id, nom_affiche, bio, avatar_url, notifications_proactives_actives, premier_agent_id, est_createur, popup_chat_x, popup_chat_y, popup_chat_largeur, popup_chat_hauteur")
             .eq("user_id", user_id)
             .maybe_single()
             .execute()
@@ -288,6 +299,10 @@ def obtenir_profil_public(user_id: str, utilisateur=Depends(utilisateur_optionne
         ),
         premier_agent_id=(ligne.get("premier_agent_id") if est_le_proprietaire else None),
         est_createur=(bool(ligne.get("est_createur")) if est_le_proprietaire else False),
+        popup_chat_x=(ligne.get("popup_chat_x") if est_le_proprietaire else None),
+        popup_chat_y=(ligne.get("popup_chat_y") if est_le_proprietaire else None),
+        popup_chat_largeur=(ligne.get("popup_chat_largeur") if est_le_proprietaire else None),
+        popup_chat_hauteur=(ligne.get("popup_chat_hauteur") if est_le_proprietaire else None),
         agents_administres=(_agents_administres_de(user_id) if est_le_proprietaire else []),
     )
 
@@ -312,6 +327,14 @@ class MettreAJourProfilPayload(BaseModel):
     # création du compte contredirait cette décision). None = champ omis,
     # ne rien changer -- reste NULL tant que jamais répondu.
     est_majeur: Optional[bool] = None
+    # 07/09/2026, voir docstring de ProfilPublic. Chaque champ omis (None)
+    # laisse la valeur actuelle inchangée -- un déplacement/redimensionnement
+    # renvoie toujours les 4 ensemble (voir ChatFlottant.tsx), mais rien
+    # n'empêche un appel partiel côté client.
+    popup_chat_x: Optional[int] = None
+    popup_chat_y: Optional[int] = None
+    popup_chat_largeur: Optional[int] = None
+    popup_chat_hauteur: Optional[int] = None
 
 
 @router.patch("/me", response_model=ProfilPublic)
@@ -367,6 +390,14 @@ def mettre_a_jour_mon_profil(
         ligne["premier_agent_id"] = payload.premier_agent_id.strip() or None
     if payload.est_majeur is not None:
         ligne["est_majeur"] = payload.est_majeur
+    if payload.popup_chat_x is not None:
+        ligne["popup_chat_x"] = payload.popup_chat_x
+    if payload.popup_chat_y is not None:
+        ligne["popup_chat_y"] = payload.popup_chat_y
+    if payload.popup_chat_largeur is not None:
+        ligne["popup_chat_largeur"] = payload.popup_chat_largeur
+    if payload.popup_chat_hauteur is not None:
+        ligne["popup_chat_hauteur"] = payload.popup_chat_hauteur
 
     try:
         deja_existant = (
@@ -431,7 +462,7 @@ def mettre_a_jour_mon_profil(
     try:
         res = (
             supabase.table("profiles")
-            .select("user_id, nom_affiche, bio, avatar_url, notifications_proactives_actives, premier_agent_id, est_createur")
+            .select("user_id, nom_affiche, bio, avatar_url, notifications_proactives_actives, premier_agent_id, est_createur, popup_chat_x, popup_chat_y, popup_chat_largeur, popup_chat_hauteur")
             .eq("user_id", utilisateur.id)
             .maybe_single()
             .execute()
@@ -462,6 +493,10 @@ def mettre_a_jour_mon_profil(
         notifications_proactives_actives=bool(resultat.get("notifications_proactives_actives")),
         premier_agent_id=resultat.get("premier_agent_id"),
         est_createur=bool(resultat.get("est_createur")),
+        popup_chat_x=resultat.get("popup_chat_x"),
+        popup_chat_y=resultat.get("popup_chat_y"),
+        popup_chat_largeur=resultat.get("popup_chat_largeur"),
+        popup_chat_hauteur=resultat.get("popup_chat_hauteur"),
     )
 
 
