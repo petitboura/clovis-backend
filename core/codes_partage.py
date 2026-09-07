@@ -298,6 +298,12 @@ def _copier_fichier_pour_receveur(fichier_id: str, receveur_id: str, proprietair
                 uploade_par=proprietaire_id,
                 user_id=receveur_id,
                 description=f.get("description"),
+                # CORRECTIF 07/09/2026 (bug remonte par Bourama) : oublie ici
+                # alors que la branche fichier juste en dessous le fait deja
+                # -- le lien copie retombait sur l'origine par defaut
+                # "bibliotheque", donc mal range dans l'onglet "Depuis un
+                # code" de la bibliotheque (voir EspaceBibliotheque.tsx::origineDe).
+                origine="code_partage",
             )
         except Exception as e:
             logging.error(f"ERREUR propagation lien (dossier partagé, {fichier_id} -> {receveur_id}) : {e}")

@@ -20,6 +20,7 @@ from core.codes_partage import (
     entrer_code,
     lister_mes_rattachements,
     retirer_rattachement,
+    obtenir_comportement_skill_recu,
 )
 
 router_mes_codes = APIRouter(prefix="/api/codes", tags=["codes_partage"])
@@ -121,6 +122,20 @@ def entrer(payload: EntrerCodePayload, utilisateur=Depends(utilisateur_courant))
 @router_rattachements.get("")
 def lister_recus(utilisateur=Depends(utilisateur_courant)):
     return lister_mes_rattachements(utilisateur.id)
+
+
+@router_rattachements.get("/comportements/{comportement_id}/skill")
+def voir_skill_recu(comportement_id: str, utilisateur=Depends(utilisateur_courant)):
+    """07/09/2026, demande Bourama : les skills reçus via un code n'étaient
+    consultables que par le LLM (outil consulter_comportement), aucun moyen
+    pour l'utilisateur lui-même de voir ce qu'il a reçu. Lecture seule,
+    même vérification d'accès que côté LLM (voir
+    core/codes_partage.py::obtenir_comportement_skill_recu) -- jamais de
+    fuite vers un comportement qu'on n'a pas/plus."""
+    skill_md = obtenir_comportement_skill_recu(utilisateur.id, f"recu:{comportement_id}")
+    if skill_md is None:
+        raise erreur_api(404, "SKILL_INTROUVABLE")
+    return {"skill_md": skill_md}
 
 
 @router_rattachements.delete("/{rattachement_id}", status_code=204)

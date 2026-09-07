@@ -39,6 +39,7 @@ from core.file_attente_vectorisation import (
     vectoriser_maintenant_publique as _vectoriser_maintenant_publique,
     supabase as _supabase,
 )
+from core.codes_partage import propager_fichier_range_dossier as _propager_fichier_range_dossier
 from core.dossiers_bibliotheque import (
     _proprietaire_dossier,
     creer_dossier as _creer_dossier,
@@ -592,6 +593,15 @@ def gerer_document_bibliotheque(
         except Exception as e:
             logging.error(f"ERREUR gerer_document_bibliotheque (ranger_dossier) : {e}")
             return "Erreur : impossible de ranger ce fichier, réessaie."
+        # CORRECTIF 07/09/2026 (bug remonte par Bourama) : ce chemin
+        # (rangement par le LLM) ne declenchait jamais la propagation vers
+        # les receveurs d'un code partage, contrairement au bouton manuel
+        # de l'UI (voir api/dossiers_bibliotheque.py::ranger). Non
+        # bloquant, meme principe que la-bas.
+        try:
+            _propager_fichier_range_dossier(fichier_id, dossier_id, user_id)
+        except Exception as e:
+            logging.error(f"ERREUR propagation dossier partagé (gerer_document_bibliotheque, fichier {fichier_id}, dossier {dossier_id}) : {e}")
         return "Fichier rangé dans le dossier."
 
     if action == "retirer_dossier":

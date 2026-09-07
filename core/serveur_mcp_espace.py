@@ -112,6 +112,7 @@ from core.description_multimedia import (
 from core.generation_images import generer_image as _generer_image
 from core.codes_partage import (
     obtenir_comportement_skill_recu as _obtenir_comportement_skill_recu,
+    propager_fichier_range_dossier as _propager_fichier_range_dossier,
 )
 from core.comportements_etudiants import (
     lister_comportements as _lister_comportements,
@@ -772,6 +773,13 @@ def ranger_fichier_dans_dossier(fichier_id: str, dossier_id: str, ctx: Context) 
     except Exception as e:
         logging.error(f"ERREUR outil ranger_fichier_dans_dossier : {e}")
         return "Erreur : impossible de ranger ce fichier, réessaie."
+    # CORRECTIF 07/09/2026 (bug remonte par Bourama) : meme trou que
+    # core/outils_bibliotheque.py -- ce chemin (MCP) ne declenchait jamais
+    # la propagation vers les receveurs d'un code partage.
+    try:
+        _propager_fichier_range_dossier(fichier_id, dossier_id, user_id)
+    except Exception as e:
+        logging.error(f"ERREUR propagation dossier partagé (MCP ranger_fichier_dans_dossier, fichier {fichier_id}, dossier {dossier_id}) : {e}")
     return "Fichier rangé dans le dossier."
 
 
