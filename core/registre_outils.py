@@ -506,5 +506,19 @@ REGISTRE_AFFICHAGE_OUTILS = {
     # autonomie pendant la conversation, jamais des boutons cliqués.
     "gerer_dossier_telephone": {"label": "Dossiers du téléphone", "icone": "FolderPen", "onglet": None},
     "explorer_dossier": {"label": "Exploration du dossier en direct", "icone": "FolderOpen", "onglet": None},
+
+    # --- Outil interne demander_outils (etape 5, chantier "demander_outils",
+    # 06/09/2026, decision explicite de Bourama) --- onglet=None, meme
+    # logique que les blocs ci-dessus : jamais un bouton cliquable (ce
+    # n'est PAS un vrai outil MCP, voir routage_outils._outil_demander_outils).
+    # Contrairement a garder_outils (totalement invisible, aucune entree
+    # ici), demander_outils EST affiche : Bourama a choisi de montrer a
+    # l'utilisateur le moment ou le modele realise en direct qu'il lui
+    # manque un outil et va en chercher un -- voir le bloc d'evenements
+    # statut/statut_termine/outil_resultat dans _agent_groq (core/boucle_agent.py).
+    # Icone "PackageSearch" NON VERIFIEE dans cette version de lucide-react
+    # (0.383.0, meme situation que "ImageSearch" plus haut) -- repli
+    # automatique sur Wrench sinon, rien d'autre ne casse.
+    "demander_outils": {"label": "Recherche d'un outil", "icone": "PackageSearch", "onglet": None},
 }
 

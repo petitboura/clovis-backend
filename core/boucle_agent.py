@@ -15,10 +15,11 @@ from routage_outils import (
     _separer_appels_demander_outils,
     _outils_deja_en_main,
     _rafraichir_enum_garder_outils,
+    NOM_OUTIL_DEMANDER_OUTILS,
 )
 from recherche_outils import rechercher_outils_pertinents
 from filtre_texte_streaming import _finaliser_fragment_texte, _nouvel_etat_filtre_texte, _traiter_fragment_texte
-from profils_agents import _nom_lisible_appel
+from profils_agents import _nom_lisible_appel, _nom_lisible
 
 def _evenement_confirmation(attente, messages_agent, outils_mcp, table_routage, modele=GROQ_PRIMARY, reasoning_effort=None, agent_nom=None):
     appel = attente.appel
@@ -501,17 +502,30 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
         # deux appels dans le meme lot peuvent chercher des choses
         # differentes, jamais une reponse generique partagee.
         for demande in demandes_outils_ce_lot:
+            # Etape 5 (decision explicite de Bourama, 06/09/2026) :
+            # contrairement a garder_outils, demander_outils EST visible
+            # dans le fil -- meme convention d'evenements que
+            # _traiter_appels pour un vrai outil (voir execution_outils.py),
+            # mais geree ici a la main puisque demander_outils ne passe
+            # jamais par _traiter_appels/table_routage.
+            nom_lisible_demande = _nom_lisible(NOM_OUTIL_DEMANDER_OUTILS)
+            yield {"type": "statut", "texte": f"{nom_lisible_demande}..."}
+
             if not demande["besoin"]:
                 contenu_reponse = (
                     "Je n'ai pas compris ce dont tu as besoin -- decris en "
                     "une phrase claire ce que tu cherches a faire."
                 )
+                statut_fin = f"{nom_lisible_demande} : besoin non compris"
+                resultat_affichage = "Besoin non compris (arguments vides ou illisibles)."
             elif not catalogue_complet:
                 # None (demander_outils pas cense etre propose sans
                 # catalogue -- voir _preparer_demander_outils) ou liste
                 # vide (aucun outil autorise du tout sur la plateforme) :
                 # meme reponse honnete dans les deux cas.
                 contenu_reponse = "Aucun outil supplémentaire n'est disponible pour cette conversation."
+                statut_fin = f"{nom_lisible_demande} : aucun outil disponible"
+                resultat_affichage = f"Besoin exprimé : {demande['besoin']}\n\nAucun outil supplémentaire n'est disponible pour cette conversation."
             else:
                 deja_en_main = _outils_deja_en_main(outils_mcp)
                 candidats = [o for o in catalogue_complet if o["function"]["name"] not in deja_en_main]
@@ -540,13 +554,26 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
                         f"Trouvé et ajouté à tes outils disponibles : {noms_trouves}. "
                         "Tu peux l'appeler dès maintenant pour continuer."
                     )
+                    statut_fin = f"{nom_lisible_demande} : {noms_trouves} trouvé"
+                    resultat_affichage = f"Besoin exprimé : {demande['besoin']}\n\nTrouvé : {noms_trouves}."
                 else:
                     contenu_reponse = "Aucun outil correspondant à ce besoin n'existe dans le catalogue de Clovis."
+                    statut_fin = f"{nom_lisible_demande} : rien trouvé"
+                    resultat_affichage = f"Besoin exprimé : {demande['besoin']}\n\nAucun outil correspondant trouvé dans le catalogue de Clovis."
+
+            yield {"type": "statut_termine", "texte": statut_fin}
+            yield {
+                "type": "outil_resultat",
+                "nom_outil": NOM_OUTIL_DEMANDER_OUTILS,
+                "nom_lisible": nom_lisible_demande,
+                "resultat": resultat_affichage,
+            }
             messages_agent.append({
                 "role": "tool",
                 "tool_call_id": demande["id"],
                 "content": contenu_reponse,
             })
+
 
         if appels_normaux:
             try:
