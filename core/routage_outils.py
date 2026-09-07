@@ -6,6 +6,7 @@ import json
 import logging
 from groq import Groq
 from constantes_agent import get_secret, supabase, MODELE_ROUTEUR_OUTILS, MODELE_ROUTEUR_OUTILS_REPLI, DELAI_MAX_PAR_APPEL
+from mcp_tools import lister_outils_autorises_pour_agent
 
 def _resume_description_outil(description, max_caracteres=200):
     """
@@ -220,26 +221,37 @@ def _separer_appels_demander_outils(appels):
     _outil_demander_outils) du reste des appels normaux -- meme principe
     que _separer_appels_garder_outils : jamais envoyes a
     table_routage/_traiter_appels, jamais comptes dans le budget ni la
-    detection de repetition. Renvoie (appels_normaux, besoins), besoins
-    etant la liste (dans l'ordre) des textes libres "besoin" de tous les
-    appels demander_outils de ce lot -- rare qu'il y en ait plus d'un
-    dans le meme lot, mais couvert. Un besoin vide ou illisible est
-    ignore silencieusement plutot que de faire planter le tour.
+    detection de repetition.
+
+    REVISION (etape 3, meme jour) : contrairement a la premiere version
+    (poussee avec l'etape 2), ne renvoie plus une simple liste de textes
+    "besoin" -- chaque appel demander_outils du lot peut chercher quelque
+    chose de DIFFERENT et doit recevoir sa propre reponse individuelle
+    (voir _agent_groq), pas une reponse generique partagee comme
+    garder_outils. Renvoie donc (appels_normaux, demandes), demandes
+    etant la liste (dans l'ordre, un element par appel demander_outils du
+    lot -- rare qu'il y en ait plus d'un, mais couvert) de dicts
+    {"id": tool_call_id, "besoin": texte_ou_chaine_vide}. Un besoin
+    vide/illisible reste dans la liste (jamais ignore silencieusement
+    cette fois) : l'API Groq exige un message "tool" pour CHAQUE
+    tool_call_id emis par l'assistant, sinon le prochain appel a Groq
+    echoue -- charge donc a l'appelant de repondre "je n'ai pas compris"
+    plutot que rien.
     """
     appels_normaux = []
-    besoins = []
+    demandes = []
     for appel in appels:
         if appel["name"] == NOM_OUTIL_DEMANDER_OUTILS:
             try:
                 arguments = json.loads(appel["arguments"] or "{}")
                 besoin = (arguments.get("besoin") or "").strip()
-                if besoin:
-                    besoins.append(besoin)
             except Exception as e:
                 logging.error(f"ERREUR arguments demander_outils illisibles : {e}")
+                besoin = ""
+            demandes.append({"id": appel["id"], "besoin": besoin})
         else:
             appels_normaux.append(appel)
-    return appels_normaux, besoins
+    return appels_normaux, demandes
 
 
 def _outils_deja_en_main(outils_mcp):
@@ -257,6 +269,51 @@ def _outils_deja_en_main(outils_mcp):
     savoir quoi exclure du catalogue complet avant de chercher dedans.
     """
     return {o["function"]["name"] for o in (outils_mcp or [])}
+
+
+def _preparer_demander_outils(user_id, agent_id, outils_mcp):
+    """
+    A appeler UNE SEULE FOIS dans main.py, au meme point de convergence
+    que _outil_garder_outils (une fois outils_mcp definitivement etabli
+    pour ce tour, apres garder_outils lui-meme). Ajoute demander_outils a
+    outils_mcp SEULEMENT si au moins un autre outil est deja propose ce
+    tour-ci (decision explicite de Bourama, 06/09/2026, meme regle que
+    garder_outils : zero cout de schema sur les messages qui n'ont deja
+    aucun outil -- demander_outils sert a completer une selection
+    existante, pas a demarrer de zero).
+
+    Recupere aussi le catalogue complet et sa table de routage via
+    lister_outils_autorises_pour_agent -- deja mis en cache 24h par
+    serveur (voir mcp_tools.py), donc pas de nouvel appel reseau dans le
+    cas courant, juste "piocher dedans" comme voulu par Bourama, aucune
+    nouvelle source de donnees creee ici.
+
+    Renvoie (outils_mcp, catalogue_complet, table_routage_complet).
+    Si outils_mcp est vide en entree : renvoie (outils_mcp inchange,
+    None, None), rien n'est recupere pour rien.
+    """
+    if not outils_mcp:
+        return outils_mcp, None, None
+    catalogue_complet, table_routage_complet = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id)
+    outils_mcp = outils_mcp + [_outil_demander_outils()]
+    return outils_mcp, catalogue_complet, table_routage_complet
+
+
+def _catalogue_pour_demander_outils(user_id, agent_id, outils_mcp):
+    """
+    Variante de _preparer_demander_outils pour les deux chemins de
+    reprise de main.py (apres confirmation, ou apres limite/repetition) :
+    outils_mcp y est restaure tel quel depuis l'etat de reprise -- il a
+    deja ete etabli (et demander_outils deja ajoute si applicable) sur le
+    tour precedent, donc RIEN a rajouter ici, seulement rafraichir
+    catalogue_complet/table_routage_complet (transitoires, jamais
+    persistes dans l'etat de reprise) si demander_outils fait bien partie
+    de ce qui est deja propose -- sinon (None, None), rien recupere pour
+    rien.
+    """
+    if not outils_mcp or not any(o["function"]["name"] == NOM_OUTIL_DEMANDER_OUTILS for o in outils_mcp):
+        return None, None
+    return lister_outils_autorises_pour_agent(get_secret, user_id, agent_id)
 
 
 def _router_outils(message_utilisateur, outils_disponibles, historique=None):

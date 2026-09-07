@@ -8,7 +8,14 @@ import logging
 from mcp_tools import parametres_outils
 from constantes_agent import GROQ_PRIMARY, MODELES_AVEC_REASONING_EFFORT, DELAI_MAX_PAR_APPEL
 from execution_outils import _AttenteConfirmation, _traiter_appels
-from routage_outils import _ecrire_outils_retenus, _separer_appels_garder_outils, NOM_OUTIL_GARDER_OUTILS
+from routage_outils import (
+    _ecrire_outils_retenus,
+    _separer_appels_garder_outils,
+    NOM_OUTIL_GARDER_OUTILS,
+    _separer_appels_demander_outils,
+    _outils_deja_en_main,
+)
+from recherche_outils import rechercher_outils_pertinents
 from filtre_texte_streaming import _finaliser_fragment_texte, _nouvel_etat_filtre_texte, _traiter_fragment_texte
 from profils_agents import _nom_lisible_appel
 
@@ -135,7 +142,8 @@ def _generer_conclusion_forcee(client_groq, messages_agent, outils_mcp, modele, 
 
 def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
                  appels_en_cours_a_finir=None, modele=GROQ_PRIMARY, reasoning_effort=None, agent_nom=None,
-                 rattrapage_tool_code_restant=1, conversation_id=None):
+                 rattrapage_tool_code_restant=1, conversation_id=None,
+                 catalogue_complet=None, table_routage_complet=None):
     """
     Boucle d'agent generique sur le modele Groq utilise (par defaut
     GROQ_PRIMARY, mais peut recevoir n'importe quel modele Groq qui sait
@@ -174,6 +182,16 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
     appels a l'outil interne garder_outils (voir
     _separer_appels_garder_outils plus bas) -- None accepte, dans ce cas
     garder_outils reste inoffensif (rien n'est ecrit, pas d'erreur).
+
+    `catalogue_complet`/`table_routage_complet` (etape 3, chantier
+    "demander_outils", 06/09/2026, demande Bourama) : le catalogue COMPLET
+    d'outils autorises (pas filtre par outil_force -- voir
+    mcp_tools.lister_outils_autorises_pour_agent) et sa table de routage,
+    fournis par main.py (voir routage_outils._preparer_demander_outils /
+    _catalogue_pour_demander_outils) UNIQUEMENT si l'outil interne
+    demander_outils est propose ce tour-ci -- None sinon, dans ce cas
+    demander_outils repond simplement qu'aucun outil supplementaire n'est
+    disponible (voir plus bas) plutot que de planter.
     """
     kwargs_reasoning = {"reasoning_effort": reasoning_effort} if reasoning_effort else {}
     # Compteur de sources partagé sur tout le tour (26/08, citations
@@ -359,6 +377,7 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
                     modele=modele, reasoning_effort=reasoning_effort, agent_nom=agent_nom,
                     rattrapage_tool_code_restant=rattrapage_tool_code_restant - 1,
                     conversation_id=conversation_id,
+                    catalogue_complet=catalogue_complet, table_routage_complet=table_routage_complet,
                 )
                 return
             else:
@@ -403,6 +422,15 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
         appels_normaux, noms_a_garder_ce_lot = _separer_appels_garder_outils(appels)
         if len(appels_normaux) != len(appels):
             _ecrire_outils_retenus(conversation_id, noms_a_garder_ce_lot)
+
+        # Outil interne demander_outils (etape 3, chantier "demander_outils",
+        # 06/09/2026, demande Bourama) : sorti du lot ICI, meme principe que
+        # garder_outils juste au-dessus -- jamais route vers table_routage,
+        # jamais compte dans le budget ni la detection de repetition. La
+        # recherche/le branchement reels se font plus bas (une fois le
+        # message assistant avec tool_calls ajoute a messages_agent), pas
+        # ici : cette etape ne fait que sortir ces appels du circuit normal.
+        appels_normaux, demandes_outils_ce_lot = _separer_appels_demander_outils(appels_normaux)
 
         # Detection de repetition (02/09/2026, demande Bourama) : si l'un
         # de ces appels ferait atteindre tolerance_repetition fois
@@ -460,6 +488,58 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
                         "Aucun outil gardé pour le prochain message."
                     ),
                 })
+
+        # Branchement reel de demander_outils (etape 3) -- jamais via
+        # _traiter_appels, totalement invisible pour l'utilisateur cote UI
+        # (comme garder_outils). outils_mcp/table_routage sont mis a jour
+        # ICI MEME, en place : les outils trouves sont donc utilisables des
+        # le prochain aller-retour de CE MEME tour (prochain passage de la
+        # boucle `while True` juste en dessous), sans attendre le message
+        # suivant de l'utilisateur. Chaque demande de ce lot recoit sa
+        # propre reponse individuelle (voir _separer_appels_demander_outils) :
+        # deux appels dans le meme lot peuvent chercher des choses
+        # differentes, jamais une reponse generique partagee.
+        for demande in demandes_outils_ce_lot:
+            if not demande["besoin"]:
+                contenu_reponse = (
+                    "Je n'ai pas compris ce dont tu as besoin -- decris en "
+                    "une phrase claire ce que tu cherches a faire."
+                )
+            elif not catalogue_complet:
+                # None (demander_outils pas cense etre propose sans
+                # catalogue -- voir _preparer_demander_outils) ou liste
+                # vide (aucun outil autorise du tout sur la plateforme) :
+                # meme reponse honnete dans les deux cas.
+                contenu_reponse = "Aucun outil supplémentaire n'est disponible pour cette conversation."
+            else:
+                deja_en_main = _outils_deja_en_main(outils_mcp)
+                candidats = [o for o in catalogue_complet if o["function"]["name"] not in deja_en_main]
+                trouves = rechercher_outils_pertinents(demande["besoin"], candidats)
+                if trouves:
+                    # Nouvelle liste (jamais de mutation en place de
+                    # l'ancienne outils_mcp) : outils_mcp est aussi ce qui
+                    # part dans etat_reprise (confirmation/limite/repetition,
+                    # voir _evenement_confirmation/_evenement_reprise_agent
+                    # plus bas) -- une mutation en place risquerait de
+                    # modifier une reference partagee avec un etat deja capture.
+                    outils_mcp = outils_mcp + trouves
+                    table_routage = dict(table_routage)
+                    for outil in trouves:
+                        nom = outil["function"]["name"]
+                        if table_routage_complet and nom in table_routage_complet:
+                            table_routage[nom] = table_routage_complet[nom]
+                    noms_trouves = ", ".join(o["function"]["name"] for o in trouves)
+                    contenu_reponse = (
+                        f"Trouvé et ajouté à tes outils disponibles : {noms_trouves}. "
+                        "Tu peux l'appeler dès maintenant pour continuer."
+                    )
+                else:
+                    contenu_reponse = "Aucun outil correspondant à ce besoin n'existe dans le catalogue de Clovis."
+            messages_agent.append({
+                "role": "tool",
+                "tool_call_id": demande["id"],
+                "content": contenu_reponse,
+            })
 
         if appels_normaux:
             try:

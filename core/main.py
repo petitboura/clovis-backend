@@ -37,7 +37,10 @@ from moderation_message import _verifier_message_utilisateur
 from filtre_texte_streaming import _ressemble_a_du_json_casse  # réexporté pour core/proactivite.py (05/09/2026)
 from lecture_urls_externes import _construire_parts_gemini, _enrichir_message_avec_urls, _telecharger_image
 from profils_agents import _mettre_a_jour_profil_utilisateur_si_besoin, _nom_agent, _nom_lisible, _nom_lisible_appel
-from routage_outils import _ecrire_outils_retenus, _lire_outils_retenus, _outil_garder_outils, _router_outils
+from routage_outils import (
+    _ecrire_outils_retenus, _lire_outils_retenus, _outil_garder_outils, _router_outils,
+    _preparer_demander_outils, _catalogue_pour_demander_outils,
+)
 from construction_system_prompt import _construire_system_prompt, _est_timeout, _repli_si_reponse_partielle
 from persistance_echanges import _sauvegarder_echange, _mettre_a_jour_resume_si_besoin
 from execution_outils import _resultat_pour_affichage
@@ -231,6 +234,9 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         table_routage = etat["table_routage"]
         modele_reprise = etat.get("modele", GROQ_PRIMARY)
         reasoning_effort_reprise = etat.get("reasoning_effort")
+        # demander_outils (etape 3) : transitoire, jamais persiste dans
+        # l'etat de reprise -- voir _catalogue_pour_demander_outils.
+        catalogue_complet, table_routage_complet = _catalogue_pour_demander_outils(user_id, agent_id, outils_mcp)
 
         if reprise.get("message_utilisateur"):
             messages_agent.append({"role": "user", "content": reprise["message_utilisateur"]})
@@ -241,6 +247,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 client_groq, messages_agent, outils_mcp, table_routage,
                 modele=modele_reprise, reasoning_effort=reasoning_effort_reprise,
                 agent_nom=etat.get("agent_nom"), conversation_id=conversation_id,
+                catalogue_complet=catalogue_complet, table_routage_complet=table_routage_complet,
             )
         except Exception as e:
             logging.error(f"ERREUR GROQ (reprise apres limite/répétition) {modele_reprise}: {e}")
@@ -256,6 +263,9 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         appel = etat["appel"]
         modele_reprise = etat.get("modele", GROQ_PRIMARY)
         reasoning_effort_reprise = etat.get("reasoning_effort")
+        # demander_outils (etape 3) : transitoire, jamais persiste dans
+        # l'etat de reprise -- voir _catalogue_pour_demander_outils.
+        catalogue_complet, table_routage_complet = _catalogue_pour_demander_outils(user_id, agent_id, outils_mcp)
 
         client_groq = Groq(api_key=get_secret("GROQ_API_KEY"), max_retries=0)
 
@@ -316,6 +326,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 appels_en_cours_a_finir=etat.get("appels_restants") or None,
                 modele=modele_reprise, reasoning_effort=reasoning_effort_reprise,
                 agent_nom=etat.get("agent_nom"), conversation_id=conversation_id,
+                catalogue_complet=catalogue_complet, table_routage_complet=table_routage_complet,
             )
         except Exception as e:
             logging.error(f"ERREUR GROQ (reprise apres confirmation) {modele_reprise}: {e}")
@@ -677,6 +688,14 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         outils_mcp = outils_mcp + [_outil_garder_outils([o["function"]["name"] for o in outils_mcp])]
         _ecrire_outils_retenus(conversation_id, [])
 
+    # Outil interne demander_outils (etape 3, chantier "demander_outils",
+    # 06/09/2026, demande Bourama) : ajoute juste apres garder_outils, au
+    # meme point de convergence -- voir _preparer_demander_outils pour la
+    # condition exacte (rien si outils_mcp est vide) et le catalogue
+    # complet + sa table de routage necessaires au branchement reel dans
+    # _agent_groq (core/boucle_agent.py).
+    outils_mcp, catalogue_complet, table_routage_complet = _preparer_demander_outils(user_id, agent_id, outils_mcp)
+
     if localisation and localisation.get("latitude") is not None and localisation.get("longitude") is not None:
         # Contexte "système/environnement" (2026-07-20) : position GPS
         # transmise explicitement par l'utilisateur (bouton dédié côté
@@ -832,7 +851,8 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             yield from _capturer_reponse(
                 _agent_groq(client_groq, messages_agent, outils_mcp, table_routage, agent_nom=agent_nom,
                             reasoning_effort=MODELES_AVEC_REASONING_EFFORT.get(GROQ_PRIMARY),
-                            conversation_id=conversation_id),
+                            conversation_id=conversation_id,
+                            catalogue_complet=catalogue_complet, table_routage_complet=table_routage_complet),
                 reponse_accumulee,
                 meta_assistant,
             )
@@ -872,6 +892,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                         client_groq, messages_agent, outils_mcp, table_routage,
                         modele=model, reasoning_effort=reasoning_pour_ce_modele, agent_nom=agent_nom,
                         conversation_id=conversation_id,
+                        catalogue_complet=catalogue_complet, table_routage_complet=table_routage_complet,
                     ),
                     reponse_accumulee,
                     meta_assistant,
