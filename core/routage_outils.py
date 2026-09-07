@@ -254,6 +254,47 @@ def _separer_appels_demander_outils(appels):
     return appels_normaux, demandes
 
 
+def _rafraichir_enum_garder_outils(outils_mcp):
+    """
+    Etape 4 du chantier "demander_outils" (06/09/2026, demande Bourama) :
+    verifie que garder_outils reconnaisse bien les outils ajoutes en
+    direct par demander_outils.
+
+    Probleme sans cette fonction : l'enum de garder_outils (voir
+    _outil_garder_outils, parametres.outils.items.enum) est fige au
+    moment ou main.py construit outils_mcp UNE SEULE FOIS, AVANT que le
+    tour ne commence -- si demander_outils agrandit outils_mcp en cours
+    de route (voir le branchement dans _agent_groq), l'entree
+    garder_outils deja presente dans cette meme liste continue de
+    pointer vers l'ANCIEN enum, sans les noms tout juste ajoutes. Le
+    modele ne pourrait alors pas les "garder" pour son prochain message
+    meme s'il vient de les utiliser avec succes ce tour-ci.
+
+    Reconstruit donc l'entree garder_outils de outils_mcp avec un enum a
+    jour (tous les noms reels actuellement dans outils_mcp, garder_outils
+    et demander_outils eux-memes exclus -- ce sont des outils internes
+    remis en place a chaque tour qualifiant par main.py, jamais quelque
+    chose que le modele devrait "garder" via ce mecanisme).
+
+    A appeler juste apres tout ajout reussi a outils_mcp par
+    demander_outils, AVANT le prochain appel a Groq (voir _agent_groq).
+    Si garder_outils n'est pas present dans outils_mcp (ne devrait pas
+    arriver ici, puisque demander_outils lui-meme n'est ajoute par
+    _preparer_demander_outils que si outils_mcp etait deja non vide au
+    debut du tour -- mais reste fail-safe : renvoie outils_mcp inchange).
+    """
+    if not any(o["function"]["name"] == NOM_OUTIL_GARDER_OUTILS for o in outils_mcp):
+        return outils_mcp
+    noms_reels = [
+        o["function"]["name"] for o in outils_mcp
+        if o["function"]["name"] not in (NOM_OUTIL_GARDER_OUTILS, NOM_OUTIL_DEMANDER_OUTILS)
+    ]
+    return [
+        _outil_garder_outils(noms_reels) if o["function"]["name"] == NOM_OUTIL_GARDER_OUTILS else o
+        for o in outils_mcp
+    ]
+
+
 def _outils_deja_en_main(outils_mcp):
     """
     Ensemble des noms d'outils que le modele a deja disponibles ce

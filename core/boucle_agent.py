@@ -14,6 +14,7 @@ from routage_outils import (
     NOM_OUTIL_GARDER_OUTILS,
     _separer_appels_demander_outils,
     _outils_deja_en_main,
+    _rafraichir_enum_garder_outils,
 )
 from recherche_outils import rechercher_outils_pertinents
 from filtre_texte_streaming import _finaliser_fragment_texte, _nouvel_etat_filtre_texte, _traiter_fragment_texte
@@ -523,6 +524,12 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
                     # plus bas) -- une mutation en place risquerait de
                     # modifier une reference partagee avec un etat deja capture.
                     outils_mcp = outils_mcp + trouves
+                    # Etape 4 : sans ce rafraichissement, l'entree garder_outils
+                    # deja presente dans outils_mcp garderait son ANCIEN enum
+                    # (fige par main.py avant le debut du tour) -- le modele ne
+                    # pourrait alors pas garder pour son prochain message un
+                    # outil qu'il vient tout juste d'obtenir via demander_outils.
+                    outils_mcp = _rafraichir_enum_garder_outils(outils_mcp)
                     table_routage = dict(table_routage)
                     for outil in trouves:
                         nom = outil["function"]["name"]
