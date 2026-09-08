@@ -40,7 +40,7 @@ supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
 
 STATUTS_VALIDES = {"a_venir", "en_cours", "acquis"}
 
-_COLONNES_NOTION = "id, code_id, notion_parent_id, nom, statut, ordre, created_at, updated_at"
+_COLONNES_NOTION = "id, code_id, notion_parent_id, nom, statut, ordre, created_at, updated_at, regle_comportement, consigne_llm"
 
 
 def code_appartient_a(code_id: str, proprietaire_id: str) -> bool:
@@ -169,6 +169,49 @@ def changer_statut_notion(notion_id: str, code_id: str, proprietaire_id: str, st
     res = (
         supabase.table("notions")
         .update({"statut": statut, "updated_at": datetime.utcnow().isoformat()})
+        .eq("id", notion_id)
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+
+REGLES_COMPORTEMENT_VALIDES = {"bloquer", "contourner", "signaler"}
+
+
+def definir_regle_notion(notion_id: str, code_id: str, proprietaire_id: str, regle: str | None) -> dict | None:
+    """Equivalent REST, par notion_id, de
+    core/avancement_notions_ia.py:definir_regle_comportement (qui, lui,
+    resout par nom pour l'usage MCP/LLM) -- 08/09/2026, ajoute pour que
+    le prof puisse regler bloquer/contourner/signaler directement depuis
+    l'onglet Programme, plus seulement en conversation avec l'IA. None
+    si regle n'est ni valide ni None, si le code n'appartient pas a
+    proprietaire_id, ou si la notion n'appartient pas a ce code."""
+    if regle is not None and regle not in REGLES_COMPORTEMENT_VALIDES:
+        return None
+    if not code_appartient_a(code_id, proprietaire_id) or not _notion_du_code(notion_id, code_id):
+        return None
+    res = (
+        supabase.table("notions")
+        .update({"regle_comportement": regle, "updated_at": datetime.utcnow().isoformat()})
+        .eq("id", notion_id)
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+
+def definir_consigne_notion(notion_id: str, code_id: str, proprietaire_id: str, consigne: str | None) -> dict | None:
+    """Equivalent REST, par notion_id, de
+    core/avancement_notions_ia.py:definir_consigne_llm (qui, lui, resout
+    par nom pour l'usage MCP/LLM) -- meme fonctionnalite, meme
+    heritage le long de l'arborescence, exposee ici pour l'edition
+    directe depuis l'onglet Programme. None si le code n'appartient pas
+    a proprietaire_id, ou si la notion n'appartient pas a ce code."""
+    if not code_appartient_a(code_id, proprietaire_id) or not _notion_du_code(notion_id, code_id):
+        return None
+    valeur = (consigne or "").strip() or None
+    res = (
+        supabase.table("notions")
+        .update({"consigne_llm": valeur, "updated_at": datetime.utcnow().isoformat()})
         .eq("id", notion_id)
         .execute()
     )

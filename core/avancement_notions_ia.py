@@ -76,7 +76,7 @@ def toutes_notions_code(code_id: str) -> list[dict]:
     try:
         res = (
             supabase.table("notions")
-            .select("id, code_id, notion_parent_id, nom, statut, ordre, regle_comportement")
+            .select("id, code_id, notion_parent_id, nom, statut, ordre, regle_comportement, consigne_llm")
             .eq("code_id", code_id)
             .execute()
         )
@@ -161,6 +161,61 @@ def definir_regle_comportement(
     return res.data[0] if res.data else None
 
 
+def definir_consigne_llm(
+    proprietaire_id: str,
+    code_id: str,
+    nom_notion: str,
+    consigne: str | None,
+) -> dict | None:
+    """Definit (ou retire, si consigne est None/vide) la consigne texte
+    libre a destination de l'IA sur une notion EXISTANTE -- 08/09/2026,
+    demande Bourama : contrairement a regle_comportement (bloquer/
+    contourner/signaler, uniquement pour une notion pas encore vue),
+    cette consigne est un texte libre, applicable quel que soit le
+    statut de la notion (vue ou non), et coexiste avec regle_comportement
+    (les deux peuvent etre definis en meme temps sur la meme notion).
+    Meme regle d'heritage que regle_comportement (voir
+    consigne_effective_pour_notion) : une consigne posee sur un niveau
+    s'applique a tout ce qui est dessous, sauf override plus precis.
+    None si le code n'appartient pas a proprietaire_id ou si la notion
+    est introuvable/ambigue."""
+    if not code_appartient_a(code_id, proprietaire_id):
+        return None
+    notion = trouver_notion_par_nom(code_id, nom_notion)
+    if notion is None:
+        return None
+    valeur = (consigne or "").strip() or None
+    try:
+        res = (
+            supabase.table("notions")
+            .update({"consigne_llm": valeur})
+            .eq("id", notion["id"])
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (definition consigne notion {notion['id']}) : {e}")
+        return None
+    return res.data[0] if res.data else None
+
+
+def consigne_effective_pour_notion(notion: dict, toutes_notions: list[dict]) -> str | None:
+    """Remonte la chaine des parents jusqu'a trouver une consigne_llm
+    definie -- meme logique d'heritage que regle_effective_pour_notion
+    (une consigne posee sur un chapitre s'applique a toutes ses
+    sous-notions qui n'ont pas leur propre consigne plus precise). None
+    si aucun ancetre (ni la notion elle-meme) n'a de consigne."""
+    par_id = {n["id"]: n for n in toutes_notions}
+    courante = notion
+    vus: set[str] = set()
+    while courante is not None and courante["id"] not in vus:
+        vus.add(courante["id"])
+        if courante.get("consigne_llm"):
+            return courante["consigne_llm"]
+        parent_id = courante.get("notion_parent_id")
+        courante = par_id.get(parent_id) if parent_id else None
+    return None
+
+
 def regle_effective_pour_notion(notion: dict, toutes_notions: list[dict]) -> str | None:
     """Remonte la chaine des parents jusqu'a trouver une regle_comportement
     definie -- une regle posee sur une notion "chapitre" s'applique donc
@@ -197,7 +252,8 @@ def formatter_arborescence(notions: list[dict]) -> str:
         for n in par_parent.get(parent_id, []):
             indentation = "  " * profondeur
             regle = f", regle: {n['regle_comportement']}" if n.get("regle_comportement") else ""
-            lignes.append(f"{indentation}- {n['nom']} [statut: {n['statut']}{regle}] (id: {n['id']})")
+            consigne = f", consigne: \"{n['consigne_llm']}\"" if n.get("consigne_llm") else ""
+            lignes.append(f"{indentation}- {n['nom']} [statut: {n['statut']}{regle}{consigne}] (id: {n['id']})")
             _ajouter(n["id"], profondeur + 1)
 
     _ajouter(None, 0)
@@ -249,5 +305,6 @@ def consulter_progres_notion_pour_eleve(receveur_id: str, nom_notion: str):
     return {
         "statut": notion["statut"],
         "regle": regle_effective_pour_notion(notion, toutes),
+        "consigne": consigne_effective_pour_notion(notion, toutes),
         "code_nom": code.get("nom") or code.get("code"),
     }

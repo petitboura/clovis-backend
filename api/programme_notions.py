@@ -22,6 +22,8 @@ from core.programme_notions import (
     creer_notion,
     renommer_notion,
     changer_statut_notion,
+    definir_regle_notion,
+    definir_consigne_notion,
     reordonner_notions,
     fusionner_notions,
     supprimer_notion,
@@ -81,6 +83,30 @@ def changer_statut(code_id: str, notion_id: str, payload: StatutPayload, utilisa
     resultat = changer_statut_notion(notion_id, code_id, utilisateur.id, payload.statut)
     if resultat is None:
         raise erreur_api(400, "NOTION_PROGRAMME_STATUT_INVALIDE")
+    return resultat
+
+
+class ReglePayload(BaseModel):
+    regle: str | None = None
+
+
+@router.patch("/{code_id}/{notion_id}/regle")
+def definir_regle(code_id: str, notion_id: str, payload: ReglePayload, utilisateur=Depends(utilisateur_courant)):
+    resultat = definir_regle_notion(notion_id, code_id, utilisateur.id, payload.regle)
+    if resultat is None:
+        raise erreur_api(400, "NOTION_PROGRAMME_REGLE_INVALIDE")
+    return resultat
+
+
+class ConsignePayload(BaseModel):
+    consigne: str | None = None
+
+
+@router.patch("/{code_id}/{notion_id}/consigne")
+def definir_consigne(code_id: str, notion_id: str, payload: ConsignePayload, utilisateur=Depends(utilisateur_courant)):
+    resultat = definir_consigne_notion(notion_id, code_id, utilisateur.id, payload.consigne)
+    if resultat is None:
+        raise erreur_api(404, "NOTION_PROGRAMME_INTROUVABLE")
     return resultat
 
 

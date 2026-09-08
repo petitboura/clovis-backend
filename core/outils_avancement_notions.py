@@ -17,6 +17,7 @@ from core.avancement_notions_ia import (
     trouver_notion_par_nom,
     mettre_a_jour_ou_creer_avancement,
     definir_regle_comportement,
+    definir_consigne_llm,
     formatter_arborescence,
     consulter_progres_notion_pour_eleve,
     toutes_notions_code,
@@ -36,6 +37,7 @@ def gerer_avancement_notions(
     notion_parent_nom: str = "",
     statut: str = "",
     regle: str = "",
+    consigne: str = "",
 ) -> str:
     """
     Gère l'avancement du programme (structure de notions de la Partie 1)
@@ -82,6 +84,17 @@ def gerer_avancement_notions(
       exister (une règle ne crée jamais de notion). Passe `regle` vide
       pour retirer une règle déjà posée à ce niveau précis. Paramètres :
       `code_id` (ou `code_nom`), `nom_notion`, `regle`.
+    - "definir_consigne_llm" : définit (texte libre, pas une liste
+      fermée comme `regle`) une consigne spécifique que tu dois
+      respecter dès que cette notion (ou une de ses sous-notions, sauf
+      si elle a sa propre consigne plus précise) revient dans une
+      conversation -- coexiste avec `regle` (une notion peut avoir les
+      deux en même temps), et s'applique quel que soit son statut
+      (contrairement à `regle`, qui ne concerne que les notions pas
+      encore vues). Rattachable à n'importe quel niveau de
+      l'arborescence, même logique d'héritage que `regle`. La notion
+      doit DÉJÀ exister. Passe `consigne` vide pour la retirer.
+      Paramètres : `code_id` (ou `code_nom`), `nom_notion`, `consigne`.
     """
     utilisateur_id = ctx.request_context.request.query_params.get("user_id")
     if not utilisateur_id:
@@ -156,9 +169,26 @@ def gerer_avancement_notions(
             return f"Règle sur \"{resultat['nom']}\" : \"{resultat['regle_comportement']}\"."
         return f"Règle retirée sur \"{resultat['nom']}\"."
 
+    if action == "definir_consigne_llm":
+        if not nom_notion:
+            return "Erreur : `nom_notion` est requis pour cette action."
+        try:
+            resultat = definir_consigne_llm(
+                utilisateur_id, code_cible_id, nom_notion, consigne or None
+            )
+        except Exception as e:
+            logging.error(f"ERREUR gerer_avancement_notions (definir_consigne_llm) : {e}")
+            return "Erreur : impossible de définir cette consigne, réessaie."
+        if resultat is None:
+            return "Impossible de définir cette consigne : notion introuvable/ambiguë dans ce code."
+        if resultat.get("consigne_llm"):
+            return f"Consigne sur \"{resultat['nom']}\" : \"{resultat['consigne_llm']}\"."
+        return f"Consigne retirée sur \"{resultat['nom']}\"."
+
     return (
         f"Erreur : action '{action}' inconnue. Actions valides : lister_mes_codes, "
-        "lister_notions, mettre_a_jour_statut, definir_regle_comportement."
+        "lister_notions, mettre_a_jour_statut, definir_regle_comportement, "
+        "definir_consigne_llm."
     )
 
 
@@ -175,7 +205,9 @@ def consulter_avancement_notion(nom_notion: str, ctx: Context) -> str:
     question).
 
     Le résultat renvoyé peut être :
-    - Un statut "acquis" ou "en_cours" : réponds normalement.
+    - Un statut "acquis" ou "en_cours" : réponds normalement, mais si
+      une consigne est indiquée, respecte-la quand même (elle
+      s'applique quel que soit le statut).
     - Un statut "a_venir" avec une règle "bloquer" : n'aide PAS l'élève
       sur cette notion précise, explique-lui que son prof ne l'a pas
       encore vue en classe et que tu ne peux pas l'anticiper.
@@ -185,6 +217,9 @@ def consulter_avancement_notion(nom_notion: str, ctx: Context) -> str:
     - Un statut "a_venir" avec une règle "signaler" (ou aucune règle
       définie à aucun niveau) : aide l'élève normalement, mais
       mentionne-lui que cette notion n'a pas encore été vue en classe.
+    - Si une consigne est indiquée (en plus du statut/de la règle) :
+      c'est un texte libre écrit par le prof, à respecter à la lettre
+      pour cette notion, en plus du reste.
     - Une notion introuvable, ou aucun/plusieurs codes actifs pour cet
       élève : aucune donnée fiable, réponds simplement avec ton
       jugement habituel, sans mentionner cet outil à l'élève.
@@ -211,8 +246,11 @@ def consulter_avancement_notion(nom_notion: str, ctx: Context) -> str:
 
     statut = resultat["statut"]
     regle = resultat.get("regle")
+    consigne = resultat.get("consigne")
+    suffixe_consigne = f" Consigne à respecter pour cette notion : \"{consigne}\"." if consigne else ""
+
     if statut != "a_venir":
-        return f"Notion \"{nom_notion}\" : statut \"{statut}\" (déjà vue en classe), réponds normalement."
+        return f"Notion \"{nom_notion}\" : statut \"{statut}\" (déjà vue en classe), réponds normalement.{suffixe_consigne}"
     if regle:
-        return f"Notion \"{nom_notion}\" : pas encore vue en classe (statut \"a_venir\"), règle configurée : \"{regle}\"."
-    return f"Notion \"{nom_notion}\" : pas encore vue en classe (statut \"a_venir\"), aucune règle configurée, aide l'élève en le signalant."
+        return f"Notion \"{nom_notion}\" : pas encore vue en classe (statut \"a_venir\"), règle configurée : \"{regle}\".{suffixe_consigne}"
+    return f"Notion \"{nom_notion}\" : pas encore vue en classe (statut \"a_venir\"), aucune règle configurée, aide l'élève en le signalant.{suffixe_consigne}"
