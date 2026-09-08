@@ -23,6 +23,7 @@ from core.avancement_notions_ia import (
     toutes_notions_code,
 )
 from core.codes_partage import lister_mes_codes as _lister_mes_codes
+from core.mode_actif_conversation import obtenir_mode_actif as _obtenir_mode_actif
 
 from core.outils_generation_commun import mcp_generation, Context
 
@@ -227,8 +228,21 @@ def consulter_avancement_notion(nom_notion: str, ctx: Context) -> str:
     utilisateur_id = ctx.request_context.request.query_params.get("user_id")
     if not utilisateur_id:
         return "Erreur : impossible d'identifier l'élève."
+    # Mode actif (08/09/2026, demande Bourama) : avant ce fix, cette
+    # consultation devinait seule le code de l'élève et abandonnait dès
+    # qu'il en avait plusieurs, sans jamais regarder le mode actif choisi
+    # pour cette conversation -- voir
+    # core/avancement_notions_ia.py::resoudre_code_actif_eleve.
+    # conversation_id vient du query param ajouté par
+    # registre_outils.py::_url_generation (même mécanisme que pour
+    # gerer_document_bibliotheque).
+    conversation_id = ctx.request_context.request.query_params.get("conversation_id")
+    rattachement_id_actif = None
+    if conversation_id:
+        mode_actif = _obtenir_mode_actif(conversation_id, utilisateur_id)
+        rattachement_id_actif = mode_actif.get("rattachement_id") if mode_actif else None
     try:
-        resultat = consulter_progres_notion_pour_eleve(utilisateur_id, nom_notion)
+        resultat = consulter_progres_notion_pour_eleve(utilisateur_id, nom_notion, rattachement_id_actif)
     except Exception as e:
         logging.error(f"ERREUR consulter_avancement_notion : {e}")
         return "Aucune donnée de programme disponible, réponds avec ton jugement habituel."

@@ -260,12 +260,39 @@ def formatter_arborescence(notions: list[dict]) -> str:
     return "\n".join(lignes)
 
 
-def resoudre_code_actif_eleve(receveur_id: str) -> dict | None | list[dict]:
-    """Retrouve le code sur lequel receveur_id est rattache. Renvoie le
-    code (dict id/nom) si un seul rattachement existe, None si aucun, ou
-    la LISTE des codes candidats si plusieurs (ambiguite -- pas de Partie
-    6/mode actif construite pour trancher a la place de l'eleve pour
-    l'instant, voir plan de travail)."""
+def resoudre_code_actif_eleve(receveur_id: str, rattachement_id: str | None = None) -> dict | None | list[dict]:
+    """Retrouve le code sur lequel receveur_id est rattache.
+
+    `rattachement_id` (08/09/2026, mode actif -- demande Bourama, corrige
+    le fait que cette fonction ignorait totalement le mode actif choisi
+    pour une conversation) : si fourni (voir
+    core/mode_actif_conversation.py), résout DIRECTEMENT le code de ce
+    rattachement précis, sans jamais deviner ni tomber dans l'ambiguïté,
+    même si receveur_id a plusieurs codes. None si ce rattachement
+    n'appartient pas (ou plus) à receveur_id -- jamais résolu à la place
+    par un autre rattachement.
+
+    Sans `rattachement_id` (mode actif pas choisi, ou pas de conversation
+    connue) : comportement inchangé -- renvoie le code (dict id/nom) si
+    un seul rattachement existe, None si aucun, ou la LISTE des codes
+    candidats si plusieurs (ambiguïté, laissée telle quelle à
+    l'appelant)."""
+    if rattachement_id:
+        try:
+            res = (
+                supabase.table("rattachements_codes")
+                .select("codes_partage(id, nom, code)")
+                .eq("id", rattachement_id)
+                .eq("receveur_id", receveur_id)
+                .maybe_single()
+                .execute()
+            )
+        except Exception as e:
+            logging.error(f"ERREUR SUPABASE (resolution code actif via mode actif, rattachement {rattachement_id}) : {e}")
+            return None
+        if not res or not res.data or not res.data.get("codes_partage"):
+            return None
+        return res.data["codes_partage"]
     try:
         res = (
             supabase.table("rattachements_codes")
@@ -285,13 +312,15 @@ def resoudre_code_actif_eleve(receveur_id: str) -> dict | None | list[dict]:
     return codes
 
 
-def consulter_progres_notion_pour_eleve(receveur_id: str, nom_notion: str):
+def consulter_progres_notion_pour_eleve(receveur_id: str, nom_notion: str, rattachement_id: str | None = None):
     """Point d'entree cote eleve (voir Point 1, brique B/C du document de
-    vision) : resout le code actif de l'eleve, cherche la notion par nom
-    dans ce code, renvoie (statut, regle_effective) ou un marqueur
-    d'erreur explicite pour que l'outil MCP puisse repondre clairement
-    plutot que de planter silencieusement."""
-    code = resoudre_code_actif_eleve(receveur_id)
+    vision) : resout le code actif de l'eleve (`rattachement_id`, mode
+    actif de la conversation si fourni -- 08/09/2026, sinon repli sur
+    l'ancienne resolution, voir resoudre_code_actif_eleve), cherche la
+    notion par nom dans ce code, renvoie (statut, regle_effective) ou un
+    marqueur d'erreur explicite pour que l'outil MCP puisse repondre
+    clairement plutot que de planter silencieusement."""
+    code = resoudre_code_actif_eleve(receveur_id, rattachement_id)
     if code is None:
         return {"erreur": "aucun_code"}
     if isinstance(code, list):
