@@ -199,7 +199,7 @@ async def _appeler_outil_async(url, nom_outil, arguments, headers=None):
     return ""
 
 
-def lister_outils_autorises_pour_agent(get_secret, user_id=None, agent_id=None):
+def lister_outils_autorises_pour_agent(get_secret, user_id=None, agent_id=None, conversation_id=None):
     """
     Se connecte a chaque serveur MCP du registre actif cote plateforme et
     retourne :
@@ -226,6 +226,9 @@ def lister_outils_autorises_pour_agent(get_secret, user_id=None, agent_id=None):
     headers_builder. La plupart les ignorent (cle API globale, ex:
     Tavily, Wolfram) ; certains outils "par utilisateur" (ex: Notion) en
     ont besoin pour aller chercher le bon token -- voir connexions/notion.py.
+    `conversation_id` (08/09/2026, mode actif) est transmis en plus a
+    url_builder SEULEMENT (jamais headers_builder, aucun besoin actuel) --
+    voir registre_outils.py::_url_generation.
     Si un outil necessite un utilisateur et qu'aucun n'est connecte, il
     est ignore silencieusement : il n'apparait simplement pas dans la
     liste proposee au modele.
@@ -255,7 +258,7 @@ def lister_outils_autorises_pour_agent(get_secret, user_id=None, agent_id=None):
                 logging.info(f"MCP '{nom}' ignoré : nécessite un utilisateur connecté, aucun user_id fourni.")
                 continue
 
-            url = serveur["url_builder"](get_secret, user_id, agent_id)
+            url = serveur["url_builder"](get_secret, user_id, agent_id, conversation_id)
             headers = serveur["headers_builder"](get_secret, user_id, agent_id) if "headers_builder" in serveur else None
 
             if serveur.get("necessite_utilisateur") and headers is None:
@@ -305,13 +308,14 @@ def lister_outils_autorises_pour_agent(get_secret, user_id=None, agent_id=None):
     return outils_pour_llm, table_routage
 
 
-def lister_tous_les_outils(get_secret, user_id=None, agent_id=None, outil_force=None):
+def lister_tous_les_outils(get_secret, user_id=None, agent_id=None, outil_force=None, conversation_id=None):
     """
     Reprend lister_outils_autorises_pour_agent() (catalogue brut pour cet
     agent) puis applique le filtre "bouton Outils" ci-dessous. Signature
-    et comportement inchangés pour tous les appelants existants.
+    et comportement inchangés pour tous les appelants existants (nouveau
+    paramètre optionnel conversation_id, 08/09/2026, mode actif).
     """
-    outils_pour_llm, table_routage = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id)
+    outils_pour_llm, table_routage = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id, conversation_id)
 
     # Mode "bouton Outils" (2026-07-25, GLOBAL -- décision définitive de
     # Bourama, initialement testé sur l'agent nucleos seul puis étendu à

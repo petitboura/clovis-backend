@@ -740,6 +740,35 @@ def lister_mes_rattachements(receveur_id: str) -> list[dict]:
     return resultat
 
 
+def profs_autorises_recherche_bibliotheque(receveur_id: str, rattachement_id: str | None = None) -> list[str] | None:
+    """Liste des `uploade_par` (id des profs) dont les documents doivent
+    être inclus dans une recherche bibliothèque pour receveur_id, selon
+    le mode actif de la conversation (08/09/2026, demande Bourama --
+    même principe que lister_comportements_recus pour les skills).
+
+    Renvoie None si AUCUN filtre ne doit être appliqué (0 ou 1
+    rattachement pour receveur_id : pas d'ambiguïté possible, comportement
+    inchangé, tous les documents personnels + celui de cet unique prof
+    éventuel restent cherchés comme avant). Renvoie une LISTE sinon :
+    - `rattachement_id` fourni (mode actif choisi) : liste à un seul id,
+      celui du prof propriétaire de ce rattachement.
+    - `rattachement_id` absent mais plusieurs rattachements existent
+      (mode actif pas encore choisi, ambiguïté réelle) : liste VIDE --
+      aucun document de prof inclus, seulement les documents personnels
+      de receveur_id, jamais un mélange silencieux entre plusieurs profs.
+
+    Le tri personnel/prof se fait ensuite côté appelant en comparant
+    `uploade_par` à receveur_id lui-même (toujours inclus) et à cette
+    liste (voir core/bibliotheque_rag.py)."""
+    rattachements = lister_mes_rattachements(receveur_id)
+    if rattachement_id:
+        trouve = next((r for r in rattachements if r["rattachement_id"] == rattachement_id), None)
+        return [trouve["proprietaire_id"]] if trouve else []
+    if len(rattachements) > 1:
+        return []
+    return None
+
+
 def retirer_rattachement(rattachement_id: str, receveur_id: str) -> bool:
     res = (
         supabase.table("rattachements_codes")
@@ -812,7 +841,7 @@ def lister_dossiers_recus(receveur_id: str) -> dict[str, str]:
     }
 
 
-def lister_comportements_recus(receveur_id: str) -> list[dict]:
+def lister_comportements_recus(receveur_id: str, rattachement_id: str | None = None) -> list[dict]:
     """Comportements reçus via un ou plusieurs codes actifs, forme
     {id, description} compatible avec
     core/comportements_etudiants.py::lister_comportements (même clés
@@ -827,8 +856,24 @@ def lister_comportements_recus(receveur_id: str) -> list[dict]:
     de collision possible avec le préfixe 'recu:'). Description lue EN
     DIRECT sur comportements_etudiants -- référence vivante, jamais figée
     au moment de l'entrée du code. Si le même comportement est reçu via
-    plusieurs codes actifs à la fois, il n'apparaît qu'une fois."""
+    plusieurs codes actifs à la fois, il n'apparaît qu'une fois.
+
+    `rattachement_id` (08/09/2026, mode actif -- demande Bourama, corrige
+    le mélange des skills de plusieurs profs à la fois) : si fourni (mode
+    actif choisi pour cette conversation, voir
+    core/mode_actif_conversation.py), ne renvoie QUE les comportements de
+    CE rattachement précis, jamais mélangés avec ceux des autres codes de
+    receveur_id. Si non fourni et que receveur_id a PLUSIEURS
+    rattachements (mode actif pas encore choisi, ambiguïté réelle entre
+    plusieurs profs) : renvoie une liste vide plutôt que de tout mélanger
+    -- décision explicite de Bourama, jamais de mélange silencieux. Si
+    receveur_id n'a qu'UN SEUL rattachement, aucune ambiguïté possible :
+    ce rattachement est utilisé automatiquement, mode actif ou non."""
     rattachements = lister_mes_rattachements(receveur_id)
+    if rattachement_id:
+        rattachements = [r for r in rattachements if r["rattachement_id"] == rattachement_id]
+    elif len(rattachements) > 1:
+        return []
     par_comportement: dict[str, str] = {}  # comportement_id -> nom du propriétaire (premier trouvé)
     for r in rattachements:
         for c in r["comportements"]:

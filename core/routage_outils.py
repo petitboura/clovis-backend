@@ -312,7 +312,7 @@ def _outils_deja_en_main(outils_mcp):
     return {o["function"]["name"] for o in (outils_mcp or [])}
 
 
-def _preparer_demander_outils(user_id, agent_id, outils_mcp):
+def _preparer_demander_outils(user_id, agent_id, outils_mcp, conversation_id=None):
     """
     A appeler UNE SEULE FOIS dans main.py, au meme point de convergence
     que _outil_garder_outils (une fois outils_mcp definitivement etabli
@@ -335,12 +335,12 @@ def _preparer_demander_outils(user_id, agent_id, outils_mcp):
     """
     if not outils_mcp:
         return outils_mcp, None, None
-    catalogue_complet, table_routage_complet = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id)
+    catalogue_complet, table_routage_complet = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id, conversation_id)
     outils_mcp = outils_mcp + [_outil_demander_outils()]
     return outils_mcp, catalogue_complet, table_routage_complet
 
 
-def _catalogue_pour_demander_outils(user_id, agent_id, outils_mcp):
+def _catalogue_pour_demander_outils(user_id, agent_id, outils_mcp, conversation_id=None):
     """
     Variante de _preparer_demander_outils pour les deux chemins de
     reprise de main.py (apres confirmation, ou apres limite/repetition) :
@@ -354,7 +354,7 @@ def _catalogue_pour_demander_outils(user_id, agent_id, outils_mcp):
     """
     if not outils_mcp or not any(o["function"]["name"] == NOM_OUTIL_DEMANDER_OUTILS for o in outils_mcp):
         return None, None
-    return lister_outils_autorises_pour_agent(get_secret, user_id, agent_id)
+    return lister_outils_autorises_pour_agent(get_secret, user_id, agent_id, conversation_id)
 
 
 def _router_outils(message_utilisateur, outils_disponibles, historique=None):

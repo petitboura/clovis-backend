@@ -39,7 +39,11 @@ from core.file_attente_vectorisation import (
     vectoriser_maintenant_publique as _vectoriser_maintenant_publique,
     supabase as _supabase,
 )
-from core.codes_partage import propager_fichier_range_dossier as _propager_fichier_range_dossier
+from core.codes_partage import (
+    propager_fichier_range_dossier as _propager_fichier_range_dossier,
+    profs_autorises_recherche_bibliotheque as _profs_autorises_recherche_bibliotheque,
+)
+from core.mode_actif_conversation import obtenir_mode_actif as _obtenir_mode_actif
 from core.dossiers_bibliotheque import (
     _proprietaire_dossier,
     creer_dossier as _creer_dossier,
@@ -262,9 +266,25 @@ def gerer_document_bibliotheque(
         # trouvé" alors que la bibliothèque contenait bien des documents
         # indexés) -- user_id vient de ctx (authentifié), jamais d'un
         # paramètre que le modèle pourrait halluciner/inventer.
+        #
+        # Mode actif (08/09/2026, demande Bourama) : avant ce fix, cette
+        # recherche mélangeait les documents perso ET ceux de TOUS les
+        # profs rattachés, sans jamais regarder lequel est actif pour
+        # cette conversation -- voir
+        # core/codes_partage.py::profs_autorises_recherche_bibliotheque.
+        # conversation_id vient du query param ajouté par
+        # registre_outils.py::_url_generation (absent si pas encore
+        # transmis à ce niveau -- voir mode inchangé plus bas).
+        conversation_id = ctx.request_context.request.query_params.get("conversation_id")
+        rattachement_id_actif = None
+        if conversation_id:
+            mode_actif = _obtenir_mode_actif(conversation_id, user_id)
+            rattachement_id_actif = mode_actif.get("rattachement_id") if mode_actif else None
+        profs_autorises = _profs_autorises_recherche_bibliotheque(user_id, rattachement_id_actif)
         try:
             resultats = _chercher_bibliotheque_combinee(
-                question, user_id=user_id, type_fichier=type_fichier, nom_dossier=nom_dossier
+                question, user_id=user_id, type_fichier=type_fichier, nom_dossier=nom_dossier,
+                profs_autorises=profs_autorises,
             )
         except Exception:
             return "Erreur : la recherche dans la bibliothèque a échoué, réessaie."

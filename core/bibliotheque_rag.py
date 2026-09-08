@@ -220,7 +220,9 @@ def formater_source_bibliotheque(r: dict) -> str | None:
     return f"(Source : {r['nom_fichier']}{reperage}, {r['url_publique']}, {type_mime})"
 
 
-def chercher_bibliotheque(question: str, user_id: str, match_count: int = 5) -> list:
+def chercher_bibliotheque(
+    question: str, user_id: str, match_count: int = 5, profs_autorises: list[str] | None = None
+) -> list:
     """
     Recherche sémantique dans la bibliothèque personnelle de `user_id`.
     Renvoie une liste de {contenu, similarite, fichier_id, nom_fichier,
@@ -236,6 +238,13 @@ def chercher_bibliotheque(question: str, user_id: str, match_count: int = 5) -> 
     de quoi montrer le document lui-même (voir consulter_bibliotheque
     dans core/serveur_mcp_generation.py, qui construit le lien à partir
     de url_publique désormais présent ici).
+
+    `profs_autorises` (08/09/2026, mode actif -- demande Bourama) : voir
+    core/codes_partage.py::profs_autorises_recherche_bibliotheque. None
+    = aucun filtre (comportement inchangé, tous les documents de
+    user_id). Liste (même vide) = ne renvoie que les documents perso de
+    user_id (uploade_par = user_id) plus ceux des profs de cette liste --
+    transmis tel quel à la fonction SQL, qui applique le filtre.
     """
     if not user_id:
         logging.error("chercher_bibliotheque appelé sans user_id : renvoie vide.")
@@ -250,7 +259,12 @@ def chercher_bibliotheque(question: str, user_id: str, match_count: int = 5) -> 
     try:
         return supabase.rpc(
             "recherche_bibliotheque",
-            {"query_embedding": vecteur, "match_count": match_count, "p_user_id": user_id},
+            {
+                "query_embedding": vecteur,
+                "match_count": match_count,
+                "p_user_id": user_id,
+                "p_profs_autorises": profs_autorises,
+            },
         ).execute().data or []
     except Exception as e:
         logging.error(f"ERREUR SUPABASE RPC recherche_bibliotheque (user_id={user_id}) : {e}")
@@ -263,6 +277,7 @@ def chercher_bibliotheque_combinee(
     type_fichier: str = "",
     nom_dossier: str = "",
     match_count: int = 8,
+    profs_autorises: list[str] | None = None,
 ) -> list:
     """
     Recherche COMBINÉE dans la bibliothèque personnelle (05/09/2026,
@@ -280,6 +295,15 @@ def chercher_bibliotheque_combinee(
     - filtre optionnel `nom_dossier` (ILIKE sur le nom du dossier,
       restreint aux dossiers de CET utilisateur, via
       fichiers_dossiers_bibliotheque).
+
+    `profs_autorises` (08/09/2026, mode actif -- demande Bourama) : voir
+    core/codes_partage.py::profs_autorises_recherche_bibliotheque. None
+    = aucun filtre. Liste (même vide) = seuls les documents perso de
+    user_id (uploade_par = user_id) et ceux des profs listés sont
+    cherchés, sur les DEUX chemins (sémantique ET métadonnées) --
+    appliqué ici pour le chemin métadonnées, transmis à
+    chercher_bibliotheque pour le chemin sémantique.
+
     Résultats fusionnés et dédupliqués par fichier_id (un même fichier
     trouvé par plusieurs voies n'apparaît qu'une fois, priorité au
     résultat sémantique -- il porte l'extrait de contenu le plus utile),
@@ -305,7 +329,7 @@ def chercher_bibliotheque_combinee(
     # 1) Sémantique (contenu déjà vectorisé) -- inchangé, priorité la
     # plus haute car porte le meilleur extrait.
     if question.strip():
-        for r in chercher_bibliotheque(question, user_id=user_id, match_count=match_count):
+        for r in chercher_bibliotheque(question, user_id=user_id, match_count=match_count, profs_autorises=profs_autorises):
             _ajouter(r, r.get("fichier_id"))
 
     if len(resultats) >= match_count:
@@ -313,6 +337,11 @@ def chercher_bibliotheque_combinee(
 
     # 2) Mot-clé / type / dossier, sur les métadonnées du fichier.
     requete = supabase.table("fichiers_uploades").select("*").eq("niveau", "utilisateur").eq("user_id", user_id)
+    if profs_autorises is not None:
+        # Mode actif (08/09/2026) : personnel (uploade_par = user_id lui-même,
+        # toujours inclus) + seulement les profs listés -- jamais vu sur ce
+        # chemin métadonnées avant ce fix, qui cherchait tout sans distinction.
+        requete = requete.in_("uploade_par", list({user_id, *profs_autorises}))
 
     if nom_dossier.strip():
         try:

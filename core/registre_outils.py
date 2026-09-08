@@ -35,7 +35,7 @@ import os
 
 from connexions.notion import obtenir_token_valide
 
-def _url_generation(get_secret, user_id, agent_id):
+def _url_generation(get_secret, user_id, agent_id, conversation_id=None):
     # Serveur MCP interne, pas un tiers externe (voir
     # core/serveur_mcp_generation.py, monté dans api/main.py). C'est
     # TOUJOURS le même process/port que celui qui répond à cette
@@ -49,22 +49,35 @@ def _url_generation(get_secret, user_id, agent_id):
     # serveur via ctx.request_context.request.query_params (voir
     # serveur_mcp_generation.py). Inoffensif pour les autres outils qui
     # n'en ont pas besoin.
+    #
+    # conversation_id ajouté en query param (08/09/2026, demande Bourama
+    # -- mode actif) : avant ça, aucun outil appelé par le LLM (documents,
+    # programme...) ne pouvait savoir dans quelle conversation il était
+    # appelé, donc ne pouvait jamais savoir quel prof est actif pour cette
+    # conversation (voir core/mode_actif_conversation.py). Optionnel
+    # (absent si conversation_id vaut None) pour ne rien casser des
+    # outils qui n'en ont pas besoin. Utilisé pour l'instant seulement par
+    # gerer_document_bibliotheque (core/outils_bibliotheque.py) --
+    # programme pas encore branché, un pas à la fois.
     port = os.environ.get("PORT", "8000")
-    return f"http://localhost:{port}/mcp/generation?user_id={user_id}&agent_id={agent_id}"
+    url = f"http://localhost:{port}/mcp/generation?user_id={user_id}&agent_id={agent_id}"
+    if conversation_id:
+        url += f"&conversation_id={conversation_id}"
+    return url
 
 
-def _url_github(get_secret, user_id, agent_id):
+def _url_github(get_secret, user_id, agent_id, conversation_id=None):
     # Même logique que _url_generation ci-dessus -- serveur MCP interne
     # (core/serveur_mcp_github.py), pas un tiers externe.
     port = os.environ.get("PORT", "8000")
     return f"http://localhost:{port}/mcp/github"
 
 
-def _url_tavily(get_secret, user_id, agent_id):
+def _url_tavily(get_secret, user_id, agent_id, conversation_id=None):
     return f"https://mcp.tavily.com/mcp/?tavilyApiKey={get_secret('TAVILY_API_KEY')}"
 
 
-def _url_wolfram(get_secret, user_id, agent_id):
+def _url_wolfram(get_secret, user_id, agent_id, conversation_id=None):
     # CORRECTIF 2026-08-01 bis (Bourama : "j'ai pas mis de clé wolfram
     # hein" -> creuse). L'URL precedente (services.wolfram.com/api/mcp,
     # "Wolfram MCP Service") est une offre PAYANTE necessitant un
@@ -80,7 +93,7 @@ def _url_wolfram(get_secret, user_id, agent_id):
     return "https://agenttools.wolfram.com/mcp"
 
 
-def _url_notion(get_secret, user_id, agent_id):
+def _url_notion(get_secret, user_id, agent_id, conversation_id=None):
     return "https://mcp.notion.com/mcp"
 
 
@@ -94,7 +107,7 @@ def _headers_notion(get_secret, user_id, agent_id):
     return {"Authorization": f"Bearer {token}"}
 
 
-def _url_google_drive(get_secret, user_id, agent_id):
+def _url_google_drive(get_secret, user_id, agent_id, conversation_id=None):
     # Serveur MCP Drive OFFICIEL de Google (tiers externe, comme Notion),
     # pas un serveur interne -- voir connexions/oauth_generique.py pour
     # le detail (client OAuth a creer manuellement dans Google Cloud

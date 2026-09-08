@@ -17,6 +17,7 @@ from comportements_etudiants import (
 #   from programme_llm import lister_mes_programmes_legers
 #   from codes_partage import lister_programmes_recus_legers
 from codes_partage import lister_comportements_recus
+from mode_actif_conversation import obtenir_mode_actif
 from mcp_tools import lister_tous_les_outils, lister_outils_autorises_pour_agent, appeler_outil
 from fournisseurs_llm import generer_reponse_premium
 
@@ -236,7 +237,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         reasoning_effort_reprise = etat.get("reasoning_effort")
         # demander_outils (etape 3) : transitoire, jamais persiste dans
         # l'etat de reprise -- voir _catalogue_pour_demander_outils.
-        catalogue_complet, table_routage_complet = _catalogue_pour_demander_outils(user_id, agent_id, outils_mcp)
+        catalogue_complet, table_routage_complet = _catalogue_pour_demander_outils(user_id, agent_id, outils_mcp, conversation_id)
 
         if reprise.get("message_utilisateur"):
             messages_agent.append({"role": "user", "content": reprise["message_utilisateur"]})
@@ -265,7 +266,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         reasoning_effort_reprise = etat.get("reasoning_effort")
         # demander_outils (etape 3) : transitoire, jamais persiste dans
         # l'etat de reprise -- voir _catalogue_pour_demander_outils.
-        catalogue_complet, table_routage_complet = _catalogue_pour_demander_outils(user_id, agent_id, outils_mcp)
+        catalogue_complet, table_routage_complet = _catalogue_pour_demander_outils(user_id, agent_id, outils_mcp, conversation_id)
 
         client_groq = Groq(api_key=get_secret("GROQ_API_KEY"), max_retries=0)
 
@@ -404,9 +405,20 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     # c'est ce petit routeur qui décide de le déclencher, pas le grand LLM.
     comportements_etudiant = []
     if user_id and message_utilisateur:
+        # Mode actif (08/09/2026, demande Bourama) : avant ce fix,
+        # lister_comportements_recus mélangeait les skills de TOUS les
+        # codes de user_id, sans jamais regarder lequel est actif pour
+        # CETTE conversation. rattachement_id_actif est None si
+        # conversation_id est absent, si aucun mode actif n'a encore été
+        # choisi, ou si user_id n'a qu'un seul rattachement (pas
+        # d'ambiguïté dans ce dernier cas, voir
+        # codes_partage.py::lister_comportements_recus qui gère alors
+        # tout seul le repli sur l'unique rattachement).
+        mode_actif = obtenir_mode_actif(conversation_id, user_id) if conversation_id else None
+        rattachement_id_actif = mode_actif.get("rattachement_id") if mode_actif else None
         tous_comportements = (
             [c for c in lister_comportements_etudiant(agent_id, user_id) if c.get("actif", True)]
-            + lister_comportements_recus(user_id)
+            + lister_comportements_recus(user_id, rattachement_id_actif)
         )
         candidats_niveau1, candidats_chapitre = separer_comportements_par_niveau(tous_comportements)
         retenus_niveau1 = choisir_comportements_pertinents(message_utilisateur, candidats_niveau1)
@@ -524,7 +536,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     routeur_auto = False
     if not outil_force and not ignorer_suggestion_outils and message_utilisateur and not image_url and not images_base64:
         def _tache_routeur():
-            outils_disponibles_agent, _ = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id)
+            outils_disponibles_agent, _ = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id, conversation_id)
             # Notion + GitHub exclus du CATALOGUE envoyé au routeur automatique
             # (14/08, demande Bourama : "enlève le catalogue que ce ne soit
             # plus suggéré, comme s'il ne fonctionne plus"). Ces deux serveurs
@@ -554,7 +566,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
 
         def _tache_prompt_optimiste():
             outil_force_contexte_seul = _fusionner_outils(None, outils_forces_contexte + outils_retenus_precedents)
-            outils_mcp, table_routage = lister_tous_les_outils(get_secret, user_id, agent_id, outil_force_contexte_seul)
+            outils_mcp, table_routage = lister_tous_les_outils(get_secret, user_id, agent_id, outil_force_contexte_seul, conversation_id)
             outil_force_verifie_optimiste = [o["function"]["name"] for o in outils_mcp] if outil_force_contexte_seul else None
             system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie_optimiste, sans_enseignant, comportements_etudiant, mes_programmes)
             return outils_mcp, table_routage, system_final
@@ -656,7 +668,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             outils_mcp, table_routage = [], {}
             outil_force_verifie = outil_force
         else:
-            outils_mcp, table_routage = lister_tous_les_outils(get_secret, user_id, agent_id, outil_force)
+            outils_mcp, table_routage = lister_tous_les_outils(get_secret, user_id, agent_id, outil_force, conversation_id)
             outil_force_verifie = [o["function"]["name"] for o in outils_mcp] if outil_force else outil_force
         system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie, sans_enseignant, comportements_etudiant, mes_programmes)
 
@@ -694,7 +706,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     # condition exacte (rien si outils_mcp est vide) et le catalogue
     # complet + sa table de routage necessaires au branchement reel dans
     # _agent_groq (core/boucle_agent.py).
-    outils_mcp, catalogue_complet, table_routage_complet = _preparer_demander_outils(user_id, agent_id, outils_mcp)
+    outils_mcp, catalogue_complet, table_routage_complet = _preparer_demander_outils(user_id, agent_id, outils_mcp, conversation_id)
 
     if localisation and localisation.get("latitude") is not None and localisation.get("longitude") is not None:
         # Contexte "système/environnement" (2026-07-20) : position GPS
