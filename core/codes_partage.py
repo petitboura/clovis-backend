@@ -707,13 +707,6 @@ def lister_mes_rattachements(receveur_id: str) -> list[dict]:
         except Exception as e:
             logging.error(f"ERREUR SUPABASE (lecture noms propriétaires codes) : {e}")
 
-    # Résolution du nom de programme désactivée le 29/08/2026 (demande
-    # Bourama, fonctionnalité "Programme" isolée) -- voir
-    # _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md. programme_id
-    # reste affiché tel quel (référence brute), programme_nom n'est plus
-    # résolu.
-    noms_programmes: dict[str, str] = {}
-
     resultat = []
     for l in lignes:
         cp = l.get("codes_partage")
@@ -730,9 +723,6 @@ def lister_mes_rattachements(receveur_id: str) -> list[dict]:
             "proprietaire_nom": noms_proprietaires.get(cp["proprietaire_id"], "un autre utilisateur"),
             "a_comportement": bool(comportements),
             "comportements": comportements,  # [{id, nom}, ...] -- référence vivante, jamais figée
-            "a_programme": bool(cp.get("programme_id")),
-            "programme_id": cp.get("programme_id"),
-            "programme_nom": noms_programmes.get(cp.get("programme_id")),
             "a_dossier": bool(dossiers),
             "dossiers": dossiers,  # [{id, nom}, ...]
             "texte_libre": cp.get("texte_libre"),
@@ -932,44 +922,12 @@ def obtenir_comportement_skill_recu(receveur_id: str, id_recu: str) -> str | Non
     return ligne.data.get("skill_md")
 
 
-def lister_programmes_recus_legers(receveur_id: str) -> list[dict]:
-    """Même forme que core/programme_llm.py::lister_mes_programmes_legers
-    ({id, niveau, nom}) + proprietaire_nom, pour les programmes reçus via
-    un code actif -- id ici est directement l'id du VRAI programme
-    (table programmes), pas besoin de préfixe : consulter_programme
-    accepte déjà n'importe quel programme_id, obtenir_structure_programme
-    est simplement élargi ci-dessous pour aussi vérifier l'accès par
-    code reçu, en plus de la propriété directe."""
-    rattachements = lister_mes_rattachements(receveur_id)
-    programmes_ids = [r["programme_id"] for r in rattachements if r["a_programme"]]
-    if not programmes_ids:
-        return []
-    try:
-        res = (
-            supabase.table("programmes")
-            .select("id, niveau, nom, proprietaire_id")
-            .in_("id", programmes_ids)
-            .execute()
-        )
-    except Exception as e:
-        logging.error(f"ERREUR SUPABASE (lecture programmes reçus {programmes_ids}) : {e}")
-        return []
-    noms_par_proprio = {r["proprietaire_id"]: r["proprietaire_nom"] for r in rattachements if r["a_programme"]}
-    return [
-        {
-            "id": ligne["id"],
-            "niveau": ligne["niveau"],
-            "nom": f"(reçu de {noms_par_proprio.get(ligne.get('proprietaire_id'), 'un autre utilisateur')}) {ligne.get('nom') or ''}".strip(),
-        }
-        for ligne in (res.data or [])
-    ]
-
-
-def peut_acceder_programme_recu(receveur_id: str, programme_id: str) -> bool:
-    """True si receveur_id a un rattachement actif donnant accès à ce
-    programme_id précis -- utilisé par obtenir_structure_programme
-    (core/programme_llm.py) en repli quand programme_id n'appartient pas
-    directement à l'utilisateur."""
-    rattachements = lister_mes_rattachements(receveur_id)
-    return any(r["a_programme"] and r["programme_id"] == programme_id for r in rattachements)
+# lister_programmes_recus_legers et peut_acceder_programme_recu (ancien
+# système "Programme" classe/matière/chapitre) supprimées le 08/09/2026
+# (nettoyage demandé par Bourama) : jamais appelées nulle part dans le
+# code actif depuis la désactivation du 29/08/2026, référençaient
+# core/programme_llm.py (déplacé dans _desactive_programme/, n'existe
+# plus à cet endroit) et les champs a_programme/programme_id de
+# lister_mes_rattachements, retirés au même moment pour la même raison
+# -- voir _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md.
 
