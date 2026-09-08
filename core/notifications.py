@@ -21,6 +21,10 @@ depuis :
 - correction_traitee (Partie 5, 06/09/2026, chantier "confiance
   pedagogique") : voir
   core/corrections_pedagogiques.py::enregistrer_correction_prof
+- cascade_supervision_j2 / cascade_supervision_j5 /
+  cascade_supervision_equipe_clovis / cascade_supervision_resolue
+  (Partie 10, 07/09/2026, chantier "confiance pedagogique") : voir
+  core/cascade_supervision.py
 
 creer_notification() fait deux choses a chaque appel : (1) insert en
 base (persistant, visible au prochain chargement du panneau) ; (2) tente
@@ -41,6 +45,8 @@ TYPES_VALIDES = {
     "audit_hebdomadaire_corrections", "correction_traitee",
     # Système établissement (06/09/2026, Partie 9) -- voir core/etablissements.py
     "etablissement_publication", "etablissement_demande_connexion", "etablissement_demande_acceptee",
+    # Cascade de supervision (07/09/2026, Partie 10) : voir core/cascade_supervision.py
+    "cascade_supervision_j2", "cascade_supervision_j5", "cascade_supervision_equipe_clovis", "cascade_supervision_resolue",
 }
 
 

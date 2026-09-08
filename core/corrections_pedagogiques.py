@@ -242,6 +242,18 @@ def creer_correction(
         return None
     if not res.data:
         return None
+
+    if type_ == "B" and prof_id:
+        # Partie 10 (07/09/2026) : détecte une accumulation anormale de
+        # signalements B sur ce (prof, agent) et déclenche la cascade de
+        # supervision si le seuil est atteint. Best-effort strict --
+        # jamais bloquant pour l'enregistrement du signalement lui-même.
+        try:
+            from core.cascade_supervision import verifier_accumulation as _verifier_accumulation
+            _verifier_accumulation(prof_id, agent_id)
+        except Exception as e:
+            logging.error(f"ERREUR vérification accumulation cascade (prof={prof_id}, agent={agent_id}) : {e}")
+
     return _ligne_publique(res.data[0])
 
 
