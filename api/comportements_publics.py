@@ -29,6 +29,7 @@ class ComportementPublic(BaseModel):
     nom: str
     description: str
     texte: str
+    skill_md: str = ""
     activations_count: int
     est_a_moi: bool = False
 
