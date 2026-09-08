@@ -413,7 +413,11 @@ def choisir_comportements_pertinents(message_utilisateur: str, comportements: li
     if not comportements or not message_utilisateur:
         return []
 
-    catalogue = "\n".join(f"- {c['id']} : {c['description']}" for c in comportements if c.get("description"))
+    catalogue = "\n".join(
+        f"- {c['id']} : {c.get('nom') or '(sans nom)'} -- {c['description']}"
+        for c in comportements
+        if c.get("description")
+    )
     if not catalogue:
         return []
 

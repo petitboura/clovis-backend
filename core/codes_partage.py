@@ -753,6 +753,65 @@ def retirer_rattachement(rattachement_id: str, receveur_id: str) -> bool:
 
 # --- Injection côté chat (comportements/programmes reçus) -----------------
 
+def lister_dossiers_recus(receveur_id: str) -> dict[str, str]:
+    """Mapping dossier_miroir_id -> nom du propriétaire, pour tous les
+    dossiers reçus via un code par cet utilisateur.
+
+    07/09/2026, demande Bourama (bug remonté : un dossier reçu était
+    indiscernable d'un dossier perso créé par l'utilisateur lui-même,
+    aucune section dédiée possible côté frontend faute d'info -- le
+    backend savait pourtant déjà la réponse via miroirs_dossiers_partages,
+    juste jamais exposée). Deux requêtes séparées plutôt qu'un embed
+    PostgREST pour ne pas dépendre du nom exact de la contrainte FK."""
+    try:
+        miroirs = (
+            supabase.table("miroirs_dossiers_partages")
+            .select("dossier_miroir_id, dossier_source_id")
+            .eq("receveur_id", receveur_id)
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture miroirs dossiers reçus {receveur_id}) : {e}")
+        return {}
+    lignes = miroirs.data or []
+    if not lignes:
+        return {}
+
+    source_ids = list({l["dossier_source_id"] for l in lignes})
+    try:
+        sources = (
+            supabase.table("dossiers_bibliotheque")
+            .select("id, user_id")
+            .in_("id", source_ids)
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (lecture propriétaires dossiers sources {source_ids}) : {e}")
+        return {}
+    proprietaire_par_source = {s["id"]: s["user_id"] for s in (sources.data or [])}
+
+    proprietaires_ids = list(set(proprietaire_par_source.values()))
+    noms: dict[str, str] = {}
+    if proprietaires_ids:
+        try:
+            profils = (
+                supabase.table("profiles")
+                .select("user_id, nom_affiche")
+                .in_("user_id", proprietaires_ids)
+                .execute()
+            )
+            for p in (profils.data or []):
+                if p.get("nom_affiche"):
+                    noms[p["user_id"]] = p["nom_affiche"]
+        except Exception as e:
+            logging.error(f"ERREUR SUPABASE (lecture noms propriétaires dossiers reçus) : {e}")
+
+    return {
+        l["dossier_miroir_id"]: noms.get(proprietaire_par_source.get(l["dossier_source_id"]), "un autre utilisateur")
+        for l in lignes
+    }
+
+
 def lister_comportements_recus(receveur_id: str) -> list[dict]:
     """Comportements reçus via un ou plusieurs codes actifs, forme
     {id, description} compatible avec
@@ -779,7 +838,7 @@ def lister_comportements_recus(receveur_id: str) -> list[dict]:
     try:
         lignes = (
             supabase.table("comportements_etudiants")
-            .select("id, description")
+            .select("id, nom, description")
             .in_("id", list(par_comportement.keys()))
             .execute()
         )
@@ -789,6 +848,7 @@ def lister_comportements_recus(receveur_id: str) -> list[dict]:
     return [
         {
             "id": f"recu:{l['id']}",
+            "nom": l.get("nom") or "",
             "description": f"(reçu de {par_comportement.get(l['id'], 'un autre utilisateur')}) {l.get('description') or ''}".strip(),
         }
         for l in (lignes.data or [])

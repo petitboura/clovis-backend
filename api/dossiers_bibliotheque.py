@@ -33,7 +33,7 @@ from core.dossiers_bibliotheque import (
     retirer_fichier,
     supprimer_dossier,
 )
-from core.codes_partage import propager_fichier_range_dossier
+from core.codes_partage import propager_fichier_range_dossier, lister_dossiers_recus
 
 logging.basicConfig(level=logging.INFO)
 
@@ -65,10 +65,17 @@ def lister(utilisateur=Depends(utilisateur_courant)):
     fichier_id directement rattachés à chacun, au frontend de
     reconstruire l'arborescence et de croiser avec sa propre liste de
     fichiers (déjà chargée par ailleurs via GET /api/bibliotheque).
+
+    07/09/2026, demande Bourama : ajoute recu_de (nom du propriétaire) sur
+    les dossiers qui sont en réalité des miroirs reçus via un code, pour
+    que le frontend puisse les distinguer dans une section dédiée
+    (voir core/codes_partage.py::lister_dossiers_recus).
     """
     dossiers = lister_dossiers(utilisateur.id)
+    recus = lister_dossiers_recus(utilisateur.id)
     for d in dossiers:
         d["fichier_ids"] = lister_fichiers_ids_dossier(d["id"])
+        d["recu_de"] = recus.get(d["id"])
     return dossiers
 
 

@@ -49,7 +49,9 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     mes_programmes = mes_programmes or []
 
     if comportements_etudiant:
-        candidats = "\n".join(f"- id={c['id']} : {c['description']}" for c in comportements_etudiant)
+        candidats = "\n".join(
+            f"- id={c['id']} : {c.get('nom') or '(sans nom)'} -- {c['description']}" for c in comportements_etudiant
+        )
         system_final += (
             "\n\nINSTRUCTIONS PERSONNELLES POTENTIELLEMENT PERTINENTES POUR CE MESSAGE -- appelées "
             "\"skill(s)\" dans TOUTE l'interface Clovis, \"comportement\" seulement en interne (écrites par cet "
