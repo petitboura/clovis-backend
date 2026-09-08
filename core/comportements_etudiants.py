@@ -75,6 +75,36 @@ def _slugifier(texte: str) -> str:
     return slug[:64] or "comportement"
 
 
+def _appliquer_nom_affichage(skill_md: str, nom: str) -> str:
+    """
+    08/09/2026, correctif Bourama ("le nom dans le skill lui-même est
+    différent du vraie nom... celui que je vois") : le champ
+    `nom_affichage` généré par _generer_skill (ou absent du repli, voir
+    _skill_repli) ne reflétait jamais un nom choisi manuellement par
+    l'étudiant, et pouvait aussi diverger du nom auto affiché si le
+    skill était régénéré sans que ce champ soit resynchronisé. Ici, on
+    force TOUJOURS le frontmatter à porter le nom réellement utilisé
+    (celui qui va dans la colonne `nom`, choisi par l'étudiant ou
+    généré) -- remplace la ligne `nom_affichage:` existante, ou l'ajoute
+    si absente (cas du repli, qui n'en produit pas). N'affecte jamais le
+    corps ni les autres champs du frontmatter.
+    """
+    correspondance = _RE_FRONTMATTER.match(skill_md)
+    if not correspondance:
+        return skill_md
+    entete, corps = correspondance.group(1), correspondance.group(2)
+    lignes = entete.splitlines()
+    remplace = False
+    for i, ligne in enumerate(lignes):
+        if ligne.strip().lower().startswith("nom_affichage:"):
+            lignes[i] = f"nom_affichage: {nom}"
+            remplace = True
+            break
+    if not remplace:
+        lignes.append(f"nom_affichage: {nom}")
+    return f"---\n{chr(10).join(lignes)}\n---\n\n{corps.strip()}\n"
+
+
 def _skill_repli(texte: str) -> dict:
     """Skill minimal construit sans appel LLM -- fail-safe utilisé
     SEULEMENT si _generer_skill échoue, pour ne jamais bloquer la
@@ -484,13 +514,14 @@ def ajouter_comportement(
     texte = texte.strip()
     nom = (nom or "").strip()
     skill = _generer_skill(texte)
+    nom_final = nom or skill["nom"]
     ligne_a_inserer = {
         "agent_id": agent_id,
         "etudiant_id": etudiant_id,
         "texte": texte,
         "description": skill["description"],
-        "skill_md": skill["skill_md"],
-        "nom": nom or skill["nom"],
+        "skill_md": _appliquer_nom_affichage(skill["skill_md"], nom_final),
+        "nom": nom_final,
         "lien_type": lien_type,
         "lien_id": lien_id,
     }
@@ -582,13 +613,14 @@ def modifier_comportement(
     texte = texte.strip()
     nom = (nom or "").strip()
     skill = _generer_skill(texte)
+    nom_final = nom or skill["nom"]
     res = (
         supabase.table("comportements_etudiants")
         .update({
             "texte": texte,
             "description": skill["description"],
-            "skill_md": skill["skill_md"],
-            "nom": nom or skill["nom"],
+            "skill_md": _appliquer_nom_affichage(skill["skill_md"], nom_final),
+            "nom": nom_final,
         })
         .eq("id", comportement_id)
         .eq("agent_id", agent_id)

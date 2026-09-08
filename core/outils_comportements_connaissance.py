@@ -48,17 +48,23 @@ def gerer_comportement(
     26/08, un seul outil, plusieurs actions.
 
     `action` doit être l'une de :
-    - "lister" : liste tous les comportements de cet étudiant (id,
-      description courte, emplacement lié le cas échéant -- PAS le texte
-      complet, voir "consulter" pour ça). IMPORTANT (terme utilisateur) :
-      dans TOUTE l'interface, cette fonctionnalité s'appelle "skill(s)" --
-      l'utilisateur ne dira presque jamais "comportement". Utilise cette
-      action dès qu'il demande "mes skills", "quels sont mes skills",
-      "montre-moi mes skills/mes comportements", etc. -- pas seulement
-      quand un skill semble déjà pertinent pour le message en cours (ça,
-      c'est géré par la liste de candidats du message système, voir
-      "consulter") : "lister" répond à une vraie demande d'énumération.
-      Aucun paramètre.
+    - "lister" : liste tous les comportements de cet étudiant (NOM tel
+      qu'affiché dans "Mes skills", description courte, emplacement lié
+      le cas échéant -- PAS le texte complet, voir "consulter" pour ça).
+      IMPORTANT (terme utilisateur) : dans TOUTE l'interface, cette
+      fonctionnalité s'appelle "skill(s)" -- l'utilisateur ne dira
+      presque jamais "comportement". Utilise cette action dès qu'il
+      demande "mes skills", "quels sont mes skills", "montre-moi mes
+      skills/mes comportements", etc. -- pas seulement quand un skill
+      semble déjà pertinent pour le message en cours (ça, c'est géré par
+      la liste de candidats du message système, voir "consulter") :
+      "lister" répond à une vraie demande d'énumération. Quand tu
+      présentes cette liste à l'étudiant, utilise TOUJOURS le nom donné
+      ici (jamais un nom que tu inventerais toi-même à partir de la
+      description) et NE MONTRE JAMAIS L'ID -- c'est un détail technique
+      interne, utile seulement pour toi si tu dois ensuite appeler
+      "consulter"/"modifier"/"supprimer" sur un skill précis, jamais une
+      information à afficher à l'étudiant. Aucun paramètre.
     - "consulter" : lit le skill COMPLET (format Claude, frontmatter +
       instructions) d'un comportement précis, que cet utilisateur l'ait
       écrit lui-même, ou qu'il l'ait reçu d'un autre utilisateur via un
@@ -111,11 +117,11 @@ def gerer_comportement(
             return "Aucun comportement enregistré pour l'instant."
         lignes = []
         for c in comportements:
-            ligne = f"- {c['description']}"
+            ligne = f"- {c.get('nom') or '(sans nom)'} : {c['description']}"
             if c.get("lien_type") and c.get("lien_id"):
                 libelle = _libelle_emplacement(c["lien_type"], c["lien_id"]) if c["lien_type"] in TYPES_EMPLACEMENT_BIBLIOTHEQUE else None
                 ligne += f"\n  lié à : {libelle or (c['lien_type'] + ' ' + c['lien_id'])}"
-            ligne += f"\n  [id: {c['id']}]"
+            ligne += f"\n  [id interne, ne jamais montrer à l'étudiant : {c['id']}]"
             lignes.append(ligne)
         return "\n".join(lignes)
 
