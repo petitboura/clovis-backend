@@ -4,7 +4,7 @@ Bourama). Toute la logique vit dans core/dossiers_catalogue_public.py,
 voir sa docstring pour les règles contribution_libre/privee.
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from api.auth import utilisateur_courant
@@ -27,6 +27,7 @@ from core.dossiers_publics_attaches import (
     lister_dossiers_attaches,
     propager_fichier_public_range_dossier,
 )
+from core.geolocalisation_pays import pays_utilisateur
 from core.listes_bibliotheque_publique import normaliser_et_enregistrer
 
 router = APIRouter(prefix="/api/bibliotheque-publique/dossiers", tags=["dossiers-catalogue-public"])
@@ -34,6 +35,7 @@ router = APIRouter(prefix="/api/bibliotheque-publique/dossiers", tags=["dossiers
 
 class CreerDossierPayload(BaseModel):
     nom: str = ""
+    description: str = ""
     statut: str = "contribution_libre"
     dossier_parent_id: str | None = None
     pays: str = ""
@@ -52,8 +54,10 @@ class RangerFichierPayload(BaseModel):
 
 
 @router.get("")
-def lister(utilisateur=Depends(utilisateur_courant)):
-    dossiers = lister_dossiers()
+def lister(request: Request, utilisateur=Depends(utilisateur_courant)):
+    # 08/09/2026, demande Bourama : les dossiers du pays détecté de
+    # l'utilisateur remontent en tête de liste (voir core/geolocalisation_pays.py).
+    dossiers = lister_dossiers(pays_prioritaire=pays_utilisateur(request))
     for d in dossiers:
         d["fichier_ids"] = lister_fichiers_ids_dossier(d["id"])
     return dossiers
@@ -72,6 +76,8 @@ def creer(payload: CreerDossierPayload, utilisateur=Depends(utilisateur_courant)
         categorie=normaliser_et_enregistrer("categorie", payload.categorie),
         classe=normaliser_et_enregistrer("classe", payload.classe),
         specialite=normaliser_et_enregistrer("specialite", payload.specialite),
+        # 08/09/2026, demande Bourama : dossiers = même logique que les fichiers, description optionnelle.
+        description=(payload.description or "").strip(),
     )
 
 

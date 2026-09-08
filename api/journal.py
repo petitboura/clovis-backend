@@ -36,11 +36,15 @@ import logging
 from api.auth import supabase
 
 
-def _ip_client(request):
+def ip_client(request):
     """
     Extrait l'IP du client, en tenant compte du fait que Railway est
     derriere un proxy (X-Forwarded-For contient l'IP reelle en premiere
     position ; request.client.host donnerait sinon l'IP du proxy).
+
+    Rendue publique le 08/09/2026 (demande Bourama, detection du pays
+    pour la bibliotheque publique) pour etre reutilisee par
+    core/geolocalisation_pays.py sans dupliquer cette logique.
     """
     if request is None:
         return None
@@ -48,6 +52,10 @@ def _ip_client(request):
     if entete:
         return entete.split(",")[0].strip()
     return request.client.host if request.client else None
+
+
+# Alias retro-compatible (usage interne existant plus bas dans ce fichier).
+_ip_client = ip_client
 
 
 def journaliser(action, user_id=None, cible_type=None, cible_id=None, details=None, request=None):

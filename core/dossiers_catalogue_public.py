@@ -23,7 +23,7 @@ from api.auth import supabase
 def _dossier(dossier_id: str) -> dict | None:
     res = (
         supabase.table("dossiers_catalogue_public")
-        .select("id, cree_par, nom, statut, dossier_parent_id")
+        .select("id, cree_par, nom, description, statut, dossier_parent_id")
         .eq("id", dossier_id)
         .maybe_single()
         .execute()
@@ -50,11 +50,16 @@ def peut_retirer_contenu(dossier_id: str, user_id: str) -> bool:
 def creer_dossier(
     user_id: str, nom: str, statut: str = "contribution_libre", dossier_parent_id: str = None,
     pays: str = None, niveau: str = None, categorie: str = None,
-    classe: str = None, specialite: str = None,
+    classe: str = None, specialite: str = None, description: str = "",
 ) -> dict:
     insertion = supabase.table("dossiers_catalogue_public").insert({
         "cree_par": user_id,
         "nom": nom,
+        # 08/09/2026, demande Bourama : les dossiers suivent la même
+        # logique que les fichiers -- description optionnelle, y compris
+        # pour un sous-dossier (même formulaire, voir api/dossiers_
+        # catalogue_public.py).
+        "description": description or "",
         "statut": statut,
         "dossier_parent_id": dossier_parent_id,
         # 02/09/2026, demande Bourama : 3 filtres optionnels, cochables
@@ -74,15 +79,28 @@ def renommer_dossier(dossier_id: str, nouveau_nom: str) -> None:
     supabase.table("dossiers_catalogue_public").update({"nom": nouveau_nom}).eq("id", dossier_id).execute()
 
 
-def lister_dossiers() -> list:
-    """Liste TOUS les dossiers du catalogue public, à plat -- visible par tout le monde, contrairement au perso."""
-    return (
+def lister_dossiers(pays_prioritaire: str | None = None) -> list:
+    """
+    Liste TOUS les dossiers du catalogue public, à plat -- visible par
+    tout le monde, contrairement au perso.
+
+    08/09/2026, demande Bourama : les dossiers du pays détecté de
+    l'utilisateur (voir core/geolocalisation_pays.py) remontent en tête
+    de liste. Pas de pagination ici (liste complète, filtrée/affichée
+    ensuite côté frontend par arborescence) -- un simple tri Python
+    suffit, contrairement au listing paginé des fichiers (voir
+    api/bibliotheque_publique.py) où un tri en deux temps est nécessaire.
+    """
+    dossiers = (
         supabase.table("dossiers_catalogue_public")
-        .select("id, cree_par, nom, statut, dossier_parent_id, created_at, pays, niveau, categorie, classe, specialite")
+        .select("id, cree_par, nom, description, statut, dossier_parent_id, created_at, pays, niveau, categorie, classe, specialite")
         .order("created_at")
         .execute()
         .data
     )
+    if pays_prioritaire:
+        dossiers.sort(key=lambda d: 0 if d.get("pays") == pays_prioritaire else 1)
+    return dossiers
 
 
 def lister_fichiers_ids_dossier(dossier_id: str) -> list:

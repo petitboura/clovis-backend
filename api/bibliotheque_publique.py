@@ -28,7 +28,7 @@ import logging
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from postgrest.exceptions import APIError
 from pydantic import BaseModel
 from supabase import create_client
@@ -48,6 +48,7 @@ from core.dossiers_catalogue_public import (
     lister_fichiers_ids_dossier as _lister_fichiers_ids_dossier,
 )
 from core.dossiers_publics_attaches import propager_fichier_public_range_dossier as _propager_fichier_public_range_dossier
+from core.geolocalisation_pays import pays_utilisateur
 from core.listes_bibliotheque_publique import lister_valeurs, normaliser_et_enregistrer
 
 router = APIRouter(prefix="/api/bibliotheque-publique", tags=["bibliotheque_publique"])
@@ -111,8 +112,15 @@ def lister_listes_filtres():
     }
 
 
+_CAMPOS_ENTREE = (
+    "id, nom, description, nom_fichier, type_mime, taille_octets, url_publique, created_at, "
+    "statut_vectorisation, pays, niveau, categorie, classe, specialite"
+)
+
+
 @router.get("", response_model=list[EntreeBibliothequePublique])
 def lister_bibliotheque_publique(
+    request: Request,
     q: str | None = None,
     pays: str | None = None,
     niveau: str | None = None,
@@ -137,36 +145,86 @@ def lister_bibliotheque_publique(
     # l'onglet "Tous", au lieu de charger tout son contenu d'un coup.
     limite = min(max(limite, 1), 100)
     decalage = max(decalage, 0)
-    requete = (
-        supabase.table("bibliotheque_publique")
-        .select(
-            "id, nom, description, nom_fichier, type_mime, taille_octets, url_publique, created_at, "
-            "statut_vectorisation, pays, niveau, categorie, classe, specialite"
-        )
-        .eq("statut", "publie")
-    )
-    if (q or "").strip():
-        requete = requete.or_(f"nom.ilike.%{q.strip()}%,description.ilike.%{q.strip()}%")
-    # 02/09/2026, demande Bourama : filtres pays/niveau/catégorie, en
-    # plus du filtre par type déjà géré côté frontend.
-    if (pays or "").strip():
-        requete = requete.eq("pays", pays.strip())
-    if (niveau or "").strip():
-        requete = requete.eq("niveau", niveau.strip())
-    if (categorie or "").strip():
-        requete = requete.eq("categorie", categorie.strip())
-    # 04/09/2026, demande Bourama : 2 filtres supplémentaires, même principe.
-    if (classe or "").strip():
-        requete = requete.eq("classe", classe.strip())
-    if (specialite or "").strip():
-        requete = requete.eq("specialite", specialite.strip())
+
+    ids_dossier = None
     if (dossier_id or "").strip():
         ids_dossier = _lister_fichiers_ids_dossier(dossier_id.strip())
         if not ids_dossier:
             return []
-        requete = requete.in_("id", ids_dossier)
-    res = requete.order("created_at", desc=True).range(decalage, decalage + limite - 1).execute()
-    return res.data or []
+
+    def _base(campos: str = _CAMPOS_ENTREE, count: str | None = None):
+        requete = supabase.table("bibliotheque_publique").select(campos, count=count).eq("statut", "publie")
+        if (q or "").strip():
+            requete = requete.or_(f"nom.ilike.%{q.strip()}%,description.ilike.%{q.strip()}%")
+        # 02/09/2026, demande Bourama : filtres pays/niveau/catégorie, en
+        # plus du filtre par type déjà géré côté frontend.
+        if (niveau or "").strip():
+            requete = requete.eq("niveau", niveau.strip())
+        if (categorie or "").strip():
+            requete = requete.eq("categorie", categorie.strip())
+        # 04/09/2026, demande Bourama : 2 filtres supplémentaires, même principe.
+        if (classe or "").strip():
+            requete = requete.eq("classe", classe.strip())
+        if (specialite or "").strip():
+            requete = requete.eq("specialite", specialite.strip())
+        if ids_dossier is not None:
+            requete = requete.in_("id", ids_dossier)
+        return requete
+
+    # 08/09/2026, demande Bourama : les fichiers du pays détecté de
+    # l'utilisateur (voir core/geolocalisation_pays.py) remontent en
+    # tête des résultats. Sans objet si l'appelant a déjà explicitement
+    # filtré par pays (son filtre prime, la priorité n'a plus de sens).
+    pays_filtre = (pays or "").strip()
+    pays_prioritaire = None if pays_filtre else pays_utilisateur(request)
+
+    if pays_filtre:
+        res = _base().eq("pays", pays_filtre).order("created_at", desc=True).range(decalage, decalage + limite - 1).execute()
+        return res.data or []
+
+    if not pays_prioritaire:
+        res = _base().order("created_at", desc=True).range(decalage, decalage + limite - 1).execute()
+        return res.data or []
+
+    # Mise en avant en deux temps : d'abord les entrées du pays détecté
+    # (les plus récentes en premier), puis le reste -- chaque groupe
+    # trié par date décroissante. Le compte du 1er groupe permet de
+    # savoir, pour une fenêtre decalage/limite donnée (scroll infini),
+    # quelle part de cette page vient de chaque groupe, sans jamais
+    # sauter ni répéter une entrée d'une page à l'autre.
+    try:
+        compte_prioritaire = _base(campos="id", count="exact").eq("pays", pays_prioritaire).limit(1).execute().count or 0
+    except Exception as e:
+        logging.error(f"ERREUR comptage priorite pays (bibliotheque publique) : {e}")
+        compte_prioritaire = 0
+
+    if compte_prioritaire == 0:
+        res = _base().order("created_at", desc=True).range(decalage, decalage + limite - 1).execute()
+        return res.data or []
+
+    resultats: list = []
+    if decalage < compte_prioritaire:
+        a_prendre = min(limite, compte_prioritaire - decalage)
+        res1 = (
+            _base().eq("pays", pays_prioritaire)
+            .order("created_at", desc=True)
+            .range(decalage, decalage + a_prendre - 1)
+            .execute()
+        )
+        resultats.extend(res1.data or [])
+
+    if len(resultats) < limite:
+        decalage_reste = max(0, decalage - compte_prioritaire)
+        a_prendre = limite - len(resultats)
+        res2 = (
+            _base().or_(f"pays.neq.{pays_prioritaire},pays.is.null")
+            .order("created_at", desc=True)
+            .range(decalage_reste, decalage_reste + a_prendre - 1)
+            .execute()
+        )
+        resultats.extend(res2.data or [])
+
+    return resultats
 
 
 @router.post("", response_model=EntreeBibliothequePublique, status_code=201)
