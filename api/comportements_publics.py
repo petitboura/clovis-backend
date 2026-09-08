@@ -12,10 +12,11 @@ telecharger_plugin).
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel
 
-from api.auth import utilisateur_courant
+from api.auth import utilisateur_courant, utilisateur_optionnel
 from core.comportements_etudiants import (
     activer_comportement_public,
     lister_comportements_publics,
+    retirer_skill_public,
     uploader_comportement_public,
 )
 from core.erreurs import erreur_api
@@ -29,6 +30,7 @@ class ComportementPublic(BaseModel):
     description: str
     texte: str
     activations_count: int
+    est_a_moi: bool = False
 
 
 class ComportementActive(BaseModel):
@@ -40,8 +42,30 @@ class ComportementActive(BaseModel):
 
 
 @router.get("", response_model=list[ComportementPublic])
-def rechercher_comportements_publics(q: str | None = None):
-    return lister_comportements_publics(mot_cle=q)
+def rechercher_comportements_publics(q: str | None = None, utilisateur=Depends(utilisateur_optionnel)):
+    """07/09/2026, demande Bourama (bouton "Retirer" pour l'auteur d'un
+    skill public) : recherche toujours publique (utilisateur_optionnel,
+    jamais de 401 ici, comme avant), mais calcule en plus est_a_moi pour
+    chaque ligne si un visiteur connecte regarde -- le frontend s'en sert
+    pour n'afficher "Retirer" qu'au vrai proprietaire. Meme principe que
+    obtenir_profil_public (api/profiles.py)."""
+    lignes = lister_comportements_publics(mot_cle=q)
+    mon_id = utilisateur.id if utilisateur else None
+    for ligne in lignes:
+        ligne["est_a_moi"] = mon_id is not None and ligne.get("auteur_id") == mon_id
+    return lignes
+
+
+@router.post("/{comportement_public_id}/retirer", status_code=204)
+def retirer_mon_skill_public(comportement_public_id: str, utilisateur=Depends(utilisateur_courant)):
+    """07/09/2026, demande Bourama : l'auteur d'un skill public peut le
+    retirer du catalogue (n'existait pas avant). Retrait doux, voir
+    retirer_skill_public -- les copies deja activees par d'autres
+    etudiants ne sont pas affectees. 404 generique si l'id n'existe pas
+    OU si l'appelant n'en est pas l'auteur (jamais confirmer a un tiers
+    qu'un skill existe et appartient a quelqu'un d'autre)."""
+    if not retirer_skill_public(comportement_public_id, utilisateur.id):
+        raise erreur_api(404, "COMPORTEMENT_PUBLIC_INTROUVABLE")
 
 
 @router.post("/uploader", response_model=ComportementPublic, status_code=201)

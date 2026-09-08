@@ -783,7 +783,7 @@ def uploader_comportement_public(auteur_id: str, nom: str, description: str, ski
 
 
 def lister_comportements_publics(mot_cle: str | None = None) -> list[dict]:
-    requete = supabase.table("comportements_publics").select("*")
+    requete = supabase.table("comportements_publics").select("*").eq("statut", "publie")
     mot_cle = (mot_cle or "").strip()
     if mot_cle:
         requete = requete.or_(f"nom.ilike.%{mot_cle}%,description.ilike.%{mot_cle}%")
@@ -793,6 +793,29 @@ def lister_comportements_publics(mot_cle: str | None = None) -> list[dict]:
         logging.error(f"ERREUR SUPABASE (recherche comportements publics q={mot_cle}) : {e}")
         return []
     return res.data or []
+
+
+def retirer_skill_public(comportement_public_id: str, auteur_id: str) -> bool:
+    """07/09/2026, demande Bourama : l'auteur d'un skill public doit
+    pouvoir le retirer (n'existait pas). Retrait doux (statut='retire',
+    meme convention que bibliotheque_publique) plutot qu'une suppression
+    de ligne : comportement_public_activations garde une reference vers
+    cette ligne pour l'historique, et les copies deja activees par
+    d'autres etudiants sont deja independantes (voir
+    activer_comportement_public), donc jamais affectees par ce retrait.
+    Le filtre .eq("auteur_id", ...) fait a la fois la verification de
+    propriete et la mise a jour en une seule requete : si l'appelant
+    n'est pas l'auteur, aucune ligne ne correspond et rien n'est modifie.
+    Renvoie True si une ligne a effectivement ete retiree."""
+    res = (
+        supabase.table("comportements_publics")
+        .update({"statut": "retire", "retire_le": "now()"})
+        .eq("id", comportement_public_id)
+        .eq("auteur_id", auteur_id)
+        .eq("statut", "publie")
+        .execute()
+    )
+    return bool(res.data)
 
 
 def activer_comportement_public(comportement_public_id: str, etudiant_id: str) -> dict | None:
