@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from configuration import get_system_prompt
 from profils_agents import INSTRUCTIONS_FORMATS_AFFICHAGE, INSTRUCTIONS_ARBITRAGE_CALCUL, REGLE_CONTEXTE_INVISIBLE, INSTRUCTIONS_LONGUEUR_REPONSE
 
-def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longueur_reponse="moyenne", fuseau_horaire=None, recherche_forcee=False, outil_force=None, sans_enseignant=False, comportements_etudiant=None, mes_programmes=None):
+def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longueur_reponse="moyenne", fuseau_horaire=None, recherche_forcee=False, outil_force=None, sans_enseignant=False, comportements_etudiant=None, mes_programmes=None, notions_pertinentes=None):
     # Restauré le 14/08 (voir commentaire des constantes plus haut) : la
     # page Notion de l'agent (get_system_prompt) ne doit plus contenir QUE
     # la personnalité/le comportement propre à l'agent -- les 3 blocs fixes
@@ -47,6 +47,7 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     # en réalité pas appeler, même contradiction que le bug du 12/08.
     comportements_etudiant = comportements_etudiant or []
     mes_programmes = mes_programmes or []
+    notions_pertinentes = notions_pertinentes or []
 
     if comportements_etudiant:
         candidats = "\n".join(
@@ -69,6 +70,37 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     # _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md. `mes_programmes`
     # reste un paramètre accepté (toujours vide désormais, voir chat()) pour
     # ne pas devoir modifier tous les appels à cette fonction.
+
+    # Notions du programme pertinentes pour CE message (09/09/2026, demande
+    # Bourama, nouveau systeme "confiance pedagogique", independant de
+    # l'ancien "Programme" ci-dessus) : recherche semantique deja effectuee
+    # dans chat() AVANT de construire ce prompt (voir
+    # avancement_notions_ia.py::notions_pertinentes_pour_eleve), et non une
+    # consigne que le LLM doit suivre lui-meme, corrige le bug "la
+    # consultation du programme n'est jamais obligatoire". Le statut/regle/
+    # consigne sont deja resolus (heritage inclus), le LLM n'a qu'a choisir
+    # laquelle de ces notions (s'il y en a) s'applique reellement a la
+    # question, jamais a deviner un nom en amont.
+    if notions_pertinentes:
+        lignes_notions = []
+        for n in notions_pertinentes:
+            regle = f", règle si pas encore vue : \"{n['regle']}\"" if n.get("regle") else ""
+            consigne = f", consigne du prof : \"{n['consigne']}\"" if n.get("consigne") else ""
+            lignes_notions.append(
+                f"- \"{n['nom']}\" (pertinence {n['similarite']:.2f}) : statut \"{n['statut']}\"{regle}{consigne}"
+            )
+        system_final += (
+            "\n\nNOTIONS DU PROGRAMME POTENTIELLEMENT LIÉES À CE MESSAGE (recherche automatique dans le "
+            "programme de l'élève, PAS une liste exhaustive de tout le programme) :\n"
+            f"{chr(10).join(lignes_notions)}\n"
+            "Si une de ces notions correspond vraiment à la question posée, applique son statut/règle/"
+            "consigne : \"acquis\" ou \"en_cours\" -> réponds normalement (en respectant quand même une "
+            "consigne si indiquée) ; \"a_venir\" avec règle \"bloquer\" -> n'aide pas sur cette notion "
+            "précise, explique que ce n'est pas encore vu en classe ; \"a_venir\" avec règle \"contourner\" "
+            "-> aide sans utiliser cette notion, reste dans ce qui a déjà été vu ; \"a_venir\" sans règle ou "
+            "avec règle \"signaler\" -> aide normalement en signalant que ce n'est pas encore vu. Si aucune "
+            "de ces notions ne correspond vraiment à la question, ignore cette liste et réponds normalement."
+        )
 
     # Bloc outils actifs / aucun outil actif (restauré 14/08) : outil_force
     # ici est déjà la liste VÉRIFIÉE des noms d'outils réellement envoyés au

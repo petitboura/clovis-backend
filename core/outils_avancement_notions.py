@@ -196,14 +196,18 @@ def gerer_avancement_notions(
 @mcp_generation.tool()
 def consulter_avancement_notion(nom_notion: str, ctx: Context) -> str:
     """
-    Consulte, AVANT de répondre à une question de cours d'un élève, si
-    cette question touche une notion pas encore vue en classe, et quel
-    comportement adopter dans ce cas -- Point 1 du document de vision,
-    briques B et C. Consulte systématiquement cet outil dès qu'une
-    question d'élève ressemble à une question de cours et qu'une notion
-    précise semble concernée (`nom_notion` = le nom le plus proche
-    possible de cette notion, tel que tu le devines à partir de la
-    question).
+    Outil SECONDAIRE (09/09/2026) : les notions du programme les plus
+    pertinentes pour ce message sont déjà recherchées et injectées
+    automatiquement dans ton prompt système à chaque message (recherche
+    sémantique, voir notions_pertinentes_pour_eleve), donc dans la
+    plupart des cas tu n'as PAS besoin d'appeler cet outil. Utilise-le
+    seulement si tu penses qu'une notion précise et pertinente n'est pas
+    apparue dans cette liste automatique.
+
+    `nom_notion` n'a plus besoin d'être un nom exact : la recherche est
+    désormais sémantique (09/09/2026, tolère une reformulation, une
+    faute de frappe ou un synonyme), passe la description la plus
+    naturelle possible de la notion concernée par la question.
 
     Le résultat renvoyé peut être :
     - Un statut "acquis" ou "en_cours" : réponds normalement, mais si
@@ -256,15 +260,16 @@ def consulter_avancement_notion(nom_notion: str, ctx: Context) -> str:
             "concerne cette question. Réponds avec ton jugement habituel."
         )
     if erreur == "notion_introuvable":
-        return f"Aucune notion nommée \"{nom_notion}\" trouvée dans le programme de cet élève."
+        return f"Aucune notion suffisamment proche de \"{nom_notion}\" trouvée dans le programme de cet élève."
 
+    nom_trouve = resultat.get("nom_trouve", nom_notion)
     statut = resultat["statut"]
     regle = resultat.get("regle")
     consigne = resultat.get("consigne")
     suffixe_consigne = f" Consigne à respecter pour cette notion : \"{consigne}\"." if consigne else ""
 
     if statut != "a_venir":
-        return f"Notion \"{nom_notion}\" : statut \"{statut}\" (déjà vue en classe), réponds normalement.{suffixe_consigne}"
+        return f"Notion \"{nom_trouve}\" : statut \"{statut}\" (déjà vue en classe), réponds normalement.{suffixe_consigne}"
     if regle:
-        return f"Notion \"{nom_notion}\" : pas encore vue en classe (statut \"a_venir\"), règle configurée : \"{regle}\".{suffixe_consigne}"
-    return f"Notion \"{nom_notion}\" : pas encore vue en classe (statut \"a_venir\"), aucune règle configurée, aide l'élève en le signalant.{suffixe_consigne}"
+        return f"Notion \"{nom_trouve}\" : pas encore vue en classe (statut \"a_venir\"), règle configurée : \"{regle}\".{suffixe_consigne}"
+    return f"Notion \"{nom_trouve}\" : pas encore vue en classe (statut \"a_venir\"), aucune règle configurée, aide l'élève en le signalant.{suffixe_consigne}"

@@ -27,6 +27,8 @@ from datetime import datetime
 
 from supabase import create_client
 
+from core.embeddings import activer_pause_quota_gemini, est_en_pause_quota_gemini, est_erreur_quota_gemini, vectoriser
+
 logging.basicConfig(level=logging.INFO)
 
 
@@ -41,6 +43,45 @@ supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
 STATUTS_VALIDES = {"a_venir", "en_cours", "acquis"}
 
 _COLONNES_NOTION = "id, code_id, notion_parent_id, nom, statut, ordre, created_at, updated_at, regle_comportement, consigne_llm"
+
+
+def _revectoriser_notion(notion_id: str, nom: str, consigne_llm: str | None) -> None:
+    """Recalcule et enregistre l'embedding d'une notion (09/09/2026,
+    demande Bourama : recherche semantique du programme, remplace le
+    matching texte strict de core/avancement_notions_ia.py, voir
+    migrations/2026_09_09_recherche_semantique_notions.sql). Vectorise
+    `nom` seul, ou `nom` + `consigne_llm` si elle est definie (la
+    consigne enrichit le sens de la notion pour le matching, demande de
+    Bourama).
+
+    Appelee de facon SYNCHRONE juste apres chaque creation, renommage ou
+    changement de consigne (demande Bourama : les notions sont courtes,
+    pas besoin d'une file d'attente comme pour les gros documents).
+    N'echoue JAMAIS bruyamment : si Gemini est en pause quota ou renvoie
+    une erreur, la notion garde son embedding precedent (ou reste NULL
+    si c'est sa toute premiere vectorisation), ca ne bloque jamais la
+    creation/modification elle-meme, seulement loggue pour qu'on puisse
+    suivre la frequence de ces echecs (contrairement a l'ancien systeme,
+    voir bug 6 du 08/09/2026, "double echec totalement silencieux")."""
+    if est_en_pause_quota_gemini():
+        logging.warning(f"Vectorisation notion {notion_id} ignoree (pause quota Gemini en cours).")
+        return
+    texte = nom.strip()
+    if consigne_llm:
+        texte += f", consigne : {consigne_llm}"
+    try:
+        vecteur = vectoriser(texte, task_type="RETRIEVAL_DOCUMENT")
+    except Exception as e:
+        if est_erreur_quota_gemini(str(e)):
+            activer_pause_quota_gemini()
+            logging.error(f"QUOTA GEMINI épuisé (vectorisation notion {notion_id}) : pause de 24h.")
+        else:
+            logging.error(f"ERREUR VECTORISATION notion {notion_id} (Gemini) : {e}")
+        return
+    try:
+        supabase.table("notions").update({"embedding": vecteur}).eq("id", notion_id).execute()
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (enregistrement embedding notion {notion_id}) : {e}")
 
 
 def code_appartient_a(code_id: str, proprietaire_id: str) -> bool:
@@ -143,7 +184,11 @@ def creer_notion(code_id: str, proprietaire_id: str, nom: str, notion_parent_id:
         "nom": nom,
         "ordre": _prochain_ordre(code_id, notion_parent_id),
     }).execute()
-    return insertion.data[0] if insertion.data else None
+    if not insertion.data:
+        return None
+    notion = insertion.data[0]
+    _revectoriser_notion(notion["id"], nom, None)
+    return notion
 
 
 def renommer_notion(notion_id: str, code_id: str, proprietaire_id: str, nouveau_nom: str) -> dict | None:
@@ -158,7 +203,11 @@ def renommer_notion(notion_id: str, code_id: str, proprietaire_id: str, nouveau_
         .eq("id", notion_id)
         .execute()
     )
-    return res.data[0] if res.data else None
+    if not res.data:
+        return None
+    notion = res.data[0]
+    _revectoriser_notion(notion_id, nouveau_nom, notion.get("consigne_llm"))
+    return notion
 
 
 def changer_statut_notion(notion_id: str, code_id: str, proprietaire_id: str, statut: str) -> dict | None:
@@ -215,7 +264,11 @@ def definir_consigne_notion(notion_id: str, code_id: str, proprietaire_id: str, 
         .eq("id", notion_id)
         .execute()
     )
-    return res.data[0] if res.data else None
+    if not res.data:
+        return None
+    notion = res.data[0]
+    _revectoriser_notion(notion_id, notion["nom"], valeur)
+    return notion
 
 
 def reordonner_notions(code_id: str, proprietaire_id: str, notion_parent_id: str | None, notion_ids_ordonnes: list[str]) -> bool:

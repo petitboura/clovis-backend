@@ -19,6 +19,7 @@ from comportements_etudiants import (
 #   from codes_partage import lister_programmes_recus_legers
 from codes_partage import lister_comportements_recus
 from mode_actif_conversation import obtenir_mode_actif
+from avancement_notions_ia import notions_pertinentes_pour_eleve
 from mcp_tools import lister_tous_les_outils, lister_outils_autorises_pour_agent, appeler_outil
 from fournisseurs_llm import generer_reponse_premium
 
@@ -406,6 +407,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     # core/registre_outils.py::consulter_skills_chapitres_matiere) même si
     # c'est ce petit routeur qui décide de le déclencher, pas le grand LLM.
     comportements_etudiant = []
+    notions_programme_pertinentes = []
     if user_id and message_utilisateur:
         # Mode actif (08/09/2026, demande Bourama) : avant ce fix,
         # lister_comportements_recus mélangeait les skills de TOUS les
@@ -418,6 +420,17 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         # tout seul le repli sur l'unique rattachement).
         mode_actif = obtenir_mode_actif(conversation_id, user_id) if conversation_id else None
         rattachement_id_actif = mode_actif.get("rattachement_id") if mode_actif else None
+        # Notions du programme pertinentes (09/09/2026, demande Bourama) :
+        # calculees ICI, deterministiquement, a CHAQUE message d'un eleve
+        # rattache a un code, corrige le bug "la consultation du
+        # programme n'est jamais obligatoire, c'est une consigne de
+        # comportement que le LLM peut simplement ne pas suivre" (voir
+        # avancement_notions_ia.py::notions_pertinentes_pour_eleve). Ne
+        # depend d'aucun choix du LLM, contrairement a l'outil MCP
+        # consulter_avancement_notion garde en option secondaire. Meme
+        # rattachement_id_actif que pour les skills juste au-dessus,
+        # aucune requete supplementaire pour le resoudre.
+        notions_programme_pertinentes = notions_pertinentes_pour_eleve(user_id, message_utilisateur, rattachement_id_actif)
         tous_comportements = (
             [c for c in lister_comportements_etudiant(agent_id, user_id) if c.get("actif", True)]
             + lister_comportements_recus(user_id, rattachement_id_actif)
@@ -570,7 +583,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             outil_force_contexte_seul = _fusionner_outils(None, outils_forces_contexte + outils_retenus_precedents)
             outils_mcp, table_routage = lister_tous_les_outils(get_secret, user_id, agent_id, outil_force_contexte_seul, conversation_id)
             outil_force_verifie_optimiste = [o["function"]["name"] for o in outils_mcp] if outil_force_contexte_seul else None
-            system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie_optimiste, sans_enseignant, comportements_etudiant, mes_programmes)
+            system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie_optimiste, sans_enseignant, comportements_etudiant, mes_programmes, notions_programme_pertinentes)
             return outils_mcp, table_routage, system_final
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -672,7 +685,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         else:
             outils_mcp, table_routage = lister_tous_les_outils(get_secret, user_id, agent_id, outil_force, conversation_id)
             outil_force_verifie = [o["function"]["name"] for o in outils_mcp] if outil_force else outil_force
-        system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie, sans_enseignant, comportements_etudiant, mes_programmes)
+        system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie, sans_enseignant, comportements_etudiant, mes_programmes, notions_programme_pertinentes)
 
         # PERF (10/08) : second (et dernier) point de vérification --
         # couvre tous les chemins qui ne passent PAS par le premier

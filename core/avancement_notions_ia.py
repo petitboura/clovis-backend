@@ -17,6 +17,7 @@ import os
 
 from supabase import create_client
 
+from core.embeddings import est_en_pause_quota_gemini, est_erreur_quota_gemini, vectoriser
 from core.programme_notions import (
     STATUTS_VALIDES,
     code_appartient_a,
@@ -24,6 +25,9 @@ from core.programme_notions import (
     creer_notion,
     changer_statut_notion,
 )
+
+SEUIL_SIMILARITE_NOTIONS = 0.5
+MATCH_COUNT_NOTIONS = 3
 
 logging.basicConfig(level=logging.INFO)
 
@@ -84,6 +88,58 @@ def toutes_notions_code(code_id: str) -> list[dict]:
         logging.error(f"ERREUR SUPABASE (lecture notions du code {code_id}) : {e}")
         return []
     return res.data or []
+
+
+def rechercher_notions_semantique(
+    code_id: str,
+    texte_requete: str,
+    match_count: int = MATCH_COUNT_NOTIONS,
+    seuil: float = SEUIL_SIMILARITE_NOTIONS,
+) -> list[dict]:
+    """Recherche vectorielle des notions d'un code (09/09/2026, demande
+    Bourama : remplace le matching texte strict cote consultation eleve,
+    voir migrations/2026_09_09_recherche_semantique_notions.sql). Tolere
+    une reformulation, une faute de frappe ou un synonyme, contrairement
+    a l'ancien matching par egalite stricte sur le nom (bug 4/5 du
+    08/09/2026).
+
+    Chaque resultat contient id/nom/statut/notion_parent_id/
+    regle_comportement/consigne_llm/similarite, triee par pertinence
+    decroissante. Liste vide si aucune notion vectorisee du code ne
+    depasse `seuil`, si le code n'a aucune notion, ou si la recherche
+    echoue (Gemini en pause quota, erreur reseau) : jamais d'exception
+    remontee a l'appelant, toujours loggue pour rester traçable
+    (contrairement au silence total de l'ancien systeme)."""
+    if est_en_pause_quota_gemini():
+        logging.warning(f"Recherche semantique notions ignoree pour code {code_id} (pause quota Gemini en cours).")
+        return []
+    try:
+        vecteur = vectoriser(texte_requete, task_type="RETRIEVAL_QUERY")
+    except Exception as e:
+        if est_erreur_quota_gemini(str(e)):
+            logging.error(f"QUOTA GEMINI épuisé (recherche notions, code {code_id}).")
+        else:
+            logging.error(f"ERREUR VECTORISATION recherche notions (Gemini, code {code_id}) : {e}")
+        return []
+    try:
+        resultats = supabase.rpc(
+            "recherche_notions",
+            {"query_embedding": vecteur, "match_count": match_count, "p_code_id": code_id, "p_seuil_similarite": seuil},
+        ).execute().data or []
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE RPC recherche_notions (code {code_id}) : {e}")
+        return []
+    if resultats:
+        logging.info(
+            f"Recherche semantique notions (code {code_id}) : requete=\"{texte_requete[:80]}\" "
+            f"-> {len(resultats)} candidat(s), meilleur score={resultats[0]['similarite']:.3f}."
+        )
+    else:
+        logging.info(
+            f"Recherche semantique notions (code {code_id}) : requete=\"{texte_requete[:80]}\" "
+            f"-> aucun candidat au-dessus du seuil {seuil}."
+        )
+    return resultats
 
 
 def trouver_notion_par_nom(code_id: str, nom_notion: str) -> dict | None:
@@ -313,27 +369,79 @@ def resoudre_code_actif_eleve(receveur_id: str, rattachement_id: str | None = No
 
 
 def consulter_progres_notion_pour_eleve(receveur_id: str, nom_notion: str, rattachement_id: str | None = None):
-    """Point d'entree cote eleve (voir Point 1, brique B/C du document de
-    vision) : resout le code actif de l'eleve (`rattachement_id`, mode
-    actif de la conversation si fourni -- 08/09/2026, sinon repli sur
-    l'ancienne resolution, voir resoudre_code_actif_eleve), cherche la
-    notion par nom dans ce code, renvoie (statut, regle_effective) ou un
+    """Point d'entree cote eleve pour l'outil MCP consulter_avancement_notion,
+    garde comme option secondaire (09/09/2026, demande Bourama) en plus
+    de l'injection automatique de notions_pertinentes_pour_eleve. Resout
+    le code actif de l'eleve (`rattachement_id`, mode actif de la
+    conversation si fourni, sinon repli sur l'ancienne resolution, voir
+    resoudre_code_actif_eleve), cherche la notion par RECHERCHE
+    SEMANTIQUE (09/09/2026, remplace le matching texte strict, voir
+    rechercher_notions_semantique) plutot que par egalite stricte sur le
+    nom devine par le LLM, renvoie (statut, regle_effective) ou un
     marqueur d'erreur explicite pour que l'outil MCP puisse repondre
-    clairement plutot que de planter silencieusement."""
+    clairement plutot que de planter silencieusement. Chaque appel,
+    succes ou echec, est loggue (voir rechercher_notions_semantique et
+    resoudre_code_actif_eleve), contrairement a l'ancien systeme."""
     code = resoudre_code_actif_eleve(receveur_id, rattachement_id)
     if code is None:
+        logging.info(f"Consultation notion ignoree : eleve {receveur_id} sans code rattache.")
         return {"erreur": "aucun_code"}
     if isinstance(code, list):
+        logging.warning(f"Consultation notion ambigue : eleve {receveur_id} rattache a plusieurs codes sans mode actif choisi.")
         return {"erreur": "code_ambigu", "codes": code}
-    toutes = toutes_notions_code(code["id"])
-    cible = _normaliser(nom_notion)
-    correspondances = [n for n in toutes if _normaliser(n.get("nom")) == cible]
-    if len(correspondances) != 1:
+    candidats = rechercher_notions_semantique(code["id"], nom_notion, match_count=1)
+    if not candidats:
         return {"erreur": "notion_introuvable"}
-    notion = correspondances[0]
+    toutes = toutes_notions_code(code["id"])
+    par_id = {n["id"]: n for n in toutes}
+    notion = par_id.get(candidats[0]["id"]) or candidats[0]
     return {
         "statut": notion["statut"],
         "regle": regle_effective_pour_notion(notion, toutes),
         "consigne": consigne_effective_pour_notion(notion, toutes),
         "code_nom": code.get("nom") or code.get("code"),
+        "nom_trouve": notion["nom"],
+        "similarite": candidats[0]["similarite"],
     }
+
+
+def notions_pertinentes_pour_eleve(receveur_id: str, message: str, rattachement_id: str | None = None) -> list[dict]:
+    """Point d'entree pour l'injection AUTOMATIQUE et OBLIGATOIRE dans le
+    prompt systeme (09/09/2026, demande Bourama, corrige le bug 7 du
+    08/09/2026 : "la consultation du programme n'est jamais obligatoire,
+    c'est une consigne de comportement que le LLM peut simplement ne pas
+    suivre"). Calculee de facon DETERMINISTE a chaque message d'un
+    eleve (voir core/main.py), independamment de tout choix du LLM,
+    contrairement a l'outil MCP consulter_avancement_notion qui reste
+    une option secondaire (voir consulter_progres_notion_pour_eleve).
+
+    Renvoie jusqu'a MATCH_COUNT_NOTIONS candidats (nom, statut, regle
+    effective, consigne effective, similarite), tries par pertinence
+    decroissante, pour que le grand modele choisisse lui-meme laquelle
+    s'applique reellement a la question plutot que de deviner un nom
+    unique en amont (demande Bourama, 09/09/2026). Liste vide si l'eleve
+    n'a aucun code rattache, si son mode actif est ambigu, ou si aucune
+    notion vectorisee ne depasse le seuil de similarite, jamais
+    d'exception remontee (voir rechercher_notions_semantique)."""
+    code = resoudre_code_actif_eleve(receveur_id, rattachement_id)
+    if code is None:
+        return []
+    if isinstance(code, list):
+        logging.info(f"Notions pertinentes ignorees : eleve {receveur_id} rattache a plusieurs codes sans mode actif choisi.")
+        return []
+    candidats = rechercher_notions_semantique(code["id"], message)
+    if not candidats:
+        return []
+    toutes = toutes_notions_code(code["id"])
+    par_id = {n["id"]: n for n in toutes}
+    resultat = []
+    for c in candidats:
+        notion = par_id.get(c["id"]) or c
+        resultat.append({
+            "nom": notion["nom"],
+            "statut": notion["statut"],
+            "regle": regle_effective_pour_notion(notion, toutes),
+            "consigne": consigne_effective_pour_notion(notion, toutes),
+            "similarite": c["similarite"],
+        })
+    return resultat
