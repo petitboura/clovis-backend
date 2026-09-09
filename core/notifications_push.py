@@ -70,6 +70,7 @@ from google.auth.transport.requests import Request as GoogleAuthRequest
 from pywebpush import webpush, WebPushException
 
 from api.auth import supabase
+from core.notifications import creer_notification
 
 VAPID_CLAIMS_SUB = "mailto:contact@maame.africa"  # à changer par une vraie adresse si besoin
 
@@ -508,7 +509,7 @@ def envoyer_notification_push(user_id: str, titre: str, corps: str, url: str = N
     return envoyes
 
 
-def notifier_nouvelle_version_disponible(version: str) -> int:
+def notifier_nouvelle_version_disponible(version: str, url_telechargement: str | None = None, url_page: str | None = None) -> int:
     """
     Diffuse une notification "nouvelle version disponible" à TOUS les
     appareils mobiles enregistrés, tous utilisateurs confondus --
@@ -529,16 +530,26 @@ def notifier_nouvelle_version_disponible(version: str) -> int:
     pertinente uniquement pour qui a l'app installée, pas pour un simple
     visiteur du site dans son navigateur.
 
-    Renvoie le nombre d'appareils effectivement notifiés.
-    """
-    if not (_fcm_disponible() or _apns_disponible()):
-        logging.warning(
-            "notifier_nouvelle_version_disponible : aucun canal natif (FCM/APNs) configuré, notification ignorée."
-        )
-        return 0
+    09/09/2026, demande Bourama ("il faut un CTA au lieu d'une simple
+    info") : en plus du push, crée aussi une notification dans le
+    centre de notifications (cloche) pour chaque utilisateur concerné --
+    voir core/notifications.py::creer_notification, type
+    "nouvelle_version_disponible". url_telechargement (lien direct vers
+    l'APK, extrait des assets de la release GitHub) est stocké dans
+    "lien" : BoutonNotifications.tsx l'ouvre directement au lieu de
+    naviguer dans l'app, pour que la ligne soit un vrai bouton
+    "Télécharger" plutôt qu'un simple texte informatif. Si absent
+    (release publiée sans .apk joint), on retombe sur url_page (la page
+    de la release sur GitHub) pour ne jamais créer de notification sans
+    lien exploitable.
 
+    Renvoie le nombre d'appareils effectivement notifiés par push
+    (la création des notifications in-app est best-effort, comptée à
+    part -- voir les logs).
+    """
     titre = "Nouvelle version de Clovis disponible"
     corps = f"La version {version} est prête à être installée."
+    lien = url_telechargement or url_page
 
     try:
         res = supabase.table("appareils_mobiles_push_tokens").select("user_id, plateforme, token").execute()
@@ -546,8 +557,28 @@ def notifier_nouvelle_version_disponible(version: str) -> int:
         logging.error(f"ERREUR SUPABASE (lecture de tous les tokens natifs pour notif version) : {e}")
         return 0
 
+    appareils = res.data or []
+
+    # Notification in-app (centre de notifications / cloche), une par
+    # utilisateur concerné -- indépendant du push lui-même (FCM/APNs
+    # peuvent être absents ou en échec, l'utilisateur voit quand même le
+    # CTA dans l'app à sa prochaine visite).
+    utilisateurs_notifies_en_app = set()
+    for appareil in appareils:
+        user_id = appareil["user_id"]
+        if user_id in utilisateurs_notifies_en_app:
+            continue
+        utilisateurs_notifies_en_app.add(user_id)
+        creer_notification(user_id, "nouvelle_version_disponible", titre, corps, lien=lien)
+
+    if not (_fcm_disponible() or _apns_disponible()):
+        logging.warning(
+            "notifier_nouvelle_version_disponible : aucun canal natif (FCM/APNs) configuré, notification push ignorée (notifications in-app créées quand même)."
+        )
+        return 0
+
     envoyes = 0
-    for appareil in res.data or []:
+    for appareil in appareils:
         plateforme, token, user_id = appareil["plateforme"], appareil["token"], appareil["user_id"]
         ok = False
         if plateforme == "android" and _fcm_disponible():

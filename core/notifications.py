@@ -47,6 +47,12 @@ TYPES_VALIDES = {
     "etablissement_publication", "etablissement_demande_connexion", "etablissement_demande_acceptee",
     # Cascade de supervision (07/09/2026, Partie 10) : voir core/cascade_supervision.py
     "cascade_supervision_j2", "cascade_supervision_j5", "cascade_supervision_equipe_clovis", "cascade_supervision_resolue",
+    # Nouvelle version app mobile disponible (09/09/2026, demande Bourama) :
+    # voir core/notifications_push.py::notifier_nouvelle_version_disponible,
+    # déclenché par le webhook GitHub (api/webhooks_github.py). "lien"
+    # porte l'URL de téléchargement directe de l'APK (pas une route interne
+    # de l'app) -- BoutonNotifications.tsx sait le traiter différemment.
+    "nouvelle_version_disponible",
 }
 
 

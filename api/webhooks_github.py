@@ -79,6 +79,17 @@ async def webhook_github_release(requete: Request):
         logging.error("Webhook release GitHub : tag_name absent du payload, notification ignorée.")
         return Response(status_code=204)
 
-    envoyes = notifier_nouvelle_version_disponible(version)
+    # 09/09/2026, demande Bourama (CTA "Télécharger" dans la notification
+    # in-app, pas juste une info) : même logique que
+    # VerificateurMiseAJour.kt côté app -- cherche l'asset .apk joint à la
+    # release pour en faire un lien de téléchargement direct. S'il manque
+    # (release publiée sans .apk joint), on retombe sur la page de la
+    # release elle-même plutôt que de ne pas notifier du tout.
+    assets = release.get("assets") or []
+    apk = next((a for a in assets if str(a.get("name", "")).endswith(".apk")), None)
+    url_telechargement = apk.get("browser_download_url") if apk else None
+    url_page = release.get("html_url")
+
+    envoyes = notifier_nouvelle_version_disponible(version, url_telechargement, url_page)
     logging.info(f"Notif nouvelle version {version} envoyée à {envoyes} appareil(s).")
     return Response(status_code=204)
