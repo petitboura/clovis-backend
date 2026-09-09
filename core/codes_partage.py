@@ -88,7 +88,7 @@ def _generer_code_unique() -> str:
     raise RuntimeError("Impossible de générer un code unique après plusieurs tentatives")
 
 
-_COLONNES_CODE = "id, code, nom, programme_id, texte_libre, actif, created_at, updated_at"
+_COLONNES_CODE = "id, code, nom, texte_libre, actif, created_at, updated_at"
 
 
 def _comportements_par_code(code_ids: list[str]) -> dict[str, list[dict]]:
@@ -506,7 +506,6 @@ def creer_code(
     proprietaire_id: str,
     nom: str | None = None,
     comportement_ids: list[str] | None = None,
-    programme_id: str | None = None,
     dossier_ids: list[str] | None = None,
     texte_libre: str | None = None,
 ) -> dict:
@@ -514,7 +513,6 @@ def creer_code(
         "proprietaire_id": proprietaire_id,
         "code": _generer_code_unique(),
         "nom": (nom or "").strip() or None,
-        "programme_id": programme_id or None,
         "texte_libre": (texte_libre or "").strip() or None,
     }
     res = supabase.table("codes_partage").insert(ligne).execute()
@@ -533,7 +531,6 @@ def modifier_code(
     proprietaire_id: str,
     nom: str | None = None,
     comportement_ids: list[str] | None = None,
-    programme_id: str | None = None,
     dossier_ids: list[str] | None = None,
     texte_libre: str | None = None,
 ) -> dict | None:
@@ -548,8 +545,6 @@ def modifier_code(
     patch: dict = {}
     if nom is not None:
         patch["nom"] = nom.strip() or None
-    if programme_id is not None:
-        patch["programme_id"] = programme_id or None
     if texte_libre is not None:
         patch["texte_libre"] = texte_libre.strip() or None
 
@@ -677,7 +672,7 @@ def lister_mes_rattachements(receveur_id: str) -> list[dict]:
     try:
         res = (
             supabase.table("rattachements_codes")
-            .select("id, created_at, codes_partage!inner(id, code, nom, programme_id, texte_libre, actif, proprietaire_id)")
+            .select("id, created_at, codes_partage!inner(id, code, nom, texte_libre, actif, proprietaire_id)")
             .eq("receveur_id", receveur_id)
             .eq("codes_partage.actif", True)
             .order("created_at")
@@ -928,6 +923,13 @@ def obtenir_comportement_skill_recu(receveur_id: str, id_recu: str) -> str | Non
 # code actif depuis la désactivation du 29/08/2026, référençaient
 # core/programme_llm.py (déplacé dans _desactive_programme/, n'existe
 # plus à cet endroit) et les champs a_programme/programme_id de
-# lister_mes_rattachements, retirés au même moment pour la même raison
-# -- voir _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md.
+# lister_mes_rattachements, retirés au même moment pour la même raison.
+#
+# programme_id de creer_code/modifier_code/_COLONNES_CODE/
+# lister_mes_rattachements (dernier reliquat de ce même ancien système)
+# retiré le 09/09/2026 (nettoyage demandé par Bourama) : plus aucun
+# champ ni fonction de l'ancien "Programme" dans ce fichier. La colonne
+# `programme_id` reste présente sur la table codes_partage (Supabase)
+# mais n'est plus lue ni écrite par aucun code actif, voir
+# _desactive_programme/LISEZ_MOI_NE_JAMAIS_REUTILISER.md.
 

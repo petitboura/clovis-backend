@@ -33,7 +33,6 @@ class CodePayload(BaseModel):
     # créés dans "Mes comportements" (référence vivante), plus un texte
     # tapé directement ici.
     comportement_ids: list[str] | None = None
-    programme_id: str | None = None
     # 02/09/2026, demande Bourama : remplace partage_bibliotheque (booléen
     # "toute la bibliothèque") par une sélection précise de dossiers déjà
     # créés dans la bibliothèque perso, plusieurs à la fois possibles.
@@ -49,7 +48,6 @@ class CodePatchPayload(BaseModel):
     -> remplace entièrement la sélection."""
     nom: str | None = None
     comportement_ids: list[str] | None = None
-    programme_id: str | None = None
     dossier_ids: list[str] | None = None
     texte_libre: str | None = None
 
@@ -65,7 +63,6 @@ def creer(payload: CodePayload, utilisateur=Depends(utilisateur_courant)):
         proprietaire_id=utilisateur.id,
         nom=payload.nom,
         comportement_ids=payload.comportement_ids,
-        programme_id=payload.programme_id,
         dossier_ids=payload.dossier_ids,
         texte_libre=payload.texte_libre,
     )
@@ -78,7 +75,6 @@ def modifier(code_id: str, payload: CodePatchPayload, utilisateur=Depends(utilis
         proprietaire_id=utilisateur.id,
         nom=payload.nom,
         comportement_ids=payload.comportement_ids,
-        programme_id=payload.programme_id,
         dossier_ids=payload.dossier_ids,
         texte_libre=payload.texte_libre,
     )
