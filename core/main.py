@@ -3,6 +3,7 @@ import logging
 import base64
 import concurrent.futures
 from groq import Groq
+from openai import OpenAI
 from google import genai
 from google.genai import types
 from comportements_etudiants import (
@@ -29,9 +30,10 @@ from fournisseurs_llm import generer_reponse_premium
 # et boucle_agent.py. Il ne reste ici que la fonction publique chat() et les
 # imports qui la font tenir ensemble -- aucun changement de comportement.
 from constantes_agent import (
-    AGENT_ID_PAR_DEFAUT, GOOGLE_MODEL, GROQ_FALLBACKS, GROQ_PRIMARY,
-    MESSAGE_CONTENU_BLOQUE, MESSAGE_ERREUR, MODELES_AVEC_REASONING_EFFORT,
-    MODELES_QUALITE_REDUITE, MODERATION_ENTREE_ACTIVE, get_secret, supabase,
+    AGENT_ID_PAR_DEFAUT, DEEPSEEK_PRIMARY, GOOGLE_MODEL, GROQ_FALLBACKS,
+    GROQ_PRIMARY, MESSAGE_CONTENU_BLOQUE, MESSAGE_ERREUR,
+    MODELES_AVEC_REASONING_EFFORT, MODELES_QUALITE_REDUITE,
+    MODERATION_ENTREE_ACTIVE, get_secret, supabase,
     MAX_PASSAGES_CASCADE,
 )
 from moderation_message import _verifier_message_utilisateur
@@ -840,6 +842,18 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     # dise "Nucleos veut faire X" plutôt qu'une description générique.
     agent_nom = _nom_agent(agent_id)
 
+    # DeepSeek, en amont de la cascade Groq/Gemini existante (07/09/2026,
+    # demande Bourama). Grok (xAI) envisage un temps a cette position mais
+    # abandonne le meme jour -- plus de tier gratuit chez xAI depuis mai
+    # 2025, facturation des le premier jour, ne correspond plus au budget
+    # vise. Client cree UNE fois ici (comme client_groq juste au-dessus),
+    # pas a chaque passage de la boucle plus bas. Gating silencieux (meme
+    # principe que fournisseurs_llm.py) : cle API absente = client None,
+    # l'etape correspondante est sautee sans erreur visible pour
+    # l'usager, la cascade continue directement sur la suite.
+    _cle_deepseek = get_secret("DEEPSEEK_API_KEY")
+    client_deepseek = OpenAI(api_key=_cle_deepseek, base_url="https://api.deepseek.com") if _cle_deepseek else None
+
     for _passage in range(MAX_PASSAGES_CASCADE):
         tout_est_timeout = True
 
@@ -858,7 +872,37 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         reponse_accumulee = []
         meta_assistant = {}
 
-        # 1. GPT-OSS 120B, avec cycle d'outils MCP dynamique
+        # 1. DeepSeek, position principale de la cascade (07/09/2026,
+        # demande Bourama). Meme boucle d'agent generique (_agent_groq)
+        # que Groq juste en dessous -- outils MCP transmis pareil (format
+        # de tool-calling OpenAI-compatible chez DeepSeek), y compris le
+        # catalogue complet du chantier "demander_outils" (06/09). Sautee
+        # silencieusement si client_deepseek est None (cle API absente,
+        # voir plus haut).
+        if client_deepseek:
+            try:
+                yield from _capturer_reponse(
+                    _agent_groq(client_deepseek, messages_agent, outils_mcp, table_routage, agent_nom=agent_nom,
+                                modele=DEEPSEEK_PRIMARY, conversation_id=conversation_id,
+                                catalogue_complet=catalogue_complet, table_routage_complet=table_routage_complet),
+                    reponse_accumulee,
+                    meta_assistant,
+                )
+                ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=DEEPSEEK_PRIMARY, meta_assistant=meta_assistant)
+                if ids_historique:
+                    yield {"type": "meta", **ids_historique}
+                _mettre_a_jour_resume_si_besoin(user_id)
+                _mettre_a_jour_profil_utilisateur_si_besoin(user_id, agent_id)
+                return
+            except Exception as e:
+                if not _est_timeout(e):
+                    tout_est_timeout = False
+                    logging.error(f"ERREUR DEEPSEEK {DEEPSEEK_PRIMARY}: {e}")
+                evenement_repli = _repli_si_reponse_partielle(reponse_accumulee)
+                if evenement_repli:
+                    yield evenement_repli
+
+        # 2. GPT-OSS 120B, avec cycle d'outils MCP dynamique
         try:
             yield from _capturer_reponse(
                 _agent_groq(client_groq, messages_agent, outils_mcp, table_routage, agent_nom=agent_nom,
@@ -882,7 +926,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             if evenement_repli:
                 yield evenement_repli
 
-        # 2. Fallbacks Groq — AVEC les memes outils MCP (via _agent_groq),
+        # 3. Fallbacks Groq — AVEC les memes outils MCP (via _agent_groq),
         # pour que Notion/Wolfram restent utilisables meme quand
         # GROQ_PRIMARY sature son quota TPM (ce qui est le cas le plus
         # frequent de bascule ici, pas une vraie panne du modele).
@@ -933,7 +977,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                     yield evenement_repli
                 continue
 
-        # 3. Gemini 2.5 Flash — tout dernier recours, sans outils MCP a lui,
+        # 4. Gemini 2.5 Flash — tout dernier recours, sans outils MCP a lui,
         # mais REND COMPTE de ce qu'un outil Groq a deja execute avant lui
         # dans cette meme cascade (2026-07-31, corrige suite a un cas reel
         # observe par Bourama en logs : tavily_search execute avec succes,

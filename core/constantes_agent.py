@@ -15,6 +15,20 @@ SUPABASE_URL = get_secret("SUPABASE_URL")
 SUPABASE_SECRET = get_secret("SUPABASE_SECRET")
 supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
 
+# 07/09/2026, demande Bourama : DeepSeek en position 1 de la cascade
+# (avant GROQ_PRIMARY) -- decision explicite : V4 Flash fixe pour
+# l'instant (pas de repli V4 Pro pour l'instant). API compatible OpenAI
+# (tools/tool_calls), meme format que Groq -- verifie sur la doc
+# officielle du fournisseur, a confirmer en conditions reelles. Cle API
+# absente (DEEPSEEK_API_KEY) = fournisseur invisible, meme gating
+# silencieux que fournisseurs_llm.py -- voir main.py.
+#
+# Grok (xAI) envisage un temps a la position 1 (avant DeepSeek) le meme
+# jour, abandonne : plus de tier gratuit chez xAI depuis mai 2025,
+# facturation des le premier jour -- ne correspond plus au budget vise.
+# Aucune trace de code laissee (retire de main.py le jour meme).
+DEEPSEEK_PRIMARY = "deepseek-v4-flash"
+
 GROQ_PRIMARY = "openai/gpt-oss-120b"
 GOOGLE_MODEL = "gemini-2.5-flash"
 GROQ_FALLBACKS = [
