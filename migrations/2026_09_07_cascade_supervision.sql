@@ -40,19 +40,19 @@ create table if not exists cascades_supervision (
   j2_le timestamptz not null default (now() + interval '2 days'),
   j5_le timestamptz not null default (now() + interval '5 days'),
 
-  - Renseigné seulement si un rattachement établissement accepté
-  - commun (prof + au moins un des élèves signalants) a été trouvé au
-  - moment du passage à J2 - voir le tableau à trois états du Point 6.
-  - Si null à J5, l'étape établissement est simplement sautée (le
-  - délai est quand même respecté, règle explicite de la vision).
+  /* Renseigné seulement si un rattachement établissement accepté
+     commun (prof + au moins un des élèves signalants) a été trouvé au
+     moment du passage à J2, voir le tableau à trois états du Point 6.
+     Si null à J5, l'étape établissement est simplement sautée (le
+     délai est quand même respecté, règle explicite de la vision). */
   etablissement_id uuid references etablissements(id) on delete set null,
 
-  - Neutralisation automatique et immédiate (indépendante de statut
-  - ci-dessus, voir note en tête de fichier). comportement_id nullable :
-  - la détection par LLM (core/cascade_supervision.py) peut échouer à
-  - identifier une règle candidate avec assez de confiance, auquel cas
-  - la cascade suit son cours sans neutralisation automatique plutôt
-  - que de désactiver au hasard un comportement du prof.
+  /* Neutralisation automatique et immédiate (indépendante de statut
+     ci-dessus, voir note en tête de fichier). comportement_id nullable :
+     la détection par LLM (core/cascade_supervision.py) peut échouer à
+     identifier une règle candidate avec assez de confiance, auquel cas
+     la cascade suit son cours sans neutralisation automatique plutôt
+     que de désactiver au hasard un comportement du prof. */
   comportement_neutralise_id uuid references comportements_etudiants(id) on delete set null,
   neutralisee_le timestamptz,
 
