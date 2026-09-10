@@ -57,7 +57,11 @@ def _lire_outils_retenus(conversation_id):
             .maybe_single()
             .execute()
         )
-        return (res.data or {}).get("outils") or []
+        # maybe_single().execute() peut renvoyer None directement (pas un
+        # objet avec .data) quand 0 ligne correspond, selon la version de
+        # postgrest-py -- d'ou le crash 'NoneType' object has no attribute
+        # 'data' observe en logs. On tolere les deux comportements.
+        return ((res.data if res else None) or {}).get("outils") or []
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (lecture outils_retenus_conversation) : {e}")
         return []
