@@ -851,6 +851,9 @@ def obtenir_comportement_public(comportement_public_id: str) -> dict | None:
         logging.error(f"ERREUR SUPABASE (detail comportement public id={comportement_public_id}) : {e}")
         return None
     return res.data if res else None
+
+
+def retirer_skill_public(comportement_public_id: str, auteur_id: str) -> bool:
     """07/09/2026, demande Bourama : l'auteur d'un skill public doit
     pouvoir le retirer (n'existait pas). Retrait doux (statut='retire',
     meme convention que bibliotheque_publique) plutot qu'une suppression
