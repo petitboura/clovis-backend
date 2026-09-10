@@ -10,11 +10,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Optional
 
-# Doit s'exécuter avant tout import qui crée une connexion Supabase
-# (10/09/2026 -- correctif ConnectionTerminated, voir core/supabase_reconnect.py).
-from core.supabase_reconnect import activer_reconnexion_automatique
-activer_reconnexion_automatique()
-
 from anyio import to_thread
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
