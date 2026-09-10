@@ -127,7 +127,7 @@ _desactive_programme/          ancien "programme d'études adaptatif" (api/core)
                                 voir LISEZ_MOI_NE_JAMAIS_REUTILISER.md, ne jamais réactiver sans consigne explicite
 ```
 
-## Limitation connue : recherche d'outils (Wolfram)
+## Outils MCP externes : libellés de recherche
 
 Le 10/09/2026, la recherche interne d'outils (`core/recherche_outils.py`,
 utilisée quand le grand modèle demande en pleine tâche un outil qu'il n'a
@@ -139,12 +139,12 @@ déjà présents dans `REGISTRE_AFFICHAGE_OUTILS` (core/registre_outils.py)
 comme indice supplémentaire pour cette recherche.
 
 Wolfram (serveur MCP externe, voir `SERVEURS_MCP` dans
-`core/registre_outils.py`) n'a, à ce jour, aucune entrée dans
-`REGISTRE_AFFICHAGE_OUTILS` — donc aucun libellé français, et le nom
-technique exact de son/ses outil(s) n'a pas été vérifié. Il souffre
-probablement du même problème mais n'a pas été corrigé : ajouter son
-entrée (nom exact de l'outil confirmé + libellé français) avant de le
-traiter de la même façon.
+`core/registre_outils.py`) a désormais une entrée dans
+`REGISTRE_AFFICHAGE_OUTILS` pour `WolframLanguageEvaluator` (nom confirmé
+par la documentation publique de Wolfram Cloud MCP, pas une supposition).
+Ce serveur peut exposer d'autres outils non vérifiés ici
+(WolframLanguageContext, TestReport...) : à ajouter au registre s'ils
+s'avèrent utilisés par Clovis.
 
 ## Ce qui tourne en production
 

@@ -333,6 +333,15 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "deployer_site": {"label": "Déploiement d'un site", "icone": "Rocket", "onglet": "generer"},
     "exporter_donnees": {"label": "Export de données", "icone": "FileOutput", "onglet": "generer"},
     "calculer_symbolique": {"label": "Calcul symbolique (résoudre, dériver, intégrer)", "icone": "Divide", "onglet": "generer"},
+    # Ajouté 10/09/2026 (demande Bourama) : Wolfram n'avait aucune entrée
+    # ici, donc aucun libellé français pour la recherche interne d'outils
+    # (voir core/boucle_agent.py). "WolframLanguageEvaluator" est le nom
+    # confirmé (mention explicite dans profils_agents.py + documentation
+    # publique de Wolfram Cloud MCP, agenttools.wolfram.com/mcp) -- pas une
+    # supposition. Ce serveur peut exposer d'autres outils non vérifiés ici
+    # (WolframLanguageContext, TestReport...) : à ajouter au besoin si l'un
+    # d'eux s'avère utilisé.
+    "WolframLanguageEvaluator": {"label": "Calcul et données du monde réel (Wolfram)", "icone": "Calculator", "onglet": "generer"},
 
     # --- Recherche ---
     "tavily_search": {"label": "Recherche web", "icone": "Search", "onglet": "rechercher"},
