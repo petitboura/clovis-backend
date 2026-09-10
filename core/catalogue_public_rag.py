@@ -35,7 +35,6 @@ from supabase import create_client, ClientOptions
 from client_http_supabase import nouveau_client_http_supabase
 
 from embeddings import vectoriser, decouper_texte
-from core.dossiers_catalogue_public import lister_fichiers_ids_dossier as _lister_fichiers_ids_dossier
 
 TAILLE_MAX_CHUNKS_PAR_DOCUMENT = 400  # même garde-fou que bibliotheque_rag.py
 
@@ -178,47 +177,39 @@ def lister_catalogue_public(
 
     `dossier_id`/`pays`/`niveau`/`categorie`/`classe`/`specialite`
     (09/09/2026, demande Bourama : "filtrer par tout dans sa
-    recherche") : tous optionnels, aucun filtre appliqué si absent --
-    même principe que api/bibliotheque_publique.py::lister_bibliotheque_
-    publique (filtres identiques côté frontend), dupliqué ici plutôt
-    qu'appelé en HTTP (même convention que le reste de ce fichier).
+    recherche") : tous optionnels, aucun filtre appliqué si absent.
+
+    CORRECTIF 10/09/2026 (bugs remontés par Bourama en testant) :
+    l'égalité stricte construite via le query builder ici même a été
+    remplacée par le RPC lister_catalogue_public_filtre (voir migration
+    2026_09_10_filtres_catalogue_public_permissifs.sql), pour la même
+    raison que chercher_catalogue_public/chercher_catalogue_public_
+    mots_cles : 1) un document dont le champ filtré n'a jamais été
+    renseigné reste inclus au lieu d'être exclu à tort ("il faut qu'on
+    ne perde rien", demande Bourama) 2) comparaison insensible à la
+    casse/aux espaces (un document avec classe="Terminale" en base
+    remonte maintenant même si le filtre est passé en "terminale").
     """
-    ids_dossier = None
-    if (dossier_id or "").strip():
-        ids_dossier = _lister_fichiers_ids_dossier(dossier_id.strip())
-        if not ids_dossier:
-            return {"documents": [], "total": 0}
-
-    def _base(champs: str, count: str | None = None):
-        requete = supabase.table("bibliotheque_publique").select(champs, count=count).eq("statut", "publie")
-        if (niveau or "").strip():
-            requete = requete.eq("niveau", niveau.strip())
-        if (categorie or "").strip():
-            requete = requete.eq("categorie", categorie.strip())
-        if (classe or "").strip():
-            requete = requete.eq("classe", classe.strip())
-        if (specialite or "").strip():
-            requete = requete.eq("specialite", specialite.strip())
-        if (pays or "").strip():
-            requete = requete.eq("pays", pays.strip())
-        if ids_dossier is not None:
-            requete = requete.in_("id", ids_dossier)
-        return requete
-
-    try:
-        comptage = _base("id", count="exact").execute()
-        total = comptage.count if comptage.count is not None else len(comptage.data or [])
-    except Exception as e:
-        logging.error(f"ERREUR SUPABASE (comptage catalogue public) : {e}")
-        total = None
-
     res = (
-        _base("id, nom, description, url_publique")
-        .order("created_at", desc=True)
-        .range(decalage, decalage + limite - 1)
+        supabase.rpc(
+            "lister_catalogue_public_filtre",
+            {
+                "p_limite": limite,
+                "p_decalage": decalage,
+                "p_dossier_id": (dossier_id or "").strip() or None,
+                "p_pays": (pays or "").strip() or None,
+                "p_niveau": (niveau or "").strip() or None,
+                "p_categorie": (categorie or "").strip() or None,
+                "p_classe": (classe or "").strip() or None,
+                "p_specialite": (specialite or "").strip() or None,
+            },
+        )
         .execute()
     )
-    return {"documents": res.data or [], "total": total}
+    lignes = res.data or []
+    total = lignes[0]["total"] if lignes else 0
+    documents = [{"id": l["id"], "nom": l["nom"], "description": l["description"], "url_publique": l["url_publique"]} for l in lignes]
+    return {"documents": documents, "total": total}
 
 
 def chercher_catalogue_public(

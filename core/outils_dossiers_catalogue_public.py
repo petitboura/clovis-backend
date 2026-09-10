@@ -32,6 +32,7 @@ from core.dossiers_catalogue_public import (
     peut_retirer_contenu as _peut_retirer_contenu,
 )
 from core.dossiers_publics_attaches import propager_fichier_public_range_dossier as _propager_fichier_public_range_dossier
+from core.listes_bibliotheque_publique import lister_valeurs as _lister_valeurs
 
 STATUTS_VALIDES = ("contribution_libre", "privee")
 
@@ -62,6 +63,18 @@ def gerer_dossier_catalogue_public(
     trouver_catalogue_public/lister_catalogue_public).
 
     `action` doit être l'une de :
+    - "lister_valeurs_filtres" : renvoie, pour chacun des 5 filtres
+      (pays/niveau/catégorie/classe/spécialité), la liste des valeurs
+      RÉELLEMENT déjà utilisées dans le catalogue public aujourd'hui
+      (10/09/2026, correctif suite bug remonté par Bourama : le LLM
+      inventait des valeurs de filtre au hasard -- ex. confondait
+      "niveau" et "classe" -- faute de savoir lesquelles existent
+      vraiment). RÈGLE ABSOLUE : appelle TOUJOURS cette action avant
+      d'utiliser un filtre pays/niveau/catégorie/classe/spécialité dans
+      trouver_catalogue_public/lister_catalogue_public (voir
+      gerer_document_bibliotheque) si l'étudiant n'a pas donné la
+      valeur exacte lui-même -- ne devine JAMAIS un nom de filtre.
+      Aucun paramètre.
     - "lister" : liste TOUS les dossiers publics à plat, avec pour
       chacun son chemin (dossier parent > dossier), son STATUT
       ("contribution_libre" = tout le monde peut y ajouter un document,
@@ -109,6 +122,20 @@ def gerer_dossier_catalogue_public(
     user_id = ctx.request_context.request.query_params.get("user_id")
     if not user_id:
         return "Erreur : utilisateur non authentifié."
+
+    if action == "lister_valeurs_filtres":
+        lignes = []
+        for champ, libelle in (
+            ("pays", "pays"), ("niveau", "niveau"), ("categorie", "catégorie"),
+            ("classe", "classe"), ("specialite", "spécialité"),
+        ):
+            try:
+                valeurs = _lister_valeurs(champ)
+            except Exception as e:
+                logging.error(f"ERREUR gerer_dossier_catalogue_public (lister_valeurs_filtres, champ {champ}) : {e}")
+                valeurs = []
+            lignes.append(f"- {libelle} : " + (", ".join(valeurs) if valeurs else "aucune valeur enregistrée pour l'instant"))
+        return "Valeurs déjà utilisées dans le catalogue public :\n" + "\n".join(lignes)
 
     if action == "lister":
         try:
@@ -261,6 +288,6 @@ def gerer_dossier_catalogue_public(
         return "Document retiré de ce dossier public (il reste dans le catalogue public)."
 
     return (
-        f"Erreur : action '{action}' inconnue. Actions valides : lister, consulter, creer, "
-        "renommer, supprimer, ranger_fichier, retirer_fichier."
+        f"Erreur : action '{action}' inconnue. Actions valides : lister_valeurs_filtres, lister, "
+        "consulter, creer, renommer, supprimer, ranger_fichier, retirer_fichier."
     )

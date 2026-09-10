@@ -182,9 +182,13 @@ def gerer_document_bibliotheque(
       jamais par défaut, jamais devinés : `dossier_id_catalogue_public`
       (obtenu via gerer_dossier_catalogue_public, action "lister" ou
       "consulter" -- jamais un nom de dossier inventé), `pays`,
-      `niveau`, `categorie`, `classe`, `specialite` (valeurs obtenues
-      via gerer_dossier_catalogue_public si besoin de connaître les
-      valeurs existantes).
+      `niveau`, `categorie`, `classe`, `specialite` -- RÈGLE ABSOLUE
+      (10/09/2026, correctif suite bug remonté par Bourama) : si
+      l'étudiant n'a pas donné la valeur exacte lui-même, appelle
+      D'ABORD gerer_dossier_catalogue_public, action
+      "lister_valeurs_filtres", pour voir les valeurs qui existent
+      vraiment -- ne devine JAMAIS un nom de filtre (ex. ne confonds
+      pas "niveau" et "classe").
     - "lire_catalogue_public" : renvoie le texte intégral d'un document
       du catalogue public, identifié par le `fichier_id` obtenu via
       "trouver_catalogue_public". N'appelle cette action QUE si
