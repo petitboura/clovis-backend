@@ -129,7 +129,17 @@ def _headers_google_drive(get_secret, user_id, agent_id):
 
 
 SERVEURS_MCP = [
-    {"nom": "wolfram", "url_builder": _url_wolfram},
+    # Wolfram DESACTIVE (10/09/2026, demande Bourama) : le serveur
+    # agenttools.wolfram.com renvoyait des 503 Service Unavailable de
+    # facon repetee, et le code retentait la connexion (1s de backoff)
+    # avant de continuer -- environ 12 secondes perdues a CHAQUE message
+    # (tous agents, tous modeles confondus, puisque la liste d'outils MCP
+    # est reconstruite avant tout appel LLM), pris a tort pour de la
+    # lenteur du modele (DeepSeek) alors que lui repondait en moins d'1s.
+    # _url_wolfram (juste au-dessus) reste en place pour reactivation
+    # facile si le service redevient fiable -- juste redecommenter
+    # l'entree ci-dessous.
+    # {"nom": "wolfram", "url_builder": _url_wolfram},
     {
         "nom": "tavily",
         "url_builder": _url_tavily,
