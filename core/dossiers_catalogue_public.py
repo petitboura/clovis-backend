@@ -261,8 +261,17 @@ def confirmer_demande(demande_id: str, acteur_id: str) -> dict:
 
     action = demande["action"]
     if action == "deplacer_fichier":
+        from core.dossiers_publics_attaches import propager_fichier_public_range_dossier
+
         retirer_fichier(demande["fichier_id"], demande["dossier_id"])
         ranger_fichier(demande["fichier_id"], demande["dossier_destination_id"])
+        # Même règle que api/dossiers_catalogue_public.py::ranger : toute
+        # arrivée d'un fichier dans un dossier du catalogue public doit
+        # se propager chez qui a attaché ce dossier (ou un de ses
+        # ancêtres) à sa bibliothèque perso -- oublié dans la 1ère version
+        # de cette fonction, corrigé le 09/09/2026 en vérifiant tout avant
+        # de dire "c'est fait" à Bourama.
+        propager_fichier_public_range_dossier(demande["fichier_id"], demande["dossier_destination_id"])
     elif action == "supprimer_fichier":
         retirer_fichier(demande["fichier_id"], demande["dossier_id"])
     elif action == "deplacer_dossier":

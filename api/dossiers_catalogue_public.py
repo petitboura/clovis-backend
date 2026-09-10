@@ -237,6 +237,7 @@ def deplacer_fichier_endpoint(
     if peut_retirer_contenu(dossier_id, utilisateur.id):
         retirer_fichier(fichier_id, dossier_id)
         ranger_fichier(fichier_id, payload.dossier_destination_id)
+        propager_fichier_public_range_dossier(fichier_id, payload.dossier_destination_id)
         response.status_code = 200
         return {"fichier_id": fichier_id, "dossier_id": payload.dossier_destination_id}
     if dossier["statut"] == "contribution_libre":
