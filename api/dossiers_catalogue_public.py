@@ -4,19 +4,25 @@ Bourama). Toute la logique vit dans core/dossiers_catalogue_public.py,
 voir sa docstring pour les règles contribution_libre/privee.
 """
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel
 
 from api.auth import utilisateur_courant
 from core.erreurs import erreur_api
 from core.dossiers_catalogue_public import (
     _dossier,
+    confirmer_demande,
+    creer_demande,
     creer_dossier,
+    deplacerait_en_boucle,
+    deplacer_dossier,
+    lister_demandes_en_attente,
     lister_dossiers,
     lister_fichiers_ids_dossier,
     peut_ajouter_contenu,
     peut_retirer_contenu,
     ranger_fichier,
+    refuser_demande,
     renommer_dossier,
     retirer_fichier,
     supprimer_dossier,
@@ -53,6 +59,14 @@ class RangerFichierPayload(BaseModel):
     fichier_id: str
 
 
+class DeplacerFichierPayload(BaseModel):
+    dossier_destination_id: str
+
+
+class DeplacerDossierPayload(BaseModel):
+    dossier_destination_id: str | None = None
+
+
 @router.get("")
 def lister(request: Request, utilisateur=Depends(utilisateur_courant)):
     # 08/09/2026, demande Bourama : les dossiers du pays détecté de
@@ -81,6 +95,26 @@ def creer(payload: CreerDossierPayload, utilisateur=Depends(utilisateur_courant)
     )
 
 
+# --- Demandes en attente de confirmation (09/09/2026, demande Bourama) ----
+# Placées AVANT les routes "/{dossier_id}" ci-dessous pour ne jamais
+# risquer qu'un futur "/{dossier_id}" en GET n'intercepte "/demandes".
+
+
+@router.get("/demandes")
+def lister_mes_demandes(utilisateur=Depends(utilisateur_courant)):
+    return lister_demandes_en_attente(utilisateur.id)
+
+
+@router.post("/demandes/{demande_id}/confirmer")
+def confirmer(demande_id: str, utilisateur=Depends(utilisateur_courant)):
+    return confirmer_demande(demande_id, utilisateur.id)
+
+
+@router.post("/demandes/{demande_id}/refuser")
+def refuser(demande_id: str, utilisateur=Depends(utilisateur_courant)):
+    return refuser_demande(demande_id, utilisateur.id)
+
+
 @router.patch("/{dossier_id}")
 def renommer(dossier_id: str, payload: RenommerDossierPayload, utilisateur=Depends(utilisateur_courant)):
     dossier = _dossier(dossier_id)
@@ -93,14 +127,57 @@ def renommer(dossier_id: str, payload: RenommerDossierPayload, utilisateur=Depen
     return {"id": dossier_id, "nom": nouveau_nom}
 
 
-@router.delete("/{dossier_id}", status_code=204)
-def supprimer(dossier_id: str, utilisateur=Depends(utilisateur_courant)):
+@router.delete("/{dossier_id}")
+def supprimer(dossier_id: str, response: Response, utilisateur=Depends(utilisateur_courant)):
     dossier = _dossier(dossier_id)
     if not dossier:
         raise erreur_api(404, "DOSSIER_INTROUVABLE")
-    if dossier["cree_par"] != utilisateur.id:
-        raise erreur_api(403, "CE_DOSSIER_NE_T_APPARTIENT_PAS")
-    supprimer_dossier(dossier_id)
+    if dossier["cree_par"] == utilisateur.id:
+        supprimer_dossier(dossier_id)
+        response.status_code = 204
+        return None
+    # 09/09/2026, demande Bourama : un SOUS-dossier (dossier_parent_id
+    # non nul) à contribution libre peut être proposé à la suppression
+    # par n'importe qui -- bloqué tant que son propre créateur n'a pas
+    # confirmé. Le dossier racine lui-même reste strictement réservé au
+    # créateur, comportement inchangé (403 ci-dessous).
+    if dossier["dossier_parent_id"] and dossier["statut"] == "contribution_libre":
+        demande = creer_demande(
+            action="supprimer_dossier",
+            createur_id=dossier["cree_par"],
+            demandeur_id=utilisateur.id,
+            dossier_id=dossier_id,
+        )
+        response.status_code = 202
+        return demande
+    raise erreur_api(403, "CE_DOSSIER_NE_T_APPARTIENT_PAS")
+
+
+@router.post("/{dossier_id}/deplacer")
+def deplacer(dossier_id: str, payload: DeplacerDossierPayload, response: Response, utilisateur=Depends(utilisateur_courant)):
+    dossier = _dossier(dossier_id)
+    if not dossier:
+        raise erreur_api(404, "DOSSIER_INTROUVABLE")
+    if payload.dossier_destination_id and not _dossier(payload.dossier_destination_id):
+        raise erreur_api(404, "DOSSIER_DESTINATION_INTROUVABLE")
+    if deplacerait_en_boucle(dossier_id, payload.dossier_destination_id):
+        raise erreur_api(400, "DEPLACEMENT_CREERAIT_UNE_BOUCLE")
+
+    if dossier["cree_par"] == utilisateur.id:
+        deplacer_dossier(dossier_id, payload.dossier_destination_id)
+        response.status_code = 200
+        return {"id": dossier_id, "dossier_parent_id": payload.dossier_destination_id}
+    if dossier["dossier_parent_id"] and dossier["statut"] == "contribution_libre":
+        demande = creer_demande(
+            action="deplacer_dossier",
+            createur_id=dossier["cree_par"],
+            demandeur_id=utilisateur.id,
+            dossier_id=dossier_id,
+            dossier_destination_id=payload.dossier_destination_id,
+        )
+        response.status_code = 202
+        return demande
+    raise erreur_api(403, "CE_DOSSIER_NE_T_APPARTIENT_PAS")
 
 
 @router.post("/{dossier_id}/fichiers", status_code=201)
@@ -114,16 +191,66 @@ def ranger(dossier_id: str, payload: RangerFichierPayload, utilisateur=Depends(u
     return {"dossier_id": dossier_id, "fichier_id": payload.fichier_id}
 
 
-@router.delete("/{dossier_id}/fichiers/{fichier_id}", status_code=204)
-def retirer(dossier_id: str, fichier_id: str, utilisateur=Depends(utilisateur_courant)):
-    if not _dossier(dossier_id):
+@router.delete("/{dossier_id}/fichiers/{fichier_id}")
+def retirer(dossier_id: str, fichier_id: str, response: Response, utilisateur=Depends(utilisateur_courant)):
+    dossier = _dossier(dossier_id)
+    if not dossier:
         raise erreur_api(404, "DOSSIER_INTROUVABLE")
-    # 28/08, correctif Bourama : retirer reste réservé au créateur du
-    # dossier, même en contribution_libre (contrairement à ranger,
-    # ci-dessus, qui lui est ouvert à tous en contribution_libre).
-    if not peut_retirer_contenu(dossier_id, utilisateur.id):
-        raise erreur_api(403, "SEUL_LE_CREATEUR_DU_DOSSIER_PEUT_EN_RETIRER_UN_FICHIER")
-    retirer_fichier(fichier_id, dossier_id)
+    # 28/08, correctif Bourama : retirer reste immédiat uniquement pour
+    # le créateur du dossier -- ÉVOLUTION 09/09/2026 (demande Bourama,
+    # "confirmation contributeurs") : en contribution_libre, un autre
+    # contributeur peut désormais le PROPOSER, bloqué tant que ce
+    # créateur n'a pas confirmé (voir core/dossiers_catalogue_public.py).
+    if peut_retirer_contenu(dossier_id, utilisateur.id):
+        retirer_fichier(fichier_id, dossier_id)
+        response.status_code = 204
+        return None
+    if dossier["statut"] == "contribution_libre":
+        demande = creer_demande(
+            action="supprimer_fichier",
+            createur_id=dossier["cree_par"],
+            demandeur_id=utilisateur.id,
+            dossier_id=dossier_id,
+            fichier_id=fichier_id,
+        )
+        response.status_code = 202
+        return demande
+    raise erreur_api(403, "SEUL_LE_CREATEUR_DU_DOSSIER_PEUT_EN_RETIRER_UN_FICHIER")
+
+
+@router.post("/{dossier_id}/fichiers/{fichier_id}/deplacer")
+def deplacer_fichier_endpoint(
+    dossier_id: str, fichier_id: str, payload: DeplacerFichierPayload, response: Response,
+    utilisateur=Depends(utilisateur_courant),
+):
+    dossier = _dossier(dossier_id)
+    if not dossier:
+        raise erreur_api(404, "DOSSIER_INTROUVABLE")
+    if not _dossier(payload.dossier_destination_id):
+        raise erreur_api(404, "DOSSIER_DESTINATION_INTROUVABLE")
+    # Ranger dans la destination reste immédiat pour tout le monde (même
+    # règle que POST .../fichiers ci-dessus) -- seul le retrait de la
+    # source peut nécessiter une confirmation, juste en-dessous.
+    if not peut_ajouter_contenu(payload.dossier_destination_id, utilisateur.id):
+        raise erreur_api(403, "CE_DOSSIER_EST_PRIVE_A_SON_CREATEUR")
+
+    if peut_retirer_contenu(dossier_id, utilisateur.id):
+        retirer_fichier(fichier_id, dossier_id)
+        ranger_fichier(fichier_id, payload.dossier_destination_id)
+        response.status_code = 200
+        return {"fichier_id": fichier_id, "dossier_id": payload.dossier_destination_id}
+    if dossier["statut"] == "contribution_libre":
+        demande = creer_demande(
+            action="deplacer_fichier",
+            createur_id=dossier["cree_par"],
+            demandeur_id=utilisateur.id,
+            dossier_id=dossier_id,
+            fichier_id=fichier_id,
+            dossier_destination_id=payload.dossier_destination_id,
+        )
+        response.status_code = 202
+        return demande
+    raise erreur_api(403, "SEUL_LE_CREATEUR_DU_DOSSIER_PEUT_EN_RETIRER_UN_FICHIER")
 
 
 # --- Attachement à la bibliothèque perso (02/09/2026, demande Bourama) -

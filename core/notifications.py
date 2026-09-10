@@ -25,6 +25,9 @@ depuis :
   cascade_supervision_equipe_clovis / cascade_supervision_resolue
   (Partie 10, 07/09/2026, chantier "confiance pedagogique") : voir
   core/cascade_supervision.py
+- demande_confirmation_dossier_public / demande_dossier_public_traitee
+  (09/09/2026, "confirmation contributeurs") : voir
+  core/dossiers_catalogue_public.py
 
 creer_notification() fait deux choses a chaque appel : (1) insert en
 base (persistant, visible au prochain chargement du panneau) ; (2) tente
@@ -53,6 +56,8 @@ TYPES_VALIDES = {
     # porte l'URL de téléchargement directe de l'APK (pas une route interne
     # de l'app) -- BoutonNotifications.tsx sait le traiter différemment.
     "nouvelle_version_disponible",
+    # Confirmation contributeurs (09/09/2026) : voir core/dossiers_catalogue_public.py
+    "demande_confirmation_dossier_public", "demande_dossier_public_traitee",
 }
 
 

@@ -244,6 +244,14 @@ MESSAGES_FR: dict[str, str] = {
     # 02/09, centre de notifications (bouton cloche) -- voir api/notifications.py.
     "NOTIFICATIONS_LECTURE_ECHEC": "Impossible de récupérer tes notifications pour le moment.",
     "NOTIFICATIONS_MAJ_ECHEC": "Impossible de mettre à jour tes notifications pour le moment.",
+    # 09/09, confirmation contributeurs (dossiers catalogue public à
+    # contribution libre) -- voir core/dossiers_catalogue_public.py.
+    "DEMANDE_INTROUVABLE": "Cette demande est introuvable.",
+    "DEMANDE_DEJA_TRAITEE": "Cette demande a déjà été traitée.",
+    "SEUL_LE_CREATEUR_CONCERNE_PEUT_CONFIRMER": "Seul le créateur concerné peut confirmer cette demande.",
+    "SEUL_LE_CREATEUR_CONCERNE_PEUT_REFUSER": "Seul le créateur concerné peut refuser cette demande.",
+    "DEPLACEMENT_CREERAIT_UNE_BOUCLE": "Ce déplacement est impossible (un dossier ne peut pas finir dans lui-même ou dans l'un de ses propres sous-dossiers).",
+    "DOSSIER_DESTINATION_INTROUVABLE": "Dossier de destination introuvable.",
 }
 
 
