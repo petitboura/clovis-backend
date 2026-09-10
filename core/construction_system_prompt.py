@@ -124,15 +124,22 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
             "</outils_actifs>"
         )
     else:
+        # (10/09/2026, demande Bourama) : demander_outils est desormais
+        # toujours propose (voir _preparer_demander_outils, main.py), donc
+        # ce bloc ne doit plus dire au modele qu'il n'a "aucun outil" --
+        # il a toujours au moins demander_outils pour en chercher un.
         system_final += (
-            "\n\n<aucun_outil_actif>\n"
-            "Pour ce message précis, aucun outil n'est actif -- même si l'un d'eux l'était plus tôt dans "
-            "la conversation. Si on te demande ce que tu sais faire, réponds que tu n'as aucun outil actif "
-            "pour ce message précis plutôt que de lister des capacités génériques. Le texte de ta réponse "
-            "ne doit contenir aucun outil inventé ni pseudo-syntaxe d'appel (TOOL_CODE, nom_outil(...), "
-            "nom_outil{...}, call:nom_outil{...}). Les blocs d'affichage mermaid/chart/carte/widget/"
-            "geometrie restent disponibles : ce sont des formats de sortie, pas des outils.\n"
-            "</aucun_outil_actif>"
+            "\n\n<outils>\n"
+            "Aucun outil n'est préchargé pour ce message. Au moindre doute qu'un outil "
+            "puisse aider, appelle demander_outils avant de répondre -- ne dis jamais "
+            "\"je n'ai pas d'outil\" ou \"je ne peux pas\" sans avoir vérifié. Si on te "
+            "demande ce que tu sais faire, dis que ça dépend de la question plutôt "
+            "que de prétendre n'avoir aucune capacité. Le texte de ta réponse ne doit "
+            "contenir aucun outil inventé ni pseudo-syntaxe d'appel (TOOL_CODE, "
+            "nom_outil(...), nom_outil{...}, call:nom_outil{...}). Les blocs "
+            "d'affichage mermaid/chart/carte/widget/geometrie restent disponibles : "
+            "ce sont des formats de sortie, pas des outils.\n"
+            "</outils>"
         )
 
     # Réflexe de transition (2026-09-05, demande Bourama, timeline
