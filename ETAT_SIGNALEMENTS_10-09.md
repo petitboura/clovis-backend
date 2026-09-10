@@ -59,9 +59,29 @@ silencieusement remis mon dossier de travail local dans l'état de ce nouveau
 `main`, effaçant une partie de mes modifications sur disque (mais pas les
 nouveaux fichiers). Je les ai reconstruites avant de committer — le diff
 final a été revérifié pour confirmer qu'il correspond exactement à ce qui
-est décrit dans ce document. Supabase avait aussi été remis dans l'ancien
-état (table `corrections_pedagogiques` de retour, `cascades_supervision`
-recréée) entre-temps — remigré manuellement avant de pousser.
+est décrit dans ce document.
+
+**Erreur corrigée après coup, celle-là bien plus grave** : j'avais aussi
+remigré Supabase pour qu'il corresponde à MA branche (`signalements`, sans
+`cascades_supervision`) alors que Supabase est une base unique et partagée
+-- elle doit suivre ce qui tourne réellement en production (`main`), pas une
+branche qui n'est déployée nulle part. Pendant que c'était dans cet état,
+`main` (et son propre chantier en cours) ne pouvait plus fonctionner
+correctement sur tout ce qui touche aux signalements. Remis dans l'état
+attendu par `main` actuel (schéma vérifié colonne par colonne contre les
+migrations réelles de `main`, pas contre mon souvenir de l'ancien schéma).
+Une vraie ligne de signalement du 07/09 (antérieure à cette session) a été
+préservée au passage. Effet de bord découvert en cours de réparation : mon
+insertion initiale dans `registre_outils_plateforme` avait déclenché un
+envoi automatique de notification "nouvel outil disponible" à ~21
+utilisateurs réels pour 3 outils qui n'existent que sur ma branche --
+notifications et entrées de registre supprimées.
+
+**Leçon pour la suite** : ne plus jamais modifier Supabase en direct pour
+une branche non déployée. Le fichier de migration
+`migrations/2026_09_10_refonte_signalements.sql` sur cette branche est prêt
+et correct, mais ne doit être appliqué à Supabase qu'au moment où cette
+branche est réellement fusionnée/déployée -- pas avant.
 
 ## Pas encore fait
 
