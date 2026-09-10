@@ -832,6 +832,28 @@ def lister_comportements_publics(mot_cle: str | None = None) -> list[dict]:
     return res.data or []
 
 
+def obtenir_comportement_public(comportement_public_id: str) -> dict | None:
+    """10/09/2026, chantier "Clovis ouvert" (demande Bourama : chaque
+    skill publique retrouvable par son nom, avec son propre lien) --
+    detail d'une seule ligne, pour /api/comportements-publics/{id} et
+    la page publique /skills/[id]. Meme filtre statut="publie" que la
+    liste ci-dessus : un skill retire par son auteur (voir
+    retirer_skill_public) ne doit jamais rester accessible par son id."""
+    try:
+        res = (
+            supabase.table("comportements_publics")
+            .select("*")
+            .eq("id", comportement_public_id)
+            .eq("statut", "publie")
+            .maybe_single()
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (detail comportement public id={comportement_public_id}) : {e}")
+        return None
+    return res.data if res else None
+
+
 def retirer_skill_public(comportement_public_id: str, auteur_id: str) -> bool:
     """07/09/2026, demande Bourama : l'auteur d'un skill public doit
     pouvoir le retirer (n'existait pas). Retrait doux (statut='retire',

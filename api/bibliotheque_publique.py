@@ -228,6 +228,29 @@ def lister_bibliotheque_publique(
     return resultats
 
 
+@router.get("/{entree_id}", response_model=EntreeBibliothequePublique)
+def obtenir_entree_bibliotheque_publique(entree_id: str):
+    """Détail d'une entrée publiée, pour la page publique /bibliotheque/[id]
+    (chantier "Clovis ouvert" du 10/09/2026, demande Bourama : chaque
+    PDF retrouvable par son nom et téléchargeable via un lien propre).
+
+    Même filtre statut="publie" que la liste ci-dessus : une entrée
+    retirée par un admin suite à un signalement (voir api/signalements.py)
+    ou pas encore publiée ne doit jamais être accessible en devinant
+    son id dans l'URL, même si le catalogue "" ne la montre plus."""
+    res = (
+        supabase.table("bibliotheque_publique")
+        .select(_CAMPOS_ENTREE)
+        .eq("id", entree_id)
+        .eq("statut", "publie")
+        .maybe_single()
+        .execute()
+    )
+    if not res or not res.data:
+        raise erreur_api(404, "ENTREE_INTROUVABLE")
+    return res.data
+
+
 @router.post("", response_model=EntreeBibliothequePublique, status_code=201)
 async def ajouter_a_bibliotheque_publique(
     fichier: UploadFile = File(...),

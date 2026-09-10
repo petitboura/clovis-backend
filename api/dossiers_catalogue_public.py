@@ -7,7 +7,7 @@ voir sa docstring pour les règles contribution_libre/privee.
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel
 
-from api.auth import utilisateur_courant
+from api.auth import utilisateur_courant, utilisateur_optionnel
 from core.erreurs import erreur_api
 from core.dossiers_catalogue_public import (
     _dossier,
@@ -68,7 +68,13 @@ class DeplacerDossierPayload(BaseModel):
 
 
 @router.get("")
-def lister(request: Request, utilisateur=Depends(utilisateur_courant)):
+def lister(request: Request, utilisateur=Depends(utilisateur_optionnel)):
+    # 10/09/2026, chantier "Clovis ouvert" (Lot F, sitemap) : utilisateur_courant
+    # -> utilisateur_optionnel. Signale au Lot E, corrige ici : cette liste ne
+    # filtre déjà rien par utilisateur (lister_dossiers() le documente,
+    # "visible par tout le monde"), l'auth obligatoire n'apportait donc
+    # aucune protection réelle -- elle empêchait juste le générateur de
+    # sitemap (sans session) de trouver les dossiers à indexer.
     # 08/09/2026, demande Bourama : les dossiers du pays détecté de
     # l'utilisateur remontent en tête de liste (voir core/geolocalisation_pays.py).
     dossiers = lister_dossiers(pays_prioritaire=pays_utilisateur(request))
@@ -277,3 +283,24 @@ def attacher(dossier_id: str, utilisateur=Depends(utilisateur_courant)):
 @router.delete("/{dossier_id}/attacher", status_code=204)
 def detacher(dossier_id: str, utilisateur=Depends(utilisateur_courant)):
     _detacher_dossier_public(dossier_id, utilisateur.id)
+
+
+# 10/09/2026, chantier "Clovis ouvert" (Lot E, demande Bourama : chaque
+# dossier du catalogue public retrouvable par son nom, avec son propre
+# lien). Déclarée en tout dernier, après TOUTE route statique à un seul
+# segment ("/demandes", "/attaches") -- sinon "/{dossier_id}" les
+# intercepterait (même piège que documenté plus haut pour "/demandes").
+#
+# Pas de filtre sur `statut` : lister_dossiers() ci-dessus le documente
+# déjà, "contribution_libre"/"privee" ne concerne QUE le droit d'ajouter
+# du contenu (voir peut_ajouter_contenu), tous les dossiers sont
+# "visible[s] par tout le monde" -- ce endpoint ne fait qu'exposer
+# publiquement (sans exiger de compte, contrairement à lister() ci-dessus)
+# ce qui l'était déjà pour un utilisateur connecté.
+@router.get("/{dossier_id}")
+def obtenir_dossier_public(dossier_id: str, utilisateur=Depends(utilisateur_optionnel)):
+    dossier = _dossier(dossier_id)
+    if not dossier:
+        raise erreur_api(404, "DOSSIER_INTROUVABLE")
+    dossier["fichier_ids"] = lister_fichiers_ids_dossier(dossier_id)
+    return dossier

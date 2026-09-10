@@ -16,6 +16,7 @@ from api.auth import utilisateur_courant, utilisateur_optionnel
 from core.comportements_etudiants import (
     activer_comportement_public,
     lister_comportements_publics,
+    obtenir_comportement_public,
     retirer_skill_public,
     uploader_comportement_public,
 )
@@ -55,6 +56,19 @@ def rechercher_comportements_publics(q: str | None = None, utilisateur=Depends(u
     for ligne in lignes:
         ligne["est_a_moi"] = mon_id is not None and ligne.get("auteur_id") == mon_id
     return lignes
+
+
+@router.get("/{comportement_public_id}", response_model=ComportementPublic)
+def obtenir_comportement_public_detail(comportement_public_id: str, utilisateur=Depends(utilisateur_optionnel)):
+    """10/09/2026, chantier "Clovis ouvert" : detail d'un skill publie,
+    pour la page publique /skills/[id]. Public, aucune auth requise --
+    meme philosophie que la recherche ci-dessus. est_a_moi calcule de la
+    meme facon (bouton "Retirer" reserve au vrai proprietaire)."""
+    ligne = obtenir_comportement_public(comportement_public_id)
+    if not ligne:
+        raise erreur_api(404, "COMPORTEMENT_INTROUVABLE")
+    ligne["est_a_moi"] = utilisateur is not None and ligne.get("auteur_id") == utilisateur.id
+    return ligne
 
 
 @router.post("/{comportement_public_id}/retirer", status_code=204)
