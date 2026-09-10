@@ -27,9 +27,10 @@ import sys
 import time
 import argparse
 
-from supabase import create_client
+from supabase import create_client, ClientOptions
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'core'))
+from client_http_supabase import nouveau_client_http_supabase  # noqa: E402
 from embeddings import vectoriser, DIMENSION_EMBEDDING  # noqa: E402
 
 TABLES = ["documents", "prompts_chunks"]
@@ -48,7 +49,7 @@ def get_client():
     if not url or not key:
         print("❌ SUPABASE_URL ou SUPABASE_SECRET absent de l'environnement.")
         sys.exit(1)
-    return create_client(url, key)
+    return create_client(url, key, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 
 def vectoriser_avec_retry(texte):

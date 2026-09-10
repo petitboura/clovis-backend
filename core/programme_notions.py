@@ -25,7 +25,8 @@ import logging
 import os
 from datetime import datetime
 
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 
 from core.embeddings import activer_pause_quota_gemini, est_en_pause_quota_gemini, est_erreur_quota_gemini, vectoriser
 
@@ -38,7 +39,7 @@ def get_secret(key):
 
 SUPABASE_URL = get_secret("SUPABASE_URL")
 SUPABASE_SECRET = get_secret("SUPABASE_SECRET")
-supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
+supabase = create_client(SUPABASE_URL, SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 STATUTS_VALIDES = {"a_venir", "en_cours", "acquis"}
 

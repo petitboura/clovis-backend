@@ -46,7 +46,8 @@ import secrets
 import logging
 from urllib.parse import urlencode
 
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 from supabase_auth.helpers import generate_pkce_verifier, generate_pkce_challenge
 
 
@@ -67,7 +68,7 @@ if not URL_RETOUR:
         "Ajoute par exemple URL_RETOUR_APP = \"https://tonapp.streamlit.app\""
     )
 
-supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
+supabase = create_client(SUPABASE_URL, SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 
 def inscription(email, mot_de_passe, redirection=None):

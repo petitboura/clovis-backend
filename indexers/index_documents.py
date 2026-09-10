@@ -15,9 +15,10 @@ commande historique (tutorat-maths) :
 import os
 import sys
 import PyPDF2
-from supabase import create_client
+from supabase import create_client, ClientOptions
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'core'))
+from client_http_supabase import nouveau_client_http_supabase  # noqa: E402
 from embeddings import vectoriser, decouper_texte  # noqa: E402
 from storage import BUCKET, supabase as storage_client  # noqa: E402
 
@@ -31,7 +32,7 @@ def get_secret(key):
 SUPABASE_URL = get_secret("SUPABASE_URL")
 SUPABASE_SECRET = get_secret("SUPABASE_SECRET")
 
-supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
+supabase = create_client(SUPABASE_URL, SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 
 def extraire_texte_pdf(chemin_pdf):

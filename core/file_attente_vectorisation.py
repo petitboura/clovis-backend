@@ -82,7 +82,8 @@ import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 
 sys.path.append(os.path.dirname(__file__))
 from bibliotheque_rag import (  # noqa: E402
@@ -121,7 +122,7 @@ def _get_secret(cle):
     return os.environ.get(cle)
 
 
-supabase = create_client(_get_secret("SUPABASE_URL"), _get_secret("SUPABASE_SECRET"))
+supabase = create_client(_get_secret("SUPABASE_URL"), _get_secret("SUPABASE_SECRET"), options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 
 def necessite_vectorisation_fichier_privee(type_mime: str | None) -> bool:

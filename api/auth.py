@@ -8,7 +8,8 @@ Next.js via le SDK JS Supabase.
 import os
 import logging
 from fastapi import Header, HTTPException
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from core.client_http_supabase import nouveau_client_http_supabase
 from core.erreurs import erreur_api
 
 logging.basicConfig(level=logging.INFO)
@@ -27,7 +28,7 @@ SUPABASE_SECRET = get_secret("SUPABASE_SECRET")
 if not SUPABASE_URL or not SUPABASE_SECRET:
     logging.error("SUPABASE_URL ou SUPABASE_SECRET manquant : l'auth API sera toujours en echec.")
 
-supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
+supabase = create_client(SUPABASE_URL, SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 
 def utilisateur_courant(authorization: str = Header(default=None)):

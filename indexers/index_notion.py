@@ -21,9 +21,10 @@ import os
 import sys
 import logging
 import requests
-from supabase import create_client
+from supabase import create_client, ClientOptions
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'core'))
+from client_http_supabase import nouveau_client_http_supabase  # noqa: E402
 from embeddings import vectoriser, decouper_texte  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
@@ -37,7 +38,7 @@ NOTION_TOKEN = get_secret("NOTION_TOKEN")
 SUPABASE_URL = get_secret("SUPABASE_URL")
 SUPABASE_SECRET = get_secret("SUPABASE_SECRET")
 
-supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
+supabase = create_client(SUPABASE_URL, SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 HEADERS = {
     "Authorization": f"Bearer {NOTION_TOKEN}",

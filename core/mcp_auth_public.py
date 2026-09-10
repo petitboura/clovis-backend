@@ -56,7 +56,8 @@ import os
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.server.mcpserver import Context
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 
 logging.basicConfig(level=logging.INFO)
 
@@ -69,7 +70,7 @@ if not SUPABASE_URL or not SUPABASE_SECRET:
         "jetons OAuth des serveurs MCP publics sera toujours en echec."
     )
 
-_supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
+_supabase = create_client(SUPABASE_URL, SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 # URL publique de production (Railway, service clovis-backend -- voir
 # Railway > prolific-truth > clovis-backend > domaine de service).

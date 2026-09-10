@@ -12,7 +12,8 @@ Cloud) détermine quel agent est actif dans ce process.
 import os
 import time
 import logging
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 import requests
 
 
@@ -41,7 +42,7 @@ _supabase = None
 def _get_supabase():
     global _supabase
     if _supabase is None:
-        _supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
+        _supabase = create_client(SUPABASE_URL, SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
     return _supabase
 
 

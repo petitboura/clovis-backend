@@ -39,7 +39,8 @@ comportements_etudiants).
 import logging
 import os
 
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 
 from core.comportements_etudiants import ajouter_comportement as _ajouter_comportement
 from core.generalisation_correction_pedagogique import (
@@ -55,7 +56,7 @@ def get_secret(key):
 
 SUPABASE_URL = get_secret("SUPABASE_URL")
 SUPABASE_SECRET = get_secret("SUPABASE_SECRET")
-supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
+supabase = create_client(SUPABASE_URL, SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 logging.basicConfig(level=logging.INFO)
 

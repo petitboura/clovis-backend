@@ -49,7 +49,8 @@ import secrets
 import string
 import sys
 
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien  # noqa: E402
@@ -63,7 +64,7 @@ def get_secret(key):
 
 SUPABASE_URL = get_secret("SUPABASE_URL")
 SUPABASE_SECRET = get_secret("SUPABASE_SECRET")
-supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
+supabase = create_client(SUPABASE_URL, SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 logging.basicConfig(level=logging.INFO)
 

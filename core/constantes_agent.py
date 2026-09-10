@@ -5,7 +5,8 @@
 # main.py (et main.py lui-meme) les importent depuis un seul endroit plutot
 # que de dupliquer/redevenir circulaires entre eux.
 import os
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 
 def get_secret(key):
     return os.environ.get(key)
@@ -13,7 +14,7 @@ def get_secret(key):
 
 SUPABASE_URL = get_secret("SUPABASE_URL")
 SUPABASE_SECRET = get_secret("SUPABASE_SECRET")
-supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
+supabase = create_client(SUPABASE_URL, SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 # 07/09/2026, demande Bourama : DeepSeek en position 1 de la cascade
 # (avant GROQ_PRIMARY) -- decision explicite : V4 Flash fixe pour

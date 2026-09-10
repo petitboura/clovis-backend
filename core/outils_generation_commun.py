@@ -17,7 +17,8 @@ import logging
 import requests
 
 from mcp.server.mcpserver import MCPServer as FastMCP, Context
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 
 from core.bibliotheque_fichiers import enregistrer_fichier as _enregistrer_fichier
 
@@ -39,7 +40,7 @@ def _lister_emplacements_document(fichier_id):
 
 _SUPABASE_URL = os.environ.get("SUPABASE_URL")
 _SUPABASE_SECRET = os.environ.get("SUPABASE_SECRET")
-_supabase_memoire = create_client(_SUPABASE_URL, _SUPABASE_SECRET)
+_supabase_memoire = create_client(_SUPABASE_URL, _SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 mcp_generation = FastMCP(name="generation")
 

@@ -13,11 +13,12 @@ import logging
 import os
 from datetime import datetime, timezone
 
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 
 _SUPABASE_URL = os.environ.get("SUPABASE_URL")
 _SUPABASE_SECRET = os.environ.get("SUPABASE_SECRET")
-_supabase = create_client(_SUPABASE_URL, _SUPABASE_SECRET)
+_supabase = create_client(_SUPABASE_URL, _SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 _TABLE = "confirmations_mcp_espace"
 

@@ -4,7 +4,11 @@ Utilitaires de gestion des documents dans le stockage Supabase
 """
 
 import os
-from supabase import create_client
+import sys
+from supabase import create_client, ClientOptions
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'core'))
+from client_http_supabase import nouveau_client_http_supabase  # noqa: E402
 
 
 def get_secret(key):
@@ -14,7 +18,7 @@ def get_secret(key):
 SUPABASE_URL = get_secret("SUPABASE_URL")
 SUPABASE_SECRET = get_secret("SUPABASE_SECRET")
 
-supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
+supabase = create_client(SUPABASE_URL, SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 BUCKET = "documents-agents"
 

@@ -63,7 +63,8 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from groq import Groq
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 
 from core.comportements_etudiants import (
     get_secret,
@@ -75,7 +76,7 @@ logging.basicConfig(level=logging.INFO)
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_SECRET = os.environ.get("SUPABASE_SECRET")
-supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
+supabase = create_client(SUPABASE_URL, SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 # Choix par défaut, faute de décision explicite de Bourama sur ces deux
 # nombres (question posée en même temps que la livraison de cette

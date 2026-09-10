@@ -31,7 +31,8 @@ import logging
 import os
 
 import PyPDF2
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 
 from embeddings import vectoriser, decouper_texte
 
@@ -42,7 +43,7 @@ def _get_secret(cle):
     return os.environ.get(cle)
 
 
-supabase = create_client(_get_secret("SUPABASE_URL"), _get_secret("SUPABASE_SECRET"))
+supabase = create_client(_get_secret("SUPABASE_URL"), _get_secret("SUPABASE_SECRET"), options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 
 def extraire_pages_pdf(chemin_pdf: str) -> list[str]:

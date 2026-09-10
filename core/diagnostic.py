@@ -49,7 +49,8 @@ def check_env_vars():
 def _recuperer_notion_page_id(agent_id):
     """Va chercher agents.notion_page_id pour cet agent (remplace l'ancien secret NOTION_PAGE_ID global)."""
     try:
-        from supabase import create_client
+        from supabase import create_client, ClientOptions
+        from client_http_supabase import nouveau_client_http_supabase
     except Exception as e:
         print(f"{KO} Impossible d'importer supabase pour résoudre notion_page_id : {e}")
         return None
@@ -61,7 +62,7 @@ def _recuperer_notion_page_id(agent_id):
         return None
 
     try:
-        client = create_client(url, key)
+        client = create_client(url, key, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
         res = client.table("agents").select("notion_page_id").eq("id", agent_id).maybe_single().execute()
         page_id = (res.data or {}).get("notion_page_id")
         if not page_id:
@@ -150,7 +151,8 @@ def check_gemini_embeddings():
 def check_supabase(vecteur, agent_id):
     print(f"\n=== 4. Supabase (tables + fonctions RPC, agent '{agent_id}') ===")
     try:
-        from supabase import create_client
+        from supabase import create_client, ClientOptions
+        from client_http_supabase import nouveau_client_http_supabase
     except Exception as e:
         print(f"{KO} Impossible d'importer supabase : {e}")
         return
@@ -161,7 +163,7 @@ def check_supabase(vecteur, agent_id):
         print(f"{KO} SUPABASE_URL ou SUPABASE_SECRET absent, test impossible.")
         return
 
-    client = create_client(url, key)
+    client = create_client(url, key, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
     # outils_chunks a été supprimé (obsolète depuis le passage au principe
     # MCP, voir Plan d'action) : ne plus le tester, sinon faux négatif

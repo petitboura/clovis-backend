@@ -33,7 +33,8 @@ import logging
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client, create_mcp_http_client
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 
 from registre_outils import SERVEURS_MCP
 
@@ -44,7 +45,7 @@ def _get_secret_local(key):
     return os.environ.get(key)
 
 
-_supabase = create_client(_get_secret_local("SUPABASE_URL"), _get_secret_local("SUPABASE_SECRET"))
+_supabase = create_client(_get_secret_local("SUPABASE_URL"), _get_secret_local("SUPABASE_SECRET"), options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 
 # Clovis (12/08, demande Bourama) : une seule IA -- plus de systeme

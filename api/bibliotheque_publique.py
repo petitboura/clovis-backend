@@ -31,7 +31,8 @@ import uuid
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from postgrest.exceptions import APIError
 from pydantic import BaseModel
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from core.client_http_supabase import nouveau_client_http_supabase
 
 from api.auth import utilisateur_courant
 from core.erreurs import erreur_api
@@ -73,7 +74,7 @@ def _get_secret(cle):
     return os.environ.get(cle)
 
 
-supabase = create_client(_get_secret("SUPABASE_URL"), _get_secret("SUPABASE_SECRET"))
+supabase = create_client(_get_secret("SUPABASE_URL"), _get_secret("SUPABASE_SECRET"), options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 
 class EntreeBibliothequePublique(BaseModel):

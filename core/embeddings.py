@@ -18,7 +18,8 @@ from datetime import datetime, timedelta, timezone
 
 from google import genai
 from google.genai import types
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 
 # gemini-embedding-001 sort en 3072-dim par défaut, mais supporte la
 # troncature (Matryoshka Representation Learning) vers 768 ou 1536 sans
@@ -97,7 +98,7 @@ _supabase_parametres = None
 def _get_supabase_parametres():
     global _supabase_parametres
     if _supabase_parametres is None:
-        _supabase_parametres = create_client(get_secret("SUPABASE_URL"), get_secret("SUPABASE_SECRET"))
+        _supabase_parametres = create_client(get_secret("SUPABASE_URL"), get_secret("SUPABASE_SECRET"), options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
     return _supabase_parametres
 
 

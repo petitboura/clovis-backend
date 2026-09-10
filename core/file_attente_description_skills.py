@@ -32,7 +32,8 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from groq import Groq
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 
 MAX_TENTATIVES = 3
 TAILLE_LOT = 5  # skills traités par passage -- garde-fou pour qu'un passage ne tourne jamais indéfiniment avant de rendre la main à la boucle appelante.
@@ -57,7 +58,7 @@ def _get_secret(cle):
     return os.environ.get(cle)
 
 
-supabase = create_client(_get_secret("SUPABASE_URL"), _get_secret("SUPABASE_SECRET"))
+supabase = create_client(_get_secret("SUPABASE_URL"), _get_secret("SUPABASE_SECRET"), options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 
 def _generer_description_depuis_skill_md(skill_md: str) -> str:

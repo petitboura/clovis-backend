@@ -74,7 +74,8 @@ import requests
 
 from mcp.server.mcpserver import MCPServer as FastMCP, Context, Image
 from mcp.types import ToolAnnotations
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 
 from core.mcp_auth_public import (
     VerificateurJetonSupabase,
@@ -187,7 +188,7 @@ from contenu_dynamique_matiere import resoudre_system_prompt as _resoudre_system
 
 _SUPABASE_URL = os.environ.get("SUPABASE_URL")
 _SUPABASE_SECRET = os.environ.get("SUPABASE_SECRET")
-_supabase = create_client(_SUPABASE_URL, _SUPABASE_SECRET)
+_supabase = create_client(_SUPABASE_URL, _SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 # Clovis mono-agent : voir docstring en tête de fichier. Fixe, jamais un
 # paramètre exposé aux outils ci-dessous.

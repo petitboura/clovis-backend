@@ -18,7 +18,8 @@ même domaine".
 import os
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from client_http_supabase import nouveau_client_http_supabase
 from embeddings import vectoriser
 
 logging.basicConfig(level=logging.INFO)
@@ -40,7 +41,7 @@ SUPABASE_SECRET = get_secret("SUPABASE_SECRET")
 if not SUPABASE_URL or not SUPABASE_SECRET:
     logging.error("SUPABASE_URL ou SUPABASE_SECRET manquant : la recherche RAG sera toujours vide.")
 
-supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
+supabase = create_client(SUPABASE_URL, SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 
 def chercher_candidats(question, agent_id=AGENT_ID_PAR_DEFAUT):

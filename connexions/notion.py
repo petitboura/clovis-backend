@@ -50,7 +50,8 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import httpx
-from supabase import create_client
+from supabase import create_client, ClientOptions
+from core.client_http_supabase import nouveau_client_http_supabase
 
 MCP_NOTION_URL = "https://mcp.notion.com/mcp"
 DECOUVERTE_URL = "https://mcp.notion.com/.well-known/oauth-authorization-server"
@@ -77,7 +78,7 @@ SUPABASE_URL = get_secret("SUPABASE_URL")
 SUPABASE_SECRET = get_secret("SUPABASE_SECRET")
 URL_RETOUR = get_secret("URL_RETOUR_APP")
 
-supabase = create_client(SUPABASE_URL, SUPABASE_SECRET)
+supabase = create_client(SUPABASE_URL, SUPABASE_SECRET, options=ClientOptions(httpx_client=nouveau_client_http_supabase()))
 
 
 def _generer_pkce():
