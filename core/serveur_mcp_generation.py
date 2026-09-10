@@ -65,8 +65,11 @@ from core.outils_generation_commun import mcp_generation  # noqa: F401 (ré-expo
 import core.outils_generation_documents  # noqa: F401
 import core.outils_generation_media  # noqa: F401
 import core.outils_bibliotheque  # noqa: F401
+import core.outils_dossiers_catalogue_public  # noqa: F401
+import core.outils_catalogue_public_publication  # noqa: F401
 import core.outils_memoire_profil  # noqa: F401
 import core.outils_comportements_connaissance  # noqa: F401
+import core.outils_comportements_publics  # noqa: F401
 import core.outils_mobile  # noqa: F401
 import core.outils_corrections_pedagogiques  # noqa: F401
 import core.outils_avancement_notions  # noqa: F401

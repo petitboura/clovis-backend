@@ -119,6 +119,12 @@ def gerer_document_bibliotheque(
     type_fichier: str = "",
     nom_dossier: str = "",
     decalage: int = 0,
+    dossier_id_catalogue_public: str = "",
+    pays: str = "",
+    niveau: str = "",
+    categorie: str = "",
+    classe: str = "",
+    specialite: str = "",
 ) -> str:
     """
     Gère la bibliothèque personnelle de CET utilisateur, et permet aussi de
@@ -170,7 +176,15 @@ def gerer_document_bibliotheque(
       uniquement le nom, la description et le lien de chaque document
       trouvé, JAMAIS son contenu : ne sert qu'à dire à l'utilisateur où
       trouver un document, jamais à citer ou paraphraser ce document
-      dans ta réponse. Paramètre : `question`.
+      dans ta réponse. Paramètre : `question`. Paramètres optionnels de
+      filtre (09/09/2026, demande Bourama), à ne remplir QUE si
+      l'étudiant mentionne clairement le critère correspondant --
+      jamais par défaut, jamais devinés : `dossier_id_catalogue_public`
+      (obtenu via gerer_dossier_catalogue_public, action "lister" ou
+      "consulter" -- jamais un nom de dossier inventé), `pays`,
+      `niveau`, `categorie`, `classe`, `specialite` (valeurs obtenues
+      via gerer_dossier_catalogue_public si besoin de connaître les
+      valeurs existantes).
     - "lire_catalogue_public" : renvoie le texte intégral d'un document
       du catalogue public, identifié par le `fichier_id` obtenu via
       "trouver_catalogue_public". N'appelle cette action QUE si
@@ -194,7 +208,10 @@ def gerer_document_bibliotheque(
       SUIVANTS (pagination via `decalage`, voir "lister" ci-dessous pour
       la logique, identique ici) n'ont pas besoin d'une nouvelle
       confirmation, ils font partie de la même demande déjà approuvée.
-      Paramètre optionnel : `decalage`.
+      Paramètre optionnel : `decalage`. Mêmes paramètres de filtre
+      optionnels que "trouver_catalogue_public" ci-dessus
+      (`dossier_id_catalogue_public`, `pays`, `niveau`, `categorie`,
+      `classe`, `specialite`), jamais devinés.
     - "lister" : liste les documents/liens/notes de la bibliothèque
       personnelle (avec le lien de chacun), sans recherche par contenu.
       Couvre TOUS les types, y compris image/audio/vidéo, contrairement
@@ -307,7 +324,10 @@ def gerer_document_bibliotheque(
 
     if action == "trouver_catalogue_public":
         try:
-            resultats = _chercher_catalogue_public(question)
+            resultats = _chercher_catalogue_public(
+                question, dossier_id=dossier_id_catalogue_public, pays=pays, niveau=niveau,
+                categorie=categorie, classe=classe, specialite=specialite,
+            )
         except Exception:
             return "Erreur : la recherche dans le catalogue public a échoué, réessaie."
         if not resultats:
@@ -357,7 +377,10 @@ def gerer_document_bibliotheque(
     if action == "lister_catalogue_public":
         decalage_val = max(0, decalage or 0)
         try:
-            resultat = _lister_catalogue_public(decalage=decalage_val)
+            resultat = _lister_catalogue_public(
+                decalage=decalage_val, dossier_id=dossier_id_catalogue_public, pays=pays,
+                niveau=niveau, categorie=categorie, classe=classe, specialite=specialite,
+            )
         except Exception as e:
             logging.error(f"ERREUR gerer_document_bibliotheque (lister_catalogue_public) : {e}")
             return "Erreur : impossible de lister le catalogue public, réessaie."

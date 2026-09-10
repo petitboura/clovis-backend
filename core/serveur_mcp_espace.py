@@ -120,6 +120,10 @@ from core.comportements_etudiants import (
     modifier_comportement as _modifier_comportement,
     supprimer_comportement as _supprimer_comportement,
     obtenir_comportement_skill as _obtenir_comportement_skill,
+    lister_comportements_publics as _lister_comportements_publics,
+    publier_comportement_public as _publier_comportement_public,
+    activer_comportement_public as _activer_comportement_public,
+    retirer_skill_public as _retirer_skill_public,
 )
 # Le rattachement d'un comportement/document à un emplacement du programme
 # dépendait de core/bibliotheque_programme.py, retiré du code actif.
@@ -149,6 +153,28 @@ from core.dossiers_bibliotheque import (
     renommer_dossier as _renommer_dossier,
     retirer_fichier as _retirer_fichier,
     supprimer_dossier as _supprimer_dossier,
+)
+from core.dossiers_catalogue_public import (
+    supabase as _supabase_catalogue_public,
+    _dossier as _obtenir_dossier_public,
+    creer_dossier as _creer_dossier_public,
+    lister_dossiers as _lister_dossiers_public,
+    lister_fichiers_ids_dossier as _lister_fichiers_ids_dossier_public,
+    ranger_fichier as _ranger_fichier_public,
+    renommer_dossier as _renommer_dossier_public,
+    retirer_fichier as _retirer_fichier_public,
+    supprimer_dossier as _supprimer_dossier_public,
+    peut_ajouter_contenu as _peut_ajouter_contenu_public,
+    peut_retirer_contenu as _peut_retirer_contenu_public,
+)
+from core.dossiers_publics_attaches import propager_fichier_public_range_dossier as _propager_fichier_public_range_dossier
+from core.catalogue_public_publication import (
+    publier_fichier_public as _publier_fichier_public,
+    publier_lien_public as _publier_lien_public,
+    publier_texte_public as _publier_texte_public,
+    modifier_entree_publique as _modifier_entree_publique,
+    supprimer_entree_publique as _supprimer_entree_publique,
+    copier_entree_publique_vers_perso as _copier_entree_publique_vers_perso,
 )
 from main import chat as _chat_generateur  # core/main.py:chat() -- import bare comme dans api/chat.py (core/ deja sur sys.path a ce point, voir api/main.py : api.chat importe avant core.serveur_mcp_espace)
 from core.confirmations_mcp import (
@@ -840,7 +866,449 @@ def supprimer_dossier_bibliotheque(dossier_id: str, ctx: Context) -> str:
     return "Dossier supprimé."
 
 
-# --- Mémoire (résumé long-terme, "Ma mémoire" de "Mon espace") --------
+# --- Dossiers du catalogue public (bibliothèque publique) -------------
+# 09/09/2026, demande Bourama : mêmes outils que core/outils_dossiers_
+# catalogue_public.py (chat), exposés ici pour un client MCP externe --
+# distincts des dossiers PERSONNELS ci-dessus (visibles par tout le
+# monde, statut contribution_libre/privee, voir core/dossiers_catalogue_
+# public.py).
+
+STATUTS_DOSSIER_CATALOGUE_PUBLIC_VALIDES = ("contribution_libre", "privee")
+
+
+@mcp_espace.tool(
+    name="clovis_lister_dossiers_catalogue_public",
+    title="Lister les dossiers du catalogue public",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def lister_dossiers_catalogue_public(ctx: Context) -> str:
+    """Liste tous les dossiers du catalogue public (bibliothèque publique, visible par tout le monde), avec leur statut (contribution_libre/privee) et leur nombre de fichiers directs."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        dossiers = _lister_dossiers_public()
+    except Exception as e:
+        logging.error(f"ERREUR outil lister_dossiers_catalogue_public : {e}")
+        return "Erreur : impossible de lister les dossiers du catalogue public, réessaie."
+    if not dossiers:
+        return "Aucun dossier public pour l'instant."
+    par_id = {d["id"]: d for d in dossiers}
+    lignes = []
+    for d in dossiers:
+        parent = par_id.get(d["dossier_parent_id"])
+        chemin = f"{parent['nom']} > {d['nom']}" if parent else d["nom"]
+        try:
+            nb_fichiers = len(_lister_fichiers_ids_dossier_public(d["id"]))
+        except Exception:
+            nb_fichiers = 0
+        lignes.append(f"- {chemin} [id: {d['id']}] (statut: {d['statut']}, {nb_fichiers} fichier(s) direct(s))")
+    return "\n".join(lignes)
+
+
+@mcp_espace.tool(
+    name="clovis_consulter_dossier_catalogue_public",
+    title="Consulter un dossier du catalogue public",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def consulter_dossier_catalogue_public(dossier_id: str, ctx: Context) -> str:
+    """Ouvre un dossier du catalogue public : liste ses sous-dossiers et ses fichiers directs, et son statut."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    dossier = _obtenir_dossier_public(dossier_id)
+    if dossier is None:
+        return "Ce dossier public est introuvable."
+    try:
+        dossiers = _lister_dossiers_public()
+        sous_dossiers = [d for d in dossiers if d["dossier_parent_id"] == dossier_id]
+        fichier_ids = _lister_fichiers_ids_dossier_public(dossier_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil consulter_dossier_catalogue_public : {e}")
+        return "Erreur : impossible de consulter ce dossier, réessaie."
+    lignes = [f"Statut de ce dossier : {dossier['statut']}."]
+    for sd in sous_dossiers:
+        lignes.append(f"- [dossier] {sd['nom']} [id: {sd['id']}] (statut: {sd['statut']})")
+    for f_id in fichier_ids:
+        try:
+            res = _supabase_catalogue_public.table("bibliotheque_publique").select("nom, description, type_mime").eq("id", f_id).maybe_single().execute()
+        except Exception as e:
+            logging.error(f"ERREUR outil consulter_dossier_catalogue_public (lecture fichier {f_id}) : {e}")
+            continue
+        if not res or not res.data:
+            continue
+        f = res.data
+        lignes.append(f"- [fichier] {f.get('nom')} ({f.get('type_mime', 'inconnu')}) [id: {f_id}]" + (f" -- {f['description']}" if f.get("description") else ""))
+    if len(lignes) == 1:
+        lignes.append("Ce dossier est vide.")
+    return "\n".join(lignes)
+
+
+@mcp_espace.tool(
+    name="clovis_creer_dossier_catalogue_public",
+    title="Créer un dossier dans le catalogue public",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
+def creer_dossier_catalogue_public(
+    nom: str, statut: str, dossier_parent_id: str = "", description: str = "",
+    pays: str = "", niveau: str = "", categorie: str = "", classe: str = "", specialite: str = "",
+    ctx: Context = None,
+) -> str:
+    """
+    Crée un dossier dans le catalogue public (visible par tout le monde).
+    `statut` OBLIGATOIRE, exactement "contribution_libre" (tout le monde
+    peut y ajouter un document) ou "privee" (seul le créateur le peut) --
+    le client doit avoir fait choisir explicitement ce statut à
+    l'utilisateur avant d'appeler cet outil, jamais une valeur par
+    défaut. `dossier_parent_id` optionnel (sous-dossier). `description`,
+    `pays`, `niveau`, `categorie`, `classe`, `specialite` optionnels.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    nom = (nom or "").strip()
+    if not nom:
+        return "Erreur : nom de dossier manquant."
+    statut = (statut or "").strip()
+    if statut not in STATUTS_DOSSIER_CATALOGUE_PUBLIC_VALIDES:
+        return (
+            "Erreur : `statut` doit valoir exactement \"contribution_libre\" ou \"privee\" -- "
+            "fais choisir explicitement à l'utilisateur avant de rappeler cet outil."
+        )
+    parent_id = (dossier_parent_id or "").strip() or None
+    if parent_id and _obtenir_dossier_public(parent_id) is None:
+        return "Erreur : le dossier parent indiqué est introuvable."
+    try:
+        dossier = _creer_dossier_public(
+            user_id, nom, statut=statut, dossier_parent_id=parent_id,
+            pays=(pays or "").strip() or None, niveau=(niveau or "").strip() or None,
+            categorie=(categorie or "").strip() or None, classe=(classe or "").strip() or None,
+            specialite=(specialite or "").strip() or None, description=(description or "").strip(),
+        )
+    except Exception as e:
+        logging.error(f"ERREUR outil creer_dossier_catalogue_public : {e}")
+        return "Erreur : impossible de créer ce dossier, réessaie."
+    return f"Dossier public « {nom} » créé (statut: {statut}) [id: {dossier['id']}]."
+
+
+@mcp_espace.tool(
+    name="clovis_renommer_dossier_catalogue_public",
+    title="Renommer un dossier du catalogue public",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def renommer_dossier_catalogue_public(dossier_id: str, nouveau_nom: str, ctx: Context) -> str:
+    """Renomme un dossier du catalogue public. Réservé au créateur du dossier, même si son statut est contribution_libre."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    if _obtenir_dossier_public(dossier_id) is None:
+        return "Ce dossier public est introuvable."
+    if not _peut_retirer_contenu_public(dossier_id, user_id):
+        return "Erreur : seul le créateur de ce dossier peut le renommer."
+    nouveau_nom = (nouveau_nom or "").strip()
+    if not nouveau_nom:
+        return "Erreur : nouveau nom manquant."
+    try:
+        _renommer_dossier_public(dossier_id, nouveau_nom)
+    except Exception as e:
+        logging.error(f"ERREUR outil renommer_dossier_catalogue_public : {e}")
+        return "Erreur : impossible de renommer ce dossier, réessaie."
+    return f"Dossier public renommé en « {nouveau_nom} »."
+
+
+@mcp_espace.tool(
+    name="clovis_ranger_fichier_catalogue_public",
+    title="Ranger un fichier dans un dossier du catalogue public",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def ranger_fichier_catalogue_public(fichier_id: str, dossier_id: str, ctx: Context) -> str:
+    """Range un document déjà publié dans le catalogue public dans un dossier public. Autorisé si le dossier est contribution_libre, ou si l'utilisateur en est le créateur."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    if _obtenir_dossier_public(dossier_id) is None:
+        return "Ce dossier public est introuvable."
+    if not _peut_ajouter_contenu_public(dossier_id, user_id):
+        return "Erreur : ce dossier est privé, seul son créateur peut y ranger un document."
+    try:
+        res = _supabase_catalogue_public.table("bibliotheque_publique").select("id, statut").eq("id", fichier_id).maybe_single().execute()
+    except Exception as e:
+        logging.error(f"ERREUR outil ranger_fichier_catalogue_public (vérif fichier) : {e}")
+        return "Erreur : impossible de vérifier ce document, réessaie."
+    if not res or not res.data or res.data.get("statut") != "publie":
+        return "Erreur : ce document n'existe pas dans le catalogue public (ou n'y est plus)."
+    try:
+        _ranger_fichier_public(fichier_id, dossier_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil ranger_fichier_catalogue_public : {e}")
+        return "Erreur : impossible de ranger ce document, réessaie."
+    try:
+        _propager_fichier_public_range_dossier(fichier_id, dossier_id)
+    except Exception as e:
+        logging.error(f"ERREUR propagation dossier public attaché (MCP ranger_fichier_catalogue_public, fichier {fichier_id}, dossier {dossier_id}) : {e}")
+    return "Document rangé dans ce dossier public."
+
+
+@mcp_espace.tool(
+    name="clovis_retirer_fichier_catalogue_public",
+    title="Retirer un fichier d'un dossier du catalogue public",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def retirer_fichier_catalogue_public(fichier_id: str, dossier_id: str, ctx: Context) -> str:
+    """Retire un document d'un dossier du catalogue public (le document lui-même reste dans le catalogue public). Réservé au créateur du dossier, même si contribution_libre."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    if _obtenir_dossier_public(dossier_id) is None:
+        return "Ce dossier public est introuvable."
+    if not _peut_retirer_contenu_public(dossier_id, user_id):
+        return "Erreur : seul le créateur de ce dossier peut en retirer un document."
+    try:
+        _retirer_fichier_public(fichier_id, dossier_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil retirer_fichier_catalogue_public : {e}")
+        return "Erreur : impossible de retirer ce document, réessaie."
+    return "Document retiré de ce dossier public (il reste dans le catalogue public)."
+
+
+@mcp_espace.tool(
+    name="clovis_supprimer_dossier_catalogue_public",
+    title="Supprimer un dossier du catalogue public",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
+)
+def supprimer_dossier_catalogue_public(dossier_id: str, ctx: Context) -> str:
+    """
+    Supprime DÉFINITIVEMENT un dossier du catalogue public (et ses
+    sous-dossiers). Ne supprime JAMAIS les documents qu'il contenait
+    (ressources partagées par la communauté) -- ils redeviennent juste
+    non classés. Réservé au créateur du dossier, même si
+    contribution_libre. SENSIBLE : le client doit confirmer avec
+    l'utilisateur avant d'appeler cet outil.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    if _obtenir_dossier_public(dossier_id) is None:
+        return "Ce dossier public est introuvable."
+    if not _peut_retirer_contenu_public(dossier_id, user_id):
+        return "Erreur : seul le créateur de ce dossier peut le supprimer."
+    try:
+        _supprimer_dossier_public(dossier_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_dossier_catalogue_public : {e}")
+        return "Erreur : impossible de supprimer ce dossier, réessaie."
+    return "Dossier public supprimé (les documents qu'il contenait restent dans le catalogue public, juste non classés)."
+
+
+# --- Entrées du catalogue public (fichier/lien/note) -------------------
+# 09/09/2026, demande Bourama : mêmes outils que core/outils_catalogue_
+# public_publication.py (chat), exposés ici pour un client MCP externe.
+# Toute la logique métier vit dans core/catalogue_public_publication.py
+# (réutilisée des deux côtés).
+
+@mcp_espace.tool(
+    name="clovis_publier_fichier_catalogue_public",
+    title="Publier un fichier dans le catalogue public",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
+def publier_fichier_catalogue_public(
+    nom_fichier: str, type_mime: str, ctx: Context,
+    nom: str = "", description: str = "", contenu_base64: str = "", url_fichier: str = "",
+    dossier_id: str = "", pays: str = "", niveau: str = "", categorie: str = "",
+    classe: str = "", specialite: str = "",
+) -> str:
+    """
+    Publie un fichier dans le catalogue public (visible par tout le
+    monde), au nom de cet utilisateur -- mêmes règles que
+    clovis_ajouter_document_bibliotheque pour nom_fichier/type_mime/
+    url_fichier/contenu_base64 (jamais demandés à l'utilisateur, limite
+    50 Mo). `dossier_id` (dossier PUBLIC), `pays`, `niveau`,
+    `categorie`, `classe`, `specialite` optionnels.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    type_mime = (type_mime or "").strip().lower()
+    if not type_mime:
+        return "Erreur : type de fichier manquant."
+    url_fichier = (url_fichier or "").strip()
+    contenu_base64 = (contenu_base64 or "").strip()
+    if not url_fichier and not contenu_base64:
+        return "Erreur : fournis url_fichier (lien réel d'un fichier déjà joint dans la conversation) ou contenu_base64."
+    if url_fichier:
+        try:
+            reponse = requests.get(url_fichier, timeout=30)
+            reponse.raise_for_status()
+            contenu = reponse.content
+        except Exception as e:
+            logging.error(f"ERREUR outil publier_fichier_catalogue_public (url_fichier={url_fichier}) : {e}")
+            return "Erreur : impossible de récupérer le fichier à cette URL."
+    else:
+        import base64
+        try:
+            contenu = base64.b64decode(contenu_base64, validate=True)
+        except Exception:
+            return "Erreur : contenu_base64 invalide (doit être du base64 valide)."
+    if len(contenu) > _TAILLE_MAX_OCTETS:
+        return "Erreur : fichier trop lourd (50 Mo max)."
+    try:
+        entree = _publier_fichier_public(
+            ajoute_par=user_id, contenu=contenu, nom_fichier=(nom_fichier or "fichier").strip(),
+            type_mime=type_mime, nom=nom, description=description, dossier_id=(dossier_id or "").strip() or None,
+            pays=pays, niveau=niveau, categorie=categorie, classe=classe, specialite=specialite,
+        )
+    except ValueError as e:
+        return "Erreur : fichier vide." if str(e) == "FICHIER_VIDE" else "Erreur : impossible de publier ce fichier, réessaie."
+    except Exception as e:
+        logging.error(f"ERREUR outil publier_fichier_catalogue_public : {e}")
+        if getattr(e, "code", None) == "23505":
+            return "Erreur : ce nom est déjà utilisé dans le catalogue public, choisis-en un autre."
+        return "Erreur : impossible de publier ce fichier, réessaie."
+    return f"Fichier publié dans le catalogue public (id {entree['id']})."
+
+
+@mcp_espace.tool(
+    name="clovis_publier_lien_catalogue_public",
+    title="Publier un lien dans le catalogue public",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
+def publier_lien_catalogue_public(
+    url: str, ctx: Context, nom: str = "", description: str = "", dossier_id: str = "",
+    pays: str = "", niveau: str = "", categorie: str = "", classe: str = "", specialite: str = "",
+) -> str:
+    """Publie un lien dans le catalogue public (pas de fichier réel : url_publique EST le lien lui-même)."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        entree = _publier_lien_public(
+            ajoute_par=user_id, url=url, nom=nom, description=description, dossier_id=(dossier_id or "").strip() or None,
+            pays=pays, niveau=niveau, categorie=categorie, classe=classe, specialite=specialite,
+        )
+    except ValueError:
+        return "Erreur : url manquante."
+    except Exception as e:
+        logging.error(f"ERREUR outil publier_lien_catalogue_public : {e}")
+        if getattr(e, "code", None) == "23505":
+            return "Erreur : ce nom est déjà utilisé dans le catalogue public, choisis-en un autre."
+        return "Erreur : impossible de publier ce lien, réessaie."
+    return f"Lien publié dans le catalogue public (id {entree['id']})."
+
+
+@mcp_espace.tool(
+    name="clovis_publier_texte_catalogue_public",
+    title="Publier une note dans le catalogue public",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
+def publier_texte_catalogue_public(
+    contenu: str, ctx: Context, nom: str = "", dossier_id: str = "",
+    pays: str = "", niveau: str = "", categorie: str = "", classe: str = "", specialite: str = "",
+) -> str:
+    """Publie une note de texte libre dans le catalogue public."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        entree = _publier_texte_public(
+            ajoute_par=user_id, contenu=contenu, nom=nom, dossier_id=(dossier_id or "").strip() or None,
+            pays=pays, niveau=niveau, categorie=categorie, classe=classe, specialite=specialite,
+        )
+    except ValueError:
+        return "Erreur : texte vide."
+    except Exception as e:
+        logging.error(f"ERREUR outil publier_texte_catalogue_public : {e}")
+        if getattr(e, "code", None) == "23505":
+            return "Erreur : ce nom est déjà utilisé dans le catalogue public, choisis-en un autre."
+        return "Erreur : impossible de publier cette note, réessaie."
+    return f"Note publiée dans le catalogue public (id {entree['id']})."
+
+
+@mcp_espace.tool(
+    name="clovis_modifier_entree_catalogue_public",
+    title="Modifier une entrée du catalogue public",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def modifier_entree_catalogue_public(
+    entree_id: str, ctx: Context, description: str = "", pays: str = "",
+    niveau: str = "", categorie: str = "", classe: str = "", specialite: str = "",
+) -> str:
+    """
+    Modifie la description et/ou les filtres d'une entrée déjà publiée
+    dans le catalogue public. Réservé au contributeur d'origine. Seuls
+    les champs fournis (non vides) sont modifiés.
+    """
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        erreur = _modifier_entree_publique(
+            entree_id, user_id,
+            description=description.strip() or None if description else None,
+            pays=pays.strip() or None if pays else None,
+            niveau=niveau.strip() or None if niveau else None,
+            categorie=categorie.strip() or None if categorie else None,
+            classe=classe.strip() or None if classe else None,
+            specialite=specialite.strip() or None if specialite else None,
+        )
+    except Exception as e:
+        logging.error(f"ERREUR outil modifier_entree_catalogue_public : {e}")
+        return "Erreur : impossible de modifier cette entrée, réessaie."
+    if erreur == "ENTREE_INTROUVABLE":
+        return "Cette entrée du catalogue public est introuvable."
+    if erreur == "CETTE_ENTREE_NE_T_APPARTIENT_PAS":
+        return "Erreur : tu ne peux modifier que les entrées que tu as toi-même publiées."
+    if erreur == "AUCUNE_MODIFICATION_FOURNIE":
+        return "Erreur : indique au moins une chose à modifier (description ou un filtre)."
+    return "Entrée du catalogue public modifiée."
+
+
+@mcp_espace.tool(
+    name="clovis_supprimer_entree_catalogue_public",
+    title="Supprimer une entrée du catalogue public",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
+)
+def supprimer_entree_catalogue_public(entree_id: str, ctx: Context) -> str:
+    """Supprime DÉFINITIVEMENT une entrée du catalogue public. Réservé au contributeur d'origine. SENSIBLE : le client doit confirmer avec l'utilisateur avant d'appeler cet outil."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ok = _supprimer_entree_publique(entree_id, user_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil supprimer_entree_catalogue_public : {e}")
+        return "Erreur : impossible de supprimer cette entrée, réessaie."
+    if not ok:
+        return "Erreur : cette entrée est introuvable, ou tu n'en es pas l'auteur."
+    return "Entrée supprimée du catalogue public."
+
+
+@mcp_espace.tool(
+    name="clovis_copier_entree_catalogue_public_vers_perso",
+    title="Copier une entrée du catalogue public vers sa bibliothèque personnelle",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
+def copier_entree_catalogue_public_vers_perso(entree_id: str, ctx: Context) -> str:
+    """Copie un fichier déjà publié dans le catalogue public (de n'importe qui) vers la bibliothèque personnelle de cet utilisateur, comme s'il l'avait uploadé lui-même. Ne fonctionne pas pour un simple lien."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        resultat = _copier_entree_publique_vers_perso(entree_id, user_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil copier_entree_catalogue_public_vers_perso : {e}")
+        if getattr(e, "code", None) == "23505":
+            return "Erreur : un fichier de ce nom existe déjà dans ta bibliothèque personnelle."
+        return "Erreur : impossible de copier ce document, réessaie."
+    if resultat == "ENTREE_INTROUVABLE":
+        return "Cette entrée du catalogue public est introuvable."
+    if resultat == "CE_DOCUMENT_EST_UN_LIEN_NON_COPIABLE":
+        return "Erreur : ce document est un simple lien, rien à copier."
+    if resultat in ("ECHEC_DU_STOCKAGE_REESSAIE", "FICHIER_VIDE"):
+        return "Erreur : impossible de copier ce document, réessaie."
+    return "Document copié dans ta bibliothèque personnelle."
+
+
+
 # Colonne `summary` de conversation_summaries (celle que lit/écrit
 # core/main.py::_charger_resume_memoire, celle affichée par
 # MaMemoire.tsx via /api/memoire). À NE PAS confondre avec la colonne
@@ -1103,6 +1571,98 @@ def supprimer_comportement_espace(comportement_id: str, ctx: Context) -> str:
     if not ok:
         return "Ce comportement est introuvable."
     return "Comportement supprimé."
+
+
+# --- Catalogue public des skills ("comportements_publics") ------------
+# 09/09/2026, demande Bourama : mêmes outils que core/outils_
+# comportements_publics.py (chat), exposés ici pour un client MCP
+# externe. AGENT_ID_ESPACE fixe ("clovis") pour "activer", même
+# principe que le reste de cette section -- "publier" utilise
+# directement comportement_id d'un skill de "Mes comportements" (donc
+# déjà scopé sur AGENT_ID_ESPACE lui aussi côté public).
+
+@mcp_espace.tool(
+    name="clovis_chercher_comportements_publics",
+    title="Chercher dans le catalogue public de skills",
+    annotations=ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def chercher_comportements_publics(ctx: Context, mot_cle: str = "") -> str:
+    """Cherche/liste les skills du catalogue public (nom, description, nombre d'activations). Laisse `mot_cle` vide pour lister les plus populaires sans filtre."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        resultats = _lister_comportements_publics(mot_cle)
+    except Exception as e:
+        logging.error(f"ERREUR outil chercher_comportements_publics : {e}")
+        return "Erreur : impossible de chercher dans le catalogue public de skills, réessaie."
+    if not resultats:
+        return "Aucun skill public trouvé."
+    return "\n".join(
+        f"- {r['nom']} [id: {r['id']}] ({r.get('activations_count', 0)} activation(s))"
+        + (f" -- {r['description']}" if r.get("description") else "")
+        for r in resultats
+    )
+
+
+@mcp_espace.tool(
+    name="clovis_publier_comportement_public",
+    title="Publier un skill dans le catalogue public",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True),
+)
+def publier_comportement_public_espace(comportement_id: str, ctx: Context) -> str:
+    """Publie une copie figée d'un skill PERSONNEL de cet utilisateur (voir clovis_lister_comportements) dans le catalogue public. La copie publiée est indépendante."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        entree = _publier_comportement_public(AGENT_ID_ESPACE, user_id, comportement_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil publier_comportement_public_espace : {e}")
+        return "Erreur : impossible de publier ce skill, réessaie."
+    if entree is None:
+        return "Erreur : ce skill est introuvable, ou ne t'appartient pas."
+    return f"Skill publié dans le catalogue public (id {entree['id']})."
+
+
+@mcp_espace.tool(
+    name="clovis_activer_comportement_public",
+    title="Activer un skill du catalogue public",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True),
+)
+def activer_comportement_public_espace(comportement_public_id: str, ctx: Context) -> str:
+    """Active un skill du catalogue public chez cet utilisateur -- crée une copie indépendante dans ses skills personnels, déjà active. Renvoie sa copie existante si déjà activé."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        copie = _activer_comportement_public(comportement_public_id, user_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil activer_comportement_public_espace : {e}")
+        return "Erreur : impossible d'activer ce skill, réessaie."
+    if copie is None:
+        return "Erreur : ce skill public est introuvable."
+    return f"Skill « {copie.get('nom') or ''} » activé dans tes skills personnels."
+
+
+@mcp_espace.tool(
+    name="clovis_retirer_comportement_public",
+    title="Retirer un skill du catalogue public",
+    annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True),
+)
+def retirer_comportement_public_espace(comportement_public_id: str, ctx: Context) -> str:
+    """Retire un skill que cet utilisateur a lui-même publié dans le catalogue public (les copies déjà activées par d'autres restent indépendantes, jamais affectées)."""
+    user_id = _user_id_authentifie(ctx)
+    if not user_id:
+        return "Erreur : utilisateur non authentifié."
+    try:
+        ok = _retirer_skill_public(comportement_public_id, user_id)
+    except Exception as e:
+        logging.error(f"ERREUR outil retirer_comportement_public_espace : {e}")
+        return "Erreur : impossible de retirer ce skill, réessaie."
+    if not ok:
+        return "Erreur : ce skill public est introuvable, ou tu n'en es pas l'auteur."
+    return "Skill retiré du catalogue public."
 
 
 # --- Historique (lecture seule, agent_id fixe "clovis") ----------------

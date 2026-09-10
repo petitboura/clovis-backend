@@ -34,6 +34,7 @@ import os
 from supabase import create_client
 
 from embeddings import vectoriser, decouper_texte
+from core.dossiers_catalogue_public import lister_fichiers_ids_dossier as _lister_fichiers_ids_dossier
 
 TAILLE_MAX_CHUNKS_PAR_DOCUMENT = 400  # même garde-fou que bibliotheque_rag.py
 
@@ -147,7 +148,11 @@ def lire_document_catalogue_public(fichier_id: str) -> str | None:
     return "\n\n".join(ligne["contenu"] for ligne in res.data)
 
 
-def lister_catalogue_public(limite: int = 15, decalage: int = 0) -> dict:
+def lister_catalogue_public(
+    limite: int = 15, decalage: int = 0, dossier_id: str = None,
+    pays: str = None, niveau: str = None, categorie: str = None,
+    classe: str = None, specialite: str = None,
+) -> dict:
     """
     Liste les documents les PLUS RÉCENTS du catalogue public (table
     bibliotheque_publique, statut "publie"), sans recherche par contenu
@@ -169,23 +174,45 @@ def lister_catalogue_public(limite: int = 15, decalage: int = 0) -> dict:
     `decalage` (05/09/2026, demande Bourama : permettre au modèle de
     voir la page suivante sans réintervention de l'étudiant) : entrées à
     sauter, pour paginer par lots de `limite`.
+
+    `dossier_id`/`pays`/`niveau`/`categorie`/`classe`/`specialite`
+    (09/09/2026, demande Bourama : "filtrer par tout dans sa
+    recherche") : tous optionnels, aucun filtre appliqué si absent --
+    même principe que api/bibliotheque_publique.py::lister_bibliotheque_
+    publique (filtres identiques côté frontend), dupliqué ici plutôt
+    qu'appelé en HTTP (même convention que le reste de ce fichier).
     """
+    ids_dossier = None
+    if (dossier_id or "").strip():
+        ids_dossier = _lister_fichiers_ids_dossier(dossier_id.strip())
+        if not ids_dossier:
+            return {"documents": [], "total": 0}
+
+    def _base(champs: str, count: str | None = None):
+        requete = supabase.table("bibliotheque_publique").select(champs, count=count).eq("statut", "publie")
+        if (niveau or "").strip():
+            requete = requete.eq("niveau", niveau.strip())
+        if (categorie or "").strip():
+            requete = requete.eq("categorie", categorie.strip())
+        if (classe or "").strip():
+            requete = requete.eq("classe", classe.strip())
+        if (specialite or "").strip():
+            requete = requete.eq("specialite", specialite.strip())
+        if (pays or "").strip():
+            requete = requete.eq("pays", pays.strip())
+        if ids_dossier is not None:
+            requete = requete.in_("id", ids_dossier)
+        return requete
+
     try:
-        comptage = (
-            supabase.table("bibliotheque_publique")
-            .select("id", count="exact")
-            .eq("statut", "publie")
-            .execute()
-        )
+        comptage = _base("id", count="exact").execute()
         total = comptage.count if comptage.count is not None else len(comptage.data or [])
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (comptage catalogue public) : {e}")
         total = None
 
     res = (
-        supabase.table("bibliotheque_publique")
-        .select("id, nom, description, url_publique")
-        .eq("statut", "publie")
+        _base("id, nom, description, url_publique")
         .order("created_at", desc=True)
         .range(decalage, decalage + limite - 1)
         .execute()
@@ -193,7 +220,11 @@ def lister_catalogue_public(limite: int = 15, decalage: int = 0) -> dict:
     return {"documents": res.data or [], "total": total}
 
 
-def chercher_catalogue_public(question: str, match_count: int = 5) -> list:
+def chercher_catalogue_public(
+    question: str, match_count: int = 5, dossier_id: str = None,
+    pays: str = None, niveau: str = None, categorie: str = None,
+    classe: str = None, specialite: str = None,
+) -> list:
     """
     Recherche sémantique dans TOUT le catalogue public (pas de filtre
     par utilisateur ni par liste de fichiers -- contrairement à
@@ -219,24 +250,42 @@ def chercher_catalogue_public(question: str, match_count: int = 5) -> list:
     serveur_mcp_generation.py) reçoit toujours la même forme de
     résultat et décide seul de quoi en faire, sans savoir quel circuit
     a répondu.
+
+    `dossier_id`/`pays`/`niveau`/`categorie`/`classe`/`specialite`
+    (09/09/2026, demande Bourama) : tous optionnels, transmis tels quels
+    aux deux RPC (recherche_catalogue_public /
+    recherche_catalogue_public_mots_cles), aucun filtre appliqué côté
+    base si absent (défaut null).
     """
+    parametres_filtres = {
+        "p_dossier_id": (dossier_id or "").strip() or None,
+        "p_pays": (pays or "").strip() or None,
+        "p_niveau": (niveau or "").strip() or None,
+        "p_categorie": (categorie or "").strip() or None,
+        "p_classe": (classe or "").strip() or None,
+        "p_specialite": (specialite or "").strip() or None,
+    }
     try:
         vecteur = vectoriser(question, task_type="RETRIEVAL_QUERY")
     except Exception as e:
         logging.warning(f"Recherche sémantique catalogue public indisponible (Gemini), bascule sur la recherche par mots-clés : {e}")
-        return chercher_catalogue_public_mots_cles(question, match_count)
+        return chercher_catalogue_public_mots_cles(question, match_count, dossier_id, pays, niveau, categorie, classe, specialite)
 
     try:
         return supabase.rpc(
             "recherche_catalogue_public",
-            {"query_embedding": vecteur, "match_count": match_count},
+            {"query_embedding": vecteur, "match_count": match_count, **parametres_filtres},
         ).execute().data or []
     except Exception as e:
         logging.error(f"ERREUR SUPABASE RPC recherche_catalogue_public, bascule sur la recherche par mots-clés : {e}")
-        return chercher_catalogue_public_mots_cles(question, match_count)
+        return chercher_catalogue_public_mots_cles(question, match_count, dossier_id, pays, niveau, categorie, classe, specialite)
 
 
-def chercher_catalogue_public_mots_cles(question: str, match_count: int = 5) -> list:
+def chercher_catalogue_public_mots_cles(
+    question: str, match_count: int = 5, dossier_id: str = None,
+    pays: str = None, niveau: str = None, categorie: str = None,
+    classe: str = None, specialite: str = None,
+) -> list:
     """
     Recherche de secours (2026-09-05, demande Bourama) : recherche
     plein texte (mots-clés, full-text search PostgreSQL natif, RPC
@@ -256,11 +305,23 @@ def chercher_catalogue_public_mots_cles(question: str, match_count: int = 5) -> 
     (liste de {fichier_id, nom, description, url_publique, type_mime,
     similarite}) -- l'appelant n'a rien à savoir sur lequel des deux
     circuits a répondu.
+
+    Filtres optionnels (09/09/2026, demande Bourama) : même paramètres
+    que chercher_catalogue_public, transmis tels quels au RPC.
     """
     try:
         return supabase.rpc(
             "recherche_catalogue_public_mots_cles",
-            {"p_question": question, "match_count": match_count},
+            {
+                "p_question": question,
+                "match_count": match_count,
+                "p_dossier_id": (dossier_id or "").strip() or None,
+                "p_pays": (pays or "").strip() or None,
+                "p_niveau": (niveau or "").strip() or None,
+                "p_categorie": (categorie or "").strip() or None,
+                "p_classe": (classe or "").strip() or None,
+                "p_specialite": (specialite or "").strip() or None,
+            },
         ).execute().data or []
     except Exception as e:
         logging.error(f"ERREUR SUPABASE RPC recherche_catalogue_public_mots_cles : {e}")

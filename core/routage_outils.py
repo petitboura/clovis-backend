@@ -471,7 +471,29 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         "\"trouver_catalogue_public\"). "
         "Exemples : \"trouve-moi un document sur la thermodynamique "
         "dans la bibliothèque publique\", \"y a-t-il un cours sur la "
-        "Révolution française dans le catalogue public ?\".\n\n"
+        "Révolution française dans le catalogue public ?\". "
+        # AJOUT 09/09/2026 (demande Bourama : dossiers/filtres + gestion
+        # d'une entrée du catalogue public, jusque-là invisibles au
+        # LLM) : deux outils supplémentaires du même monde 3, à
+        # suggérer EN PLUS de gerer_document_bibliotheque dès que la
+        # demande porte sur un DOSSIER du catalogue public ou sur son
+        # ÉCRITURE plutôt que sa simple localisation.
+        "gerer_dossier_catalogue_public : NAVIGUER dans les dossiers "
+        "du catalogue public (lister, ouvrir un dossier précis), ou "
+        "AGIR sur eux (créer, renommer, supprimer, y ranger/retirer un "
+        "document). Exemples : \"quels sont les dossiers de la "
+        "bibliothèque publique ?\", \"ouvre le dossier Chimie du "
+        "catalogue public\", \"crée un dossier public pour le "
+        "bac\", \"range ce document publié dans le dossier X\". "
+        "gerer_entree_catalogue_public : PUBLIER un nouveau document/"
+        "lien/note dans le catalogue public, MODIFIER ou SUPPRIMER une "
+        "entrée déjà publiée, ou la COPIER vers sa bibliothèque "
+        "personnelle. Exemples : \"publie ce document dans la "
+        "bibliothèque publique\", \"ajoute ce lien au catalogue "
+        "public\", \"change la description de ce document publié\", "
+        "\"retire ce document du catalogue public\", \"copie ce "
+        "document de la bibliothèque publique dans ma bibliothèque\", "
+        "\"télécharge ce document public chez moi\".\n\n"
         "4) WEB -- tout ce qui n'est NI un document de l'étudiant, NI "
         "Clovis/l'application, NI le catalogue public : actualité, "
         "information générale externe, sujet "
@@ -520,6 +542,21 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         "compétences, talents ou aptitudes personnelles de l'utilisateur "
         "(\"qu'est-ce que je sais bien faire ?\") -- aucun rapport, ne "
         "suggère rien dans ce cas.\n\n"
+        # AJOUT 09/09/2026 (demande Bourama : "pareil avec les skills "
+        # publique" -- avant cet ajout, le catalogue public de skills
+        # ("Catalogue" de l'interface) était invisible du LLM). NE PAS
+        # confondre avec gerer_comportement ci-dessus (skills PERSONNELS,
+        # jamais publiés) : même piège que le monde bibliothèque
+        # personnelle/catalogue public plus haut, transposé aux skills.
+        "IMPORTANT : ne confonds JAMAIS \"mes skills\" (personnels, "
+        "gerer_comportement) avec le CATALOGUE PUBLIC de skills (visible "
+        "par tout le monde -> gerer_comportement_public). Exemples "
+        "catalogue public : \"cherche un skill sur la prise de notes "
+        "dans le catalogue\", \"quels sont les skills les plus utilisés "
+        "?\", \"active ce skill du catalogue\", \"publie ce skill dans "
+        "le catalogue public\", \"retire mon skill du catalogue "
+        "public\". SI TU HÉSITES entre les deux, suggère les deux "
+        "outils.\n\n"
         # AJOUT 2026-09-01 (demande Bourama, suite au renommage de
         # gerer_action_mobile en gerer_dossier_telephone) : le mot
         # "dossier" désigne DEUX choses totalement différentes dans le
@@ -530,16 +567,23 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         # plus cher ici est de rester silencieux, pas de suggérer un
         # outil de trop.
         "IMPORTANT : ne confonds JAMAIS un dossier de la BIBLIOTHÈQUE "
-        "Clovis (documents/liens/notes que l'étudiant a uploadés dans "
-        "l'app, privés ou dans le catalogue public -> "
-        "gerer_dossier_bibliotheque / gerer_document_bibliotheque) avec "
-        "un dossier PHYSIQUE sur le TÉLÉPHONE de l'étudiant (fichiers "
-        "réels de son appareil, aucun rapport avec la bibliothèque "
-        "Clovis -> gerer_dossier_telephone + explorer_dossier). Exemples "
-        "bibliothèque : \"crée-moi un dossier pour mes cours de "
-        "maths\", \"range ce document dans un nouveau dossier\", "
-        "\"supprime mon dossier Chimie\" (dans l'app). Exemples "
-        "téléphone : \"crée un dossier Téléchargements sur mon "
+        "Clovis PERSONNELLE (documents/liens/notes privés de "
+        "l'étudiant -> gerer_dossier_bibliotheque), un dossier du "
+        "CATALOGUE PUBLIC (visible par tout le monde, statut "
+        "contribution_libre/privee -> gerer_dossier_catalogue_public, "
+        "AJOUT 09/09/2026), et un dossier PHYSIQUE sur le TÉLÉPHONE de "
+        "l'étudiant (fichiers réels de son appareil, aucun rapport avec "
+        "la bibliothèque Clovis -> gerer_dossier_telephone + "
+        "explorer_dossier). Exemples bibliothèque personnelle : "
+        "\"crée-moi un dossier pour mes cours de maths\", \"range ce "
+        "document dans un nouveau dossier\", \"supprime mon dossier "
+        "Chimie\" (dans l'app, sans mention de partage/de tout le "
+        "monde). Exemples catalogue public : \"crée un dossier public "
+        "pour le bac\", \"quels sont les dossiers de la bibliothèque "
+        "publique ?\", \"range ce document publié dans le dossier X\", "
+        "\"est-ce que d'autres personnes peuvent ajouter des documents "
+        "à ce dossier public ?\". Exemples téléphone : "
+        "\"crée un dossier Téléchargements sur mon "
         "téléphone\", \"renomme le dossier Photos sur mon tel\", "
         "\"regarde mon dossier sur mon téléphone et dis-moi ce qu'il y "
         "a dedans\", \"qu'est-ce qu'il y a dans mon dossier Cours sur "
@@ -550,8 +594,8 @@ def _router_outils(message_utilisateur, outils_disponibles, historique=None):
         "séparément -- dès que le monde téléphone est identifié, "
         "suggère TOUJOURS les DEUX ensemble (explorer_dossier a besoin "
         "des noms listés par gerer_dossier_telephone pour fonctionner). "
-        "SI TU HÉSITES entre bibliothèque et téléphone, suggère les "
-        "outils des deux mondes.\n\n"
+        "SI TU HÉSITES entre bibliothèque personnelle, catalogue public "
+        "et téléphone, suggère les outils des mondes en doute.\n\n"
         # AJOUT 2026-09-04 (bug remonté par Bourama : le nouveau
         # comportement "donner le fichier en pièce jointe" -- actions
         # "donner"/"donner_catalogue_public" de gerer_document_bibliotheque,
