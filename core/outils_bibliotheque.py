@@ -125,6 +125,7 @@ def gerer_document_bibliotheque(
     categorie: str = "",
     classe: str = "",
     specialite: str = "",
+    nombre: int = 0,
 ) -> str:
     """
     Gère la bibliothèque personnelle de CET utilisateur, et permet aussi de
@@ -176,19 +177,20 @@ def gerer_document_bibliotheque(
       uniquement le nom, la description et le lien de chaque document
       trouvé, JAMAIS son contenu : ne sert qu'à dire à l'utilisateur où
       trouver un document, jamais à citer ou paraphraser ce document
-      dans ta réponse. Paramètre : `question`. Paramètres optionnels de
-      filtre (09/09/2026, demande Bourama), à ne remplir QUE si
-      l'étudiant mentionne clairement le critère correspondant --
-      jamais par défaut, jamais devinés : `dossier_id_catalogue_public`
-      (obtenu via gerer_dossier_catalogue_public, action "lister" ou
-      "consulter" -- jamais un nom de dossier inventé), `pays`,
-      `niveau`, `categorie`, `classe`, `specialite` -- RÈGLE ABSOLUE
-      (10/09/2026, correctif suite bug remonté par Bourama) : si
-      l'étudiant n'a pas donné la valeur exacte lui-même, appelle
-      D'ABORD gerer_dossier_catalogue_public, action
-      "lister_valeurs_filtres", pour voir les valeurs qui existent
-      vraiment -- ne devine JAMAIS un nom de filtre (ex. ne confonds
-      pas "niveau" et "classe").
+      dans ta réponse. Paramètre : `question`. `nombre` (optionnel,
+      défaut 5, max 20) : nombre de résultats, SEULEMENT si l'étudiant
+      en précise un. Paramètres optionnels de filtre : `dossier_id_
+      catalogue_public` (obtenu via gerer_dossier_catalogue_public,
+      action "lister" ou "consulter" -- jamais un nom de dossier
+      inventé), `pays`, `niveau`, `categorie`, `classe`, `specialite`.
+      RÈGLE 1 : un mot de `question` qui correspond à pays/niveau/
+      categorie/classe/specialite va dans le paramètre correspondant,
+      PAS seulement dans `question` (ex. "documents du Mali en
+      terminale TSE" -> pays="Mali", classe="Terminale",
+      specialite="TSE", question="documents"). RÈGLE 2 : si l'étudiant
+      n'a pas donné la valeur exacte lui-même, appelle D'ABORD
+      gerer_dossier_catalogue_public, action "lister_valeurs_filtres" --
+      ne devine JAMAIS une valeur de filtre.
     - "lire_catalogue_public" : renvoie le texte intégral d'un document
       du catalogue public, identifié par le `fichier_id` obtenu via
       "trouver_catalogue_public". N'appelle cette action QUE si
@@ -202,20 +204,20 @@ def gerer_document_bibliotheque(
       "trouver_catalogue_public" ne renverrait rien faute de sujet
       précis à chercher. N'IMPORTE QUI peut ajouter un document au
       catalogue public : cette action n'est JAMAIS exhaustive, toujours
-      plafonnée à 15 entrées PAR APPEL, les plus récentes -- si
-      l'utilisateur cherche quelque chose de précis, utilise
-      "trouver_catalogue_public" à la place. Le TOUT PREMIER appel de
-      cette action dans une conversation doit être précédé d'une
-      confirmation en langage naturel à l'étudiant (ex. "veux-tu que je
-      te montre les documents récents du catalogue public ?"), sauf s'il
-      a déjà demandé explicitement de tout voir/lister -- les appels
-      SUIVANTS (pagination via `decalage`, voir "lister" ci-dessous pour
-      la logique, identique ici) n'ont pas besoin d'une nouvelle
-      confirmation, ils font partie de la même demande déjà approuvée.
-      Paramètre optionnel : `decalage`. Mêmes paramètres de filtre
-      optionnels que "trouver_catalogue_public" ci-dessus
-      (`dossier_id_catalogue_public`, `pays`, `niveau`, `categorie`,
-      `classe`, `specialite`), jamais devinés.
+      plafonnée à 15 entrées PAR APPEL MAX (même si l'étudiant en
+      demande plus), les plus récentes -- si l'utilisateur cherche
+      quelque chose de précis, utilise "trouver_catalogue_public" à la
+      place. Le TOUT PREMIER appel de cette action dans une conversation
+      doit être précédé d'une confirmation en langage naturel à
+      l'étudiant (ex. "veux-tu que je te montre les documents récents du
+      catalogue public ?"), sauf s'il a déjà demandé explicitement de
+      tout voir/lister -- les appels SUIVANTS (pagination via
+      `decalage`, voir "lister" ci-dessous pour la logique, identique
+      ici) n'ont pas besoin d'une nouvelle confirmation, ils font partie
+      de la même demande déjà approuvée. Paramètres optionnels :
+      `decalage`, `nombre` (défaut 15, max 15). Mêmes règles de filtre
+      que "trouver_catalogue_public" ci-dessus (`dossier_id_catalogue_
+      public`, `pays`, `niveau`, `categorie`, `classe`, `specialite`).
     - "lister" : liste les documents/liens/notes de la bibliothèque
       personnelle (avec le lien de chacun), sans recherche par contenu.
       Couvre TOUS les types, y compris image/audio/vidéo, contrairement
@@ -327,10 +329,11 @@ def gerer_document_bibliotheque(
         return "Erreur : la recherche dans les plugins publics n'est plus disponible."
 
     if action == "trouver_catalogue_public":
+        match_count_val = min(max(nombre, 1), 20) if nombre else 5
         try:
             resultats = _chercher_catalogue_public(
-                question, dossier_id=dossier_id_catalogue_public, pays=pays, niveau=niveau,
-                categorie=categorie, classe=classe, specialite=specialite,
+                question, match_count=match_count_val, dossier_id=dossier_id_catalogue_public, pays=pays,
+                niveau=niveau, categorie=categorie, classe=classe, specialite=specialite,
             )
         except Exception:
             return "Erreur : la recherche dans le catalogue public a échoué, réessaie."
@@ -380,9 +383,10 @@ def gerer_document_bibliotheque(
 
     if action == "lister_catalogue_public":
         decalage_val = max(0, decalage or 0)
+        limite_val = min(max(nombre, 1), 15) if nombre else 15
         try:
             resultat = _lister_catalogue_public(
-                decalage=decalage_val, dossier_id=dossier_id_catalogue_public, pays=pays,
+                limite=limite_val, decalage=decalage_val, dossier_id=dossier_id_catalogue_public, pays=pays,
                 niveau=niveau, categorie=categorie, classe=classe, specialite=specialite,
             )
         except Exception as e:
