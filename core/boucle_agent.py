@@ -18,6 +18,17 @@ from routage_outils import (
     NOM_OUTIL_DEMANDER_OUTILS,
 )
 from recherche_outils import rechercher_outils_pertinents
+from registre_outils import REGISTRE_AFFICHAGE_OUTILS
+
+# Libellés français (déjà maintenus pour l'affichage à l'écran) réutilisés
+# le 10/09/2026 comme indice supplémentaire pour rechercher_outils_pertinents
+# -- corrige les outils d'origine externe (Tavily, Notion, Google Drive...)
+# dont le nom/la description technique est en anglais et ne matchait donc
+# jamais un besoin exprimé en français. Ne modifie pas les outils eux-mêmes,
+# seulement ce qui sert à les retrouver.
+_LIBELLES_POUR_RECHERCHE_OUTILS = {
+    nom: entree["label"] for nom, entree in REGISTRE_AFFICHAGE_OUTILS.items() if entree.get("label")
+}
 from filtre_texte_streaming import _finaliser_fragment_texte, _nouvel_etat_filtre_texte, _traiter_fragment_texte
 from profils_agents import _nom_lisible_appel, _nom_lisible
 
@@ -529,7 +540,7 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
             else:
                 deja_en_main = _outils_deja_en_main(outils_mcp)
                 candidats = [o for o in catalogue_complet if o["function"]["name"] not in deja_en_main]
-                trouves = rechercher_outils_pertinents(demande["besoin"], candidats)
+                trouves = rechercher_outils_pertinents(demande["besoin"], candidats, libelles_supplementaires=_LIBELLES_POUR_RECHERCHE_OUTILS)
                 if trouves:
                     # Nouvelle liste (jamais de mutation en place de
                     # l'ancienne outils_mcp) : outils_mcp est aussi ce qui

@@ -127,6 +127,25 @@ _desactive_programme/          ancien "programme d'études adaptatif" (api/core)
                                 voir LISEZ_MOI_NE_JAMAIS_REUTILISER.md, ne jamais réactiver sans consigne explicite
 ```
 
+## Limitation connue : recherche d'outils (Wolfram)
+
+Le 10/09/2026, la recherche interne d'outils (`core/recherche_outils.py`,
+utilisée quand le grand modèle demande en pleine tâche un outil qu'il n'a
+pas encore) a été corrigée pour Tavily, Notion et Google Drive : ces
+outils viennent de services externes, avec un nom et une description
+techniques en anglais qui ne correspondaient jamais à un besoin exprimé
+en français par le modèle. La correction réutilise les libellés français
+déjà présents dans `REGISTRE_AFFICHAGE_OUTILS` (core/registre_outils.py)
+comme indice supplémentaire pour cette recherche.
+
+Wolfram (serveur MCP externe, voir `SERVEURS_MCP` dans
+`core/registre_outils.py`) n'a, à ce jour, aucune entrée dans
+`REGISTRE_AFFICHAGE_OUTILS` — donc aucun libellé français, et le nom
+technique exact de son/ses outil(s) n'a pas été vérifié. Il souffre
+probablement du même problème mais n'a pas été corrigé : ajouter son
+entrée (nom exact de l'outil confirmé + libellé français) avant de le
+traiter de la même façon.
+
 ## Ce qui tourne en production
 
 - Backend FastAPI (`api/main.py`), déployé sur Railway (projet

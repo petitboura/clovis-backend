@@ -63,11 +63,20 @@ def _tokeniser(texte):
     return [mot for mot in _normaliser(texte).split() if mot and mot not in _MOTS_VIDES]
 
 
-def _texte_outil(outil):
+def _texte_outil(outil, libelle_supplementaire=""):
     """
     Concatène nom et description d'un outil candidat pour la recherche.
     `outil` est un dict au format outils_pour_llm existant :
     {"type": "function", "function": {"name": ..., "description": ..., ...}}.
+
+    `libelle_supplementaire` (ajouté le 10/09/2026, demande Bourama) : texte
+    optionnel fourni par l'appelant, utilisé UNIQUEMENT pour enrichir la
+    recherche -- il n'entre pas dans l'outil renvoyé, seulement dans le
+    document comparé au besoin exprimé. Sert notamment pour les outils
+    d'origine externe (Tavily, Notion, Google Drive...) dont le nom et la
+    description techniques sont en anglais et ne recoupent donc jamais un
+    besoin exprimé en français par le grand modèle (ex. "tavily_search"
+    face à "chercher sur internet").
     """
     fonction = outil.get("function", {})
     nom = fonction.get("name", "") or ""
@@ -75,10 +84,10 @@ def _texte_outil(outil):
     # Le nom compte double : souvent plus révélateur que la description
     # (ex. "gerer_document_bibliotheque" est déjà très parlant), sans pour
     # autant écraser le poids de la description.
-    return f"{nom} {nom} {description}"
+    return f"{nom} {nom} {description} {libelle_supplementaire}".strip()
 
 
-def rechercher_outils_pertinents(texte_requete, outils_candidats, seuil_pertinence=SEUIL_PERTINENCE_DEFAUT, max_resultats=5):
+def rechercher_outils_pertinents(texte_requete, outils_candidats, seuil_pertinence=SEUIL_PERTINENCE_DEFAUT, max_resultats=5, libelles_supplementaires=None):
     """
     Compare `texte_requete` (la phrase libre écrite par le grand modèle,
     ex. "il me faudrait un outil pour lire un fichier PDF") aux
@@ -96,6 +105,10 @@ def rechercher_outils_pertinents(texte_requete, outils_candidats, seuil_pertinen
             qu'un outil soit retenu. Par défaut SEUIL_PERTINENCE_DEFAUT.
         max_resultats: nombre maximum d'outils renvoyés, même si plus
             d'outils dépassent le seuil.
+        libelles_supplementaires: dict optionnel {nom_outil: texte français}
+            utilisé seulement pour la comparaison (voir _texte_outil), pas
+            renvoyé dans le résultat. Sert à combler les outils externes
+            dont le nom/la description technique est en anglais.
 
     Returns:
         Liste de dicts, sous-ensemble de `outils_candidats`, triée du plus
@@ -109,7 +122,11 @@ def rechercher_outils_pertinents(texte_requete, outils_candidats, seuil_pertinen
     if not tokens_requete:
         return []
 
-    documents = [_tokeniser(_texte_outil(outil)) for outil in outils_candidats]
+    libelles_supplementaires = libelles_supplementaires or {}
+    documents = [
+        _tokeniser(_texte_outil(outil, libelles_supplementaires.get(outil.get("function", {}).get("name", ""), "")))
+        for outil in outils_candidats
+    ]
     nb_documents = len(documents)
     longueur_moyenne = sum(len(d) for d in documents) / nb_documents
 
