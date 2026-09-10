@@ -68,7 +68,13 @@ class DeplacerDossierPayload(BaseModel):
 
 
 @router.get("")
-def lister(request: Request, utilisateur=Depends(utilisateur_courant)):
+def lister(request: Request, utilisateur=Depends(utilisateur_optionnel)):
+    # 10/09/2026, chantier "Clovis ouvert" (Lot F, sitemap) : utilisateur_courant
+    # -> utilisateur_optionnel. Signale au Lot E, corrige ici : cette liste ne
+    # filtre déjà rien par utilisateur (lister_dossiers() le documente,
+    # "visible par tout le monde"), l'auth obligatoire n'apportait donc
+    # aucune protection réelle -- elle empêchait juste le générateur de
+    # sitemap (sans session) de trouver les dossiers à indexer.
     # 08/09/2026, demande Bourama : les dossiers du pays détecté de
     # l'utilisateur remontent en tête de liste (voir core/geolocalisation_pays.py).
     dossiers = lister_dossiers(pays_prioritaire=pays_utilisateur(request))
