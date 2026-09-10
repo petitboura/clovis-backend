@@ -317,11 +317,10 @@ def _preparer_demander_outils(user_id, agent_id, outils_mcp, conversation_id=Non
     A appeler UNE SEULE FOIS dans main.py, au meme point de convergence
     que _outil_garder_outils (une fois outils_mcp definitivement etabli
     pour ce tour, apres garder_outils lui-meme). Ajoute demander_outils a
-    outils_mcp SEULEMENT si au moins un autre outil est deja propose ce
-    tour-ci (decision explicite de Bourama, 06/09/2026, meme regle que
-    garder_outils : zero cout de schema sur les messages qui n'ont deja
-    aucun outil -- demander_outils sert a completer une selection
-    existante, pas a demarrer de zero).
+    outils_mcp SYSTEMATIQUEMENT, meme si outils_mcp est vide au depart
+    (decision explicite de Bourama, 10/09/2026 : demander_outils doit
+    toujours etre propose, quel que soit l'etat du tour -- ne suit plus
+    la regle de garder_outils).
 
     Recupere aussi le catalogue complet et sa table de routage via
     lister_outils_autorises_pour_agent -- deja mis en cache 24h par
@@ -329,14 +328,11 @@ def _preparer_demander_outils(user_id, agent_id, outils_mcp, conversation_id=Non
     cas courant, juste "piocher dedans" comme voulu par Bourama, aucune
     nouvelle source de donnees creee ici.
 
-    Renvoie (outils_mcp, catalogue_complet, table_routage_complet).
-    Si outils_mcp est vide en entree : renvoie (outils_mcp inchange,
-    None, None), rien n'est recupere pour rien.
+    Renvoie (outils_mcp, catalogue_complet, table_routage_complet), avec
+    demander_outils toujours ajoute a outils_mcp.
     """
-    if not outils_mcp:
-        return outils_mcp, None, None
     catalogue_complet, table_routage_complet = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id, conversation_id)
-    outils_mcp = outils_mcp + [_outil_demander_outils()]
+    outils_mcp = (outils_mcp or []) + [_outil_demander_outils()]
     return outils_mcp, catalogue_complet, table_routage_complet
 
 

@@ -716,11 +716,12 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         _ecrire_outils_retenus(conversation_id, [])
 
     # Outil interne demander_outils (etape 3, chantier "demander_outils",
-    # 06/09/2026, demande Bourama) : ajoute juste apres garder_outils, au
-    # meme point de convergence -- voir _preparer_demander_outils pour la
-    # condition exacte (rien si outils_mcp est vide) et le catalogue
-    # complet + sa table de routage necessaires au branchement reel dans
-    # _agent_groq (core/boucle_agent.py).
+    # 06/09/2026, demande Bourama ; toujours propose depuis le 10/09/2026,
+    # meme si aucun autre outil n'est deja present) : ajoute juste apres
+    # garder_outils, au meme point de convergence -- voir
+    # _preparer_demander_outils pour le catalogue complet + sa table de
+    # routage necessaires au branchement reel dans _agent_groq
+    # (core/boucle_agent.py).
     outils_mcp, catalogue_complet, table_routage_complet = _preparer_demander_outils(user_id, agent_id, outils_mcp, conversation_id)
 
     if localisation and localisation.get("latitude") is not None and localisation.get("longitude") is not None:
