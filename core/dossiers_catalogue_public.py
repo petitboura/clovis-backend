@@ -39,7 +39,7 @@ from core.notifications import creer_notification
 def _dossier(dossier_id: str) -> dict | None:
     res = (
         supabase.table("dossiers_catalogue_public")
-        .select("id, cree_par, nom, description, statut, dossier_parent_id")
+        .select("id, cree_par, nom, description, statut, dossier_parent_id, created_at, pays, niveau, categorie, classe, specialite")
         .eq("id", dossier_id)
         .maybe_single()
         .execute()
