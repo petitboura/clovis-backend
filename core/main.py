@@ -35,7 +35,7 @@ from constantes_agent import (
     GROQ_PRIMARY, MESSAGE_CONTENU_BLOQUE, MESSAGE_ERREUR,
     MODELES_AVEC_REASONING_EFFORT, MODELES_QUALITE_REDUITE,
     MODERATION_ENTREE_ACTIVE, get_secret, supabase,
-    MAX_PASSAGES_CASCADE,
+    MAX_PASSAGES_CASCADE, ROUTEUR_OUTILS_AUTO_DESACTIVE,
 )
 from moderation_message import _verifier_message_utilisateur
 from filtre_texte_streaming import _ressemble_a_du_json_casse  # réexporté pour core/proactivite.py (05/09/2026)
@@ -549,7 +549,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     #   où ça ne change rien).
     outils_suggeres = []
     routeur_auto = False
-    if not outil_force and not ignorer_suggestion_outils and message_utilisateur and not image_url and not images_base64:
+    if not ROUTEUR_OUTILS_AUTO_DESACTIVE and not outil_force and not ignorer_suggestion_outils and message_utilisateur and not image_url and not images_base64:
         def _tache_routeur():
             outils_disponibles_agent, _ = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id, conversation_id)
             # Notion + GitHub exclus du CATALOGUE envoyé au routeur automatique

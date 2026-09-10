@@ -162,6 +162,16 @@ MODELE_ROUTEUR_OUTILS = "groq/compound-mini"
 # par gpt-oss-20b).
 MODELE_ROUTEUR_OUTILS_REPLI = "openai/gpt-oss-20b"
 
+# DESACTIVE (10/09/2026, demande Bourama) : le routeur automatique
+# (_router_outils, appel LLM separe avant chaque reponse pour suggerer des
+# outils) fait perdre du temps sur chaque message et fait double emploi
+# avec demander_outils (voir routage_outils.py), desormais toujours
+# propose au grand modele -- celui-ci peut demander lui-meme un outil des
+# qu'il en a besoin, sans routeur prealable. Code du routeur garde tel
+# quel (voir routage_outils.py), simplement plus jamais appele -- flag a
+# repasser a False pour le reactiver.
+ROUTEUR_OUTILS_AUTO_DESACTIVE = True
+
 # D'apres la doc Groq (console.groq.com/docs/reasoning), le parametre
 # reasoning_effort n'est reconnu que par certains modeles (GPT-OSS 20B/120B,
 # Qwen 3). Les autres modeles de GROQ_FALLBACKS (ex: llama-3.3-70b-versatile,
