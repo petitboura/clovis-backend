@@ -47,7 +47,7 @@ from api.comportements_publics import router as comportements_publics_router
 from api.bibliotheque_publique import router as bibliotheque_publique_router
 from api.dossiers_catalogue_public import router as dossiers_catalogue_public_router
 from api.signalements import router as signalements_router
-from api.corrections_pedagogiques import router as corrections_pedagogiques_router
+from api.signalements_pedagogiques import router as signalements_pedagogiques_router
 from api.audit_hebdomadaire_corrections import router as audit_hebdomadaire_corrections_router
 from api.contenu_legal import router as contenu_legal_router
 from api.codes_partage import router_mes_codes, router_rattachements
@@ -59,12 +59,10 @@ from api.canal_temps_reel import router as canal_temps_reel_router
 from api.webhooks_github import router as webhooks_github_router
 from api.dossiers_designes import router as dossiers_designes_router
 from api.programme_notions import router as programme_notions_router
-from api.cascade_supervision import router as cascade_supervision_router
 from core.serveur_mcp_generation import mcp_generation
 from core.notifications_push import traiter_rappels_echus, un_canal_push_disponible
 from core.proactivite import verifier_relances_proactives
 from core.audit_hebdomadaire_corrections import verifier_audits_hebdomadaires
-from core.cascade_supervision import verifier_progression_cascades
 from core.file_attente_vectorisation import (
     remettre_en_attente_bloques,
     traiter_file_attente_une_fois,
@@ -150,21 +148,6 @@ async def _boucle_planificateur_audit_corrections():
         except Exception as e:
             logging.error(f"ERREUR boucle planificateur audit corrections : {e}")
         await asyncio.sleep(6 * 60 * 60)
-
-
-async def _boucle_planificateur_cascade_supervision():
-    # Cascade de supervision (Partie 10, 07/09/2026) : délais exprimés
-    # en jours (J2/J5), un passage toutes les heures suffit largement à
-    # respecter ces délais sans dérive notable, même en cas de
-    # redémarrage -- même principe que _boucle_planificateur_audit_corrections.
-    while True:
-        try:
-            examinees = verifier_progression_cascades()
-            if examinees:
-                logging.info(f"Planificateur cascade supervision : {examinees} cascade(s) examinée(s).")
-        except Exception as e:
-            logging.error(f"ERREUR boucle planificateur cascade supervision : {e}")
-        await asyncio.sleep(60 * 60)
 
 
 # _boucle_planificateur_audits() supprimée du code actif le 29/08/2026 --
@@ -389,7 +372,6 @@ async def _lifespan(app: FastAPI):
         tache_description_skills = asyncio.create_task(_boucle_description_skills())
         tache_reessai_echecs_description = asyncio.create_task(_boucle_reessai_echecs_description())
         tache_audit_corrections = asyncio.create_task(_boucle_planificateur_audit_corrections())
-        tache_cascade_supervision = asyncio.create_task(_boucle_planificateur_cascade_supervision())
         yield
         if tache_planificateur:
             tache_planificateur.cancel()
@@ -689,7 +671,7 @@ app.include_router(comportements_publics_router)
 app.include_router(bibliotheque_publique_router)
 app.include_router(dossiers_catalogue_public_router)
 app.include_router(signalements_router)
-app.include_router(corrections_pedagogiques_router)
+app.include_router(signalements_pedagogiques_router)
 app.include_router(audit_hebdomadaire_corrections_router)
 app.include_router(contenu_legal_router)
 app.include_router(router_mes_codes)
@@ -701,7 +683,6 @@ app.include_router(canal_temps_reel_router)
 app.include_router(dossiers_designes_router)
 app.include_router(webhooks_github_router)
 app.include_router(programme_notions_router)
-app.include_router(cascade_supervision_router)
 
 
 @app.get("/health")

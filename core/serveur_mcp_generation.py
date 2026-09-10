@@ -31,8 +31,9 @@ uniquement un déplacement de code :
     de connaissance, matière active
   - outils_mobile.py             : dossiers désignés et exploration sur
     le téléphone de l'étudiant
-  - outils_corrections_pedagogiques.py : correction par le prof d'un
-    signalement de type A (Point 2, Partie 4, 06/09/2026)
+  - outils_signalements.py       : discussion prof/LLM sur un
+    signalement pédagogique, note de synthèse, rattachement matière/
+    notion (refonte du 10/09/2026)
   - outils_avancement_notions.py : avancement des notions (Partie 1) en
     langage naturel + règle de comportement (Partie 3, chantier
     "confiance pédagogique")
@@ -71,5 +72,5 @@ import core.outils_memoire_profil  # noqa: F401
 import core.outils_comportements_connaissance  # noqa: F401
 import core.outils_comportements_publics  # noqa: F401
 import core.outils_mobile  # noqa: F401
-import core.outils_corrections_pedagogiques  # noqa: F401
+import core.outils_signalements  # noqa: F401
 import core.outils_avancement_notions  # noqa: F401

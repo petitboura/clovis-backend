@@ -1,7 +1,6 @@
 """
 Créé le 06/09/2026, Bourama : fondations du système établissement (Partie 9
-du chantier "confiance pédagogique", voir Point 6 du document de vision --
-uniquement la partie établissement, pas la cascade qui est la Partie 10).
+du chantier "confiance pédagogique", voir Point 6 du document de vision).
 
 Décision prise avec Bourama avant d'écrire ce fichier (constat d'audit n°1
 du plan de travail) : nouvelles tables (`etablissements`,
@@ -12,12 +11,11 @@ intouché. Voir migrations/2026_09_06_etablissements.sql.
 
 Trois états de rattachement (voir tableau du document de vision) :
 - "suivi" : action immédiate, pas de validation. Contenu public + notif
-  sur le contenu public uniquement. Ne compte pas pour la cascade.
+  sur le contenu public uniquement.
 - "demande_en_attente" : action "se connecter", en attente de validation
   par l'établissement.
 - "accepte" : rattachement réel validé. Contenu privé en plus du public,
-  notifié sur toute publication (publique ou privée). Compte pour la
-  cascade (Partie 10, pas construite ici).
+  notifié sur toute publication (publique ou privée).
 """
 
 import logging
@@ -177,7 +175,7 @@ def demander_connexion(etablissement_id: str, utilisateur_id: str) -> dict:
 
 def accepter_rattachement(rattachement_id: str, acteur_id: str) -> dict:
     """Réservé à l'établissement concerné. Fait passer le rattachement en
-    "accepte" (rattachement réel, contenu privé, compte pour la cascade)."""
+    "accepte" (rattachement réel, contenu privé)."""
     res = supabase.table("etablissements_rattachements").select("*").eq("id", rattachement_id).execute()
     rattachement = res.data[0] if res.data else None
     if not rattachement:

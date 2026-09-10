@@ -18,13 +18,8 @@ depuis :
   etablissement_demande_acceptee : ajoutes le 06/09/2026 (Partie 9), voir
   core/etablissements.py -- systeme etablissement independant de l'ancien
   profiles.role/etablissement_id (migration 2026-08-04)
-- correction_traitee (Partie 5, 06/09/2026, chantier "confiance
-  pedagogique") : voir
-  core/corrections_pedagogiques.py::enregistrer_correction_prof
-- cascade_supervision_j2 / cascade_supervision_j5 /
-  cascade_supervision_equipe_clovis / cascade_supervision_resolue
-  (Partie 10, 07/09/2026, chantier "confiance pedagogique") : voir
-  core/cascade_supervision.py
+- signalement_demande_visibilite (refonte 10/09/2026, chantier
+  "confiance pedagogique") : voir core/signalements.py::demander_visibilite
 - demande_confirmation_dossier_public / demande_dossier_public_traitee
   (09/09/2026, "confirmation contributeurs") : voir
   core/dossiers_catalogue_public.py
@@ -45,11 +40,9 @@ from core.canal_temps_reel import notifier_utilisateur
 
 TYPES_VALIDES = {
     "rappel_echu", "action_ia_terminee", "document_recu_code", "message_systeme",
-    "audit_hebdomadaire_corrections", "correction_traitee",
+    "audit_hebdomadaire_corrections", "signalement_demande_visibilite",
     # Système établissement (06/09/2026, Partie 9) -- voir core/etablissements.py
     "etablissement_publication", "etablissement_demande_connexion", "etablissement_demande_acceptee",
-    # Cascade de supervision (07/09/2026, Partie 10) : voir core/cascade_supervision.py
-    "cascade_supervision_j2", "cascade_supervision_j5", "cascade_supervision_equipe_clovis", "cascade_supervision_resolue",
     # Nouvelle version app mobile disponible (09/09/2026, demande Bourama) :
     # voir core/notifications_push.py::notifier_nouvelle_version_disponible,
     # déclenché par le webhook GitHub (api/webhooks_github.py). "lien"

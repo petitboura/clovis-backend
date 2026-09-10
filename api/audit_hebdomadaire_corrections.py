@@ -1,7 +1,7 @@
 """
-Endpoint de lecture de l'audit synthétique hebdomadaire des corrections
-pédagogiques (Point 4, Partie 8, 06/09/2026). Séparé de
-api/corrections_pedagogiques.py (CRUD des corrections elles-mêmes) :
+Endpoint de lecture de l'audit synthétique hebdomadaire des
+signalements pédagogiques (Partie 8, mis à jour le 10/09/2026). Séparé
+de api/signalements_pedagogiques.py (CRUD des signalements eux-mêmes) :
 brique de logique distincte, voir règle transversale du plan de travail
 sur la taille des fichiers.
 """
@@ -16,8 +16,7 @@ router = APIRouter(prefix="/api/audit-corrections", tags=["audit_hebdomadaire_co
 
 @router.get("/mon-audit")
 def mon_audit(utilisateur=Depends(utilisateur_courant)):
-    """Synthèse par tendance des corrections pédagogiques reçues par le
-    prof courant (voir Bureau > audit) : notions les plus en difficulté
-    si disponibles, sinon repli par type A/B, et liste des signalements
-    de type A encore non traités."""
+    """Synthèse par notion des signalements reçus par le prof courant
+    (voir Bureau > audit), et liste des signalements encore "nouveau"
+    (pas ouverts en discussion)."""
     return calculer_audit_prof(utilisateur.id)
