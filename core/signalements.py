@@ -465,3 +465,72 @@ def consulter_par_notion(agent_id: str, etudiant_id: str, code_id: str | None, n
         logging.error(f"ERREUR SUPABASE (consultation signalements notion={notion_id} code={code_id}) : {e}")
         return []
     return res.data or []
+
+
+def signalements_pertinents_pour_injection(
+    agent_id: str, etudiant_id: str, code_id: str | None, notion_ids: list[str] | None = None
+) -> list[dict]:
+    """Point d'entrée pour l'injection AUTOMATIQUE dans le prompt système
+    (10/09/2026, demande Bourama, même principe que
+    avancement_notions_ia.py::notions_pertinentes_pour_eleve : calculé
+    déterministiquement à chaque message, pas une consigne que le LLM
+    peut choisir de ne pas suivre). Hybride avec l'outil MCP
+    consulter_signalement (voir core/outils_signalements.py) qui reste
+    disponible pour creuser au-delà de ce qui est injecté ici.
+
+    Combine deux sources, dédupliquées par id :
+    - les signalements rattachés à une notion précise parmi
+      `notion_ids` (notions jugées pertinentes pour CE message par
+      notions_pertinentes_pour_eleve, calculées juste avant dans
+      core/main.py -- pas de second appel sémantique ici) ;
+    - les signalements rattachés à la matière (code_id) mais SANS
+      notion précise (notion_id NULL) -- une note de portée plus large
+      que le prof a volontairement laissée au niveau matière.
+
+    Uniquement ceux avec une note (correction_texte), mêmes règles que
+    consulter_par_notion. code_id absent (élève sans code actif ou mode
+    actif ambigu) -> liste vide, jamais de requête large non rattachée
+    à un élève identifié."""
+    if not code_id:
+        return []
+
+    resultats_par_id: dict[str, dict] = {}
+
+    notion_ids = [n for n in (notion_ids or []) if n]
+    if notion_ids:
+        try:
+            res_notions = (
+                supabase.table("signalements")
+                .select("id, question_texte, reponse_texte, probleme_observe, correction_texte, code_id, notion_id")
+                .eq("etudiant_id", etudiant_id)
+                .eq("agent_id", agent_id)
+                .not_.is_("correction_texte", "null")
+                .in_("notion_id", notion_ids)
+                .order("updated_at", desc=True)
+                .limit(20)
+                .execute()
+            )
+            for ligne in res_notions.data or []:
+                resultats_par_id[ligne["id"]] = ligne
+        except Exception as e:
+            logging.error(f"ERREUR SUPABASE (signalements pertinents, notions={notion_ids}) : {e}")
+
+    try:
+        res_matiere = (
+            supabase.table("signalements")
+            .select("id, question_texte, reponse_texte, probleme_observe, correction_texte, code_id, notion_id")
+            .eq("etudiant_id", etudiant_id)
+            .eq("agent_id", agent_id)
+            .eq("code_id", code_id)
+            .is_("notion_id", "null")
+            .not_.is_("correction_texte", "null")
+            .order("updated_at", desc=True)
+            .limit(20)
+            .execute()
+        )
+        for ligne in res_matiere.data or []:
+            resultats_par_id[ligne["id"]] = ligne
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (signalements pertinents, code={code_id}) : {e}")
+
+    return list(resultats_par_id.values())[:20]

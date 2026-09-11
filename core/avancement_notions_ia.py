@@ -439,6 +439,7 @@ def notions_pertinentes_pour_eleve(receveur_id: str, message: str, rattachement_
     for c in candidats:
         notion = par_id.get(c["id"]) or c
         resultat.append({
+            "id": notion["id"],
             "nom": notion["nom"],
             "statut": notion["statut"],
             "regle": regle_effective_pour_notion(notion, toutes),

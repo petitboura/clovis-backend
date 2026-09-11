@@ -19,7 +19,8 @@ from comportements_etudiants import (
 #   from codes_partage import lister_programmes_recus_legers
 from codes_partage import lister_comportements_recus
 from mode_actif_conversation import obtenir_mode_actif
-from avancement_notions_ia import notions_pertinentes_pour_eleve
+from avancement_notions_ia import notions_pertinentes_pour_eleve, resoudre_code_actif_eleve
+from signalements import signalements_pertinents_pour_injection
 from mcp_tools import lister_outils_autorises_pour_agent, filtrer_catalogue_par_outil_force, appeler_outil
 from fournisseurs_llm import generer_reponse_premium
 
@@ -408,6 +409,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     # c'est ce petit routeur qui décide de le déclencher, pas le grand LLM.
     comportements_etudiant = []
     notions_programme_pertinentes = []
+    signalements_pertinents = []
     if user_id and message_utilisateur:
         # Perf (11/09/2026, demande Bourama : "tout ce qui peut se faire en
         # parallele plutot qu'a la suite, allez go") : ces 4 petites
@@ -434,12 +436,27 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         # codes_partage.py::lister_comportements_recus qui gère alors tout
         # seul le repli sur l'unique rattachement).
         rattachement_id_actif = mode_actif.get("rattachement_id") if mode_actif else None
-
         with concurrent.futures.ThreadPoolExecutor() as executor:
             f_notions = executor.submit(notions_pertinentes_pour_eleve, user_id, message_utilisateur, rattachement_id_actif)
             f_comportements_recus = executor.submit(lister_comportements_recus, user_id, rattachement_id_actif)
+            # Signalements pertinents (10/09/2026, refonte, demande Bourama) :
+            # code_id actif de l'élève, même rattachement_id_actif -- ne
+            # dépend d'aucun des deux autres, ajouté au même lot parallèle
+            # (11/09/2026, perf) plutôt qu'après-coup en séquentiel. Voir
+            # signalements.py::signalements_pertinents_pour_injection, qui a
+            # elle besoin du résultat de f_notions (notion_ids), donc
+            # appelée après ce bloc, pas dans l'executor.
+            f_code_actif = executor.submit(resoudre_code_actif_eleve, user_id, rattachement_id_actif)
             notions_programme_pertinentes = f_notions.result()
             comportements_recus = f_comportements_recus.result()
+            code_actif = f_code_actif.result()
+
+        code_id_actif = code_actif["id"] if code_actif and not isinstance(code_actif, list) else None
+        if code_id_actif:
+            notion_ids_pertinentes = [n["id"] for n in notions_programme_pertinentes if n.get("id")]
+            signalements_pertinents = signalements_pertinents_pour_injection(
+                agent_id, user_id, code_id_actif, notion_ids_pertinentes
+            )
 
         tous_comportements = (
             [c for c in comportements_etudiant_bruts if c.get("actif", True)]
@@ -597,7 +614,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             catalogue_complet, table_routage_complet = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id, conversation_id)
             outils_mcp, table_routage = filtrer_catalogue_par_outil_force(catalogue_complet, table_routage_complet, outil_force_contexte_seul)
             outil_force_verifie_optimiste = [o["function"]["name"] for o in outils_mcp] if outil_force_contexte_seul else None
-            system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie_optimiste, sans_enseignant, comportements_etudiant, mes_programmes, notions_programme_pertinentes)
+            system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie_optimiste, sans_enseignant, comportements_etudiant, mes_programmes, notions_programme_pertinentes, signalements_pertinents)
             return outils_mcp, table_routage, system_final, catalogue_complet, table_routage_complet
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -716,7 +733,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             catalogue_complet, table_routage_complet = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id, conversation_id)
             outils_mcp, table_routage = filtrer_catalogue_par_outil_force(catalogue_complet, table_routage_complet, outil_force)
             outil_force_verifie = [o["function"]["name"] for o in outils_mcp] if outil_force else outil_force
-        system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie, sans_enseignant, comportements_etudiant, mes_programmes, notions_programme_pertinentes)
+        system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie, sans_enseignant, comportements_etudiant, mes_programmes, notions_programme_pertinentes, signalements_pertinents)
 
         # PERF (10/08) : second (et dernier) point de vérification --
         # couvre tous les chemins qui ne passent PAS par le premier

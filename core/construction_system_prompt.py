@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from configuration import get_system_prompt
 from profils_agents import INSTRUCTIONS_FORMATS_AFFICHAGE, INSTRUCTIONS_ARBITRAGE_CALCUL, REGLE_CONTEXTE_INVISIBLE, INSTRUCTIONS_LONGUEUR_REPONSE
 
-def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longueur_reponse="moyenne", fuseau_horaire=None, recherche_forcee=False, outil_force=None, sans_enseignant=False, comportements_etudiant=None, mes_programmes=None, notions_pertinentes=None):
+def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longueur_reponse="moyenne", fuseau_horaire=None, recherche_forcee=False, outil_force=None, sans_enseignant=False, comportements_etudiant=None, mes_programmes=None, notions_pertinentes=None, signalements_pertinents=None):
     # Restauré le 14/08 (voir commentaire des constantes plus haut) : la
     # page Notion de l'agent (get_system_prompt) ne doit plus contenir QUE
     # la personnalité/le comportement propre à l'agent -- les 3 blocs fixes
@@ -48,6 +48,7 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     comportements_etudiant = comportements_etudiant or []
     mes_programmes = mes_programmes or []
     notions_pertinentes = notions_pertinentes or []
+    signalements_pertinents = signalements_pertinents or []
 
     if comportements_etudiant:
         candidats = "\n".join(
@@ -100,6 +101,34 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
             "-> aide sans utiliser cette notion, reste dans ce qui a déjà été vu ; \"a_venir\" sans règle ou "
             "avec règle \"signaler\" -> aide normalement en signalant que ce n'est pas encore vu. Si aucune "
             "de ces notions ne correspond vraiment à la question, ignore cette liste et réponds normalement."
+        )
+
+    # Signalements pédagogiques pertinents (10/09/2026, refonte du
+    # systeme de signalements, demande Bourama) : injection AUTOMATIQUE
+    # -- meme principe que le bloc "notions pertinentes" juste au-dessus,
+    # calculee deterministiquement dans core/main.py (voir
+    # signalements.py::signalements_pertinents_pour_injection), PAS une
+    # consigne que le LLM pourrait choisir de ne pas suivre. Hybride avec
+    # l'outil MCP consulter_signalement (core/outils_signalements.py),
+    # que le modele peut appeler pour creuser un signalement precis
+    # au-dela de ce qui est resume ici. Uniquement les signalements
+    # DEJA notes par le prof (correction_texte) -- jamais un signalement
+    # encore en attente de traitement, qui n'a rien a apprendre au LLM.
+    if signalements_pertinents:
+        lignes_signalements = []
+        for s in signalements_pertinents:
+            probleme = f", problème observé par l'élève : \"{s['probleme_observe']}\"" if s.get("probleme_observe") else ""
+            lignes_signalements.append(
+                f"- note du prof : \"{s['correction_texte']}\"{probleme}"
+            )
+        system_final += (
+            "\n\nNOTES DU PROF SUR DES SIGNALEMENTS PASSÉS, POTENTIELLEMENT LIÉES À CE MESSAGE "
+            "(élève ou matière/notion active, PAS un historique exhaustif) :\n"
+            f"{chr(10).join(lignes_signalements)}\n"
+            "Si l'une de ces notes concerne vraiment la question posée, applique-la (corrige la façon "
+            "de répondre en conséquence). Si aucune ne correspond vraiment, ignore cette liste et "
+            "réponds normalement -- ne mentionne jamais ces notes à l'élève comme si elles venaient "
+            "de lui être rappelées."
         )
 
     # Bloc outils actifs / aucun outil actif (restauré 14/08) : outil_force
@@ -215,6 +244,7 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
         f"Prompt système construit -> base_notion:{len(system_final or '')} caractères, "
         f"comportements_etudiant:{'oui' if comportements_etudiant else 'NON'}, "
         f"programmes_etudiant:{len(mes_programmes)}, "
+        f"signalements_pertinents:{len(signalements_pertinents)}, "
         f"longueur_reponse:{longueur_reponse}, "
         f"recherche_forcee:{'oui' if recherche_forcee else 'NON'}"
     )
