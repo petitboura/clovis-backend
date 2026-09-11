@@ -834,7 +834,28 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             "parts": _construire_parts_gemini(message_pour_modele, images),
         })
 
-        reponse_accumulee = []
+        # ETAPE 1 (11/09/2026, chantier "image -> grand modele", demande
+        # Bourama) : Gemini ne repond plus a l'etudiant sur ce chemin, il
+        # decrit/transcrit fidelement l'image ou la video en texte. Cette
+        # description est capturee en interne uniquement pour l'instant --
+        # rien n'est encore branche sur le flux normal (etape 2) ni sauvegarde
+        # dans l'historique (etape 4), rien n'est encore renvoye a l'etudiant :
+        # c'est attendu a ce stade, le reste suit dans les etapes suivantes,
+        # toujours sur cette meme branche.
+        instruction_description_gemini = (
+            "Tu es un outil de vision qui vient en appui d'un assistant "
+            "pedagogique, tu ne t'adresses jamais directement a l'eleve. "
+            "Decris ou transcris fidelement, en francais, tout ce que "
+            "contient l'image ou la video ci-jointe : texte imprime ou "
+            "manuscrit transcrit mot pour mot (enonce d'exercice, "
+            "consigne...), schemas, graphiques, tableaux, formules. Reste "
+            "factuel et complet, ne reponds a aucune question qui pourrait "
+            "apparaitre dans l'image et n'ajoute aucune interpretation ou "
+            "resolution de ta part. Cette description sera transmise telle "
+            "quelle a un autre assistant qui repondra reellement a l'eleve."
+        )
+
+        description_accumulee = []
         meta_utilisateur = {"pieces_jointes": []}
         if image_url:
             meta_utilisateur["pieces_jointes"].append({
@@ -860,22 +881,22 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 model=GOOGLE_MODEL,
                 contents=gemini_messages,
                 config=types.GenerateContentConfig(
-                    system_instruction=system_final
+                    system_instruction=instruction_description_gemini
                 )
             )
             for chunk in response:
                 if chunk.text:
-                    reponse_accumulee.append(chunk.text)
-                    yield {"type": "reponse", "texte": chunk.text}
-            logging.info("Réponse via GEMINI (image)")
-            ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=GOOGLE_MODEL, meta_utilisateur=meta_utilisateur)
-            if ids_historique:
-                yield {"type": "meta", **ids_historique}
-            _finaliser_memoire_en_arriere_plan(user_id, agent_id)
+                    description_accumulee.append(chunk.text)
+            description_generee = "".join(description_accumulee)
+            logging.info(f"Description GEMINI (image) générée : {len(description_generee)} caractères")
         except Exception as e:
             logging.error(f"ERREUR GEMINI (image): {e}")
-            if not reponse_accumulee:
-                yield {"type": "reponse", "texte": MESSAGE_ERREUR}
+        # ETAPE 1 uniquement : rien de plus a ce stade (voir commentaire
+        # au-dessus) -- pas de branchement sur messages_base/grand modele
+        # (etape 2), pas de gestion d'echec definitive (etape 3), pas de
+        # sauvegarde historique (etape 4). Le `return` ci-dessous est donc
+        # volontairement conserve tel quel pour l'instant, la branche
+        # n'etant pas encore fonctionnelle de bout en bout.
         return
 
     if modele_force:
