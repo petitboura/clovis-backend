@@ -182,13 +182,15 @@ def lister_catalogue_public(
     CORRECTIF 10/09/2026 (bugs remontés par Bourama en testant) :
     l'égalité stricte construite via le query builder ici même a été
     remplacée par le RPC lister_catalogue_public_filtre (voir migration
-    2026_09_10_filtres_catalogue_public_permissifs.sql), pour la même
-    raison que chercher_catalogue_public/chercher_catalogue_public_
-    mots_cles : 1) un document dont le champ filtré n'a jamais été
-    renseigné reste inclus au lieu d'être exclu à tort ("il faut qu'on
-    ne perde rien", demande Bourama) 2) comparaison insensible à la
-    casse/aux espaces (un document avec classe="Terminale" en base
-    remonte maintenant même si le filtre est passé en "terminale").
+    2026_09_10b_filtres_catalogue_public_stricts.sql). Chaque filtre
+    FOURNI doit matcher EXACTEMENT (insensible à la casse/aux espaces
+    -- un document avec classe="Terminale" en base remonte même si le
+    filtre est passé en "terminale"), un document dont le champ n'est
+    pas renseigné reste exclu comme avant. Un essai plus permissif
+    (documents non renseignés inclus par défaut) a été tenté puis
+    annulé le jour même sur demande de Bourama : la vraie cause des
+    documents manquants était ailleurs (fonctions RPC dupliquées +
+    casse), pas l'absence de valeur.
     """
     res = (
         supabase.rpc(
