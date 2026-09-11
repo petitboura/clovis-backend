@@ -859,6 +859,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
 
         description_accumulee = []
         description_generee = ""
+        description_echec = False
         meta_utilisateur = {"pieces_jointes": []}
         if image_url:
             meta_utilisateur["pieces_jointes"].append({
@@ -893,11 +894,13 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             description_generee = "".join(description_accumulee)
             logging.info(f"Description GEMINI (image) générée : {len(description_generee)} caractères")
         except Exception as e:
-            # ETAPE 3 (gestion d'echec definitive) pas encore traitee ici --
-            # a discuter avec Bourama. Pour l'instant, description_generee
-            # reste a "" (voir plus haut) : la question d'origine de
-            # l'eleve continue quand meme vers le grand modele juste en
-            # dessous, sans description d'image, plutot que de tout arreter.
+            # ETAPE 3 (11/09/2026, demande Bourama) : la description echoue
+            # -- on continue quand meme vers le grand modele (pas d'arret
+            # complet), mais il doit savoir qu'une image/video etait jointe
+            # et que sa description a echoue, plutot que de traiter le
+            # message comme s'il n'y avait jamais eu de piece jointe. Voir
+            # bloc juste en dessous.
+            description_echec = True
             logging.error(f"ERREUR GEMINI (image): {e}")
 
         # ETAPE 2 (11/09/2026) : la description remplace/complete
@@ -912,6 +915,20 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 "[Contenu de l'image ou de la vidéo jointe par l'élève, "
                 "décrit/transcrit par un outil de vision]\n"
                 f"{description_generee}"
+            )
+            messages_base[-1]["content"] = message_pour_modele
+        elif description_echec:
+            # ETAPE 3 : le grand modele doit savoir qu'une piece jointe
+            # existait et n'a pas pu etre lue, pas la traiter en silence
+            # comme un message texte ordinaire.
+            message_pour_modele = (
+                f"{message_pour_modele}\n\n"
+                "[L'élève a joint une image ou une vidéo à ce message, mais "
+                "la lecture automatique de son contenu a échoué : tu n'as "
+                "donc pas accès à ce qu'elle contient. Si c'est nécessaire "
+                "pour répondre, dis-le à l'élève et demande-lui de "
+                "redécrire ce que montre l'image/la vidéo, ou de la "
+                "renvoyer.]"
             )
             messages_base[-1]["content"] = message_pour_modele
 
