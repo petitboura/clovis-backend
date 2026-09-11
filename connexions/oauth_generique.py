@@ -44,6 +44,7 @@ import string
 import hashlib
 import base64
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
@@ -297,6 +298,11 @@ def finaliser_connexion(service, code, state):
         logging.error(f"ERREUR ECRITURE connexions_oauth ({service}) : {e}")
         return False, f"Connexion {service} impossible (erreur interne au stockage)."
 
+    # Cache invalidé (11/09/2026) : voir connexions/notion.py, même
+    # raison -- sans ça un "None" mis en cache juste avant cette connexion
+    # resterait servi jusqu'à 2 minutes.
+    _cache_token.pop((service, user_id), None)
+
     return True, f"Connecté à {service}."
 
 
@@ -341,15 +347,32 @@ def _rafraichir(service, config, connexion):
     return tokens["access_token"]
 
 
+# Cache très court (11/09/2026, demande Bourama : "pas à chaque message
+# si ça peut être évité") : même principe que connexions/notion.py --
+# TTL bien plus court que MARGE_RAFRAICHISSEMENT (2 minutes < 5 minutes),
+# donc un token servi depuis ce cache est toujours loin de son heure de
+# rafraîchissement.
+_DUREE_CACHE_SECONDES = 2 * 60
+_cache_token = {}  # (service, user_id) -> {"valeur": str | None, "expire_a": ts}
+
+
 def obtenir_token_valide(service, user_id):
     """
     Retourne un access_token utilisable pour ce service et cet
     utilisateur, en le rafraîchissant si besoin. Retourne None si
-    jamais connecté, service inconnu, ou connexion morte.
+    jamais connecté, service inconnu, ou connexion morte. Mise en cache
+    2 minutes (voir ci-dessus) pour éviter de revalider en base à chaque
+    message.
     """
     config = SERVICES.get(service)
     if not config or not user_id:
         return None
+
+    cle = (service, user_id)
+    maintenant = time.time()
+    entree = _cache_token.get(cle)
+    if entree is not None and entree["expire_a"] > maintenant:
+        return entree["valeur"]
 
     ligne = (
         supabase.table("connexions_oauth")
@@ -359,14 +382,18 @@ def obtenir_token_valide(service, user_id):
         .execute()
     )
     if not ligne.data:
+        _cache_token[cle] = {"valeur": None, "expire_a": maintenant + _DUREE_CACHE_SECONDES}
         return None
 
     connexion = ligne.data[0]
     expire_le = datetime.fromisoformat(connexion["expires_at"])
     if datetime.now(timezone.utc) + MARGE_RAFRAICHISSEMENT < expire_le:
-        return connexion["access_token"]
+        token = connexion["access_token"]
+    else:
+        token = _rafraichir(service, config, connexion)
 
-    return _rafraichir(service, config, connexion)
+    _cache_token[cle] = {"valeur": token, "expire_a": maintenant + _DUREE_CACHE_SECONDES}
+    return token
 
 
 def est_connecte(service, user_id):

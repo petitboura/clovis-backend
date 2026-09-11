@@ -20,7 +20,7 @@ from comportements_etudiants import (
 from codes_partage import lister_comportements_recus
 from mode_actif_conversation import obtenir_mode_actif
 from avancement_notions_ia import notions_pertinentes_pour_eleve
-from mcp_tools import lister_tous_les_outils, lister_outils_autorises_pour_agent, appeler_outil
+from mcp_tools import lister_outils_autorises_pour_agent, filtrer_catalogue_par_outil_force, appeler_outil
 from fournisseurs_llm import generer_reponse_premium
 
 # 05/09/2026 (demande Bourama) : main.py decoupe en plusieurs fichiers pour
@@ -40,13 +40,13 @@ from constantes_agent import (
 from moderation_message import _verifier_message_utilisateur
 from filtre_texte_streaming import _ressemble_a_du_json_casse  # réexporté pour core/proactivite.py (05/09/2026)
 from lecture_urls_externes import _construire_parts_gemini, _enrichir_message_avec_urls, _telecharger_image
-from profils_agents import _mettre_a_jour_profil_utilisateur_si_besoin, _nom_agent, _nom_lisible, _nom_lisible_appel
+from profils_agents import _nom_agent, _nom_lisible, _nom_lisible_appel
 from routage_outils import (
     _ecrire_outils_retenus, _lire_outils_retenus, _outil_garder_outils, _router_outils,
     _preparer_demander_outils, _catalogue_pour_demander_outils,
 )
 from construction_system_prompt import _construire_system_prompt, _est_timeout, _repli_si_reponse_partielle
-from persistance_echanges import _sauvegarder_echange, _mettre_a_jour_resume_si_besoin
+from persistance_echanges import _sauvegarder_echange, _finaliser_memoire_en_arriere_plan
 from execution_outils import _resultat_pour_affichage
 from boucle_agent import _agent_groq, _capturer_reponse
 
@@ -409,31 +409,41 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     comportements_etudiant = []
     notions_programme_pertinentes = []
     if user_id and message_utilisateur:
-        # Mode actif (08/09/2026, demande Bourama) : avant ce fix,
-        # lister_comportements_recus mélangeait les skills de TOUS les
-        # codes de user_id, sans jamais regarder lequel est actif pour
-        # CETTE conversation. rattachement_id_actif est None si
-        # conversation_id est absent, si aucun mode actif n'a encore été
-        # choisi, ou si user_id n'a qu'un seul rattachement (pas
-        # d'ambiguïté dans ce dernier cas, voir
-        # codes_partage.py::lister_comportements_recus qui gère alors
-        # tout seul le repli sur l'unique rattachement).
-        mode_actif = obtenir_mode_actif(conversation_id, user_id) if conversation_id else None
+        # Perf (11/09/2026, demande Bourama : "tout ce qui peut se faire en
+        # parallele plutot qu'a la suite, allez go") : ces 4 petites
+        # lectures en base tournaient jusqu'ici l'une apres l'autre alors
+        # que rien ne les y oblige. Mode actif (08/09/2026) et
+        # comportements personnels ne dependent d'aucun des deux :
+        # lances ensemble. Notions du programme (09/09/2026) et
+        # comportements recus par code, eux, ont besoin de
+        # rattachement_id_actif (resultat de mode actif) : lances
+        # ensemble juste apres, une fois mode actif connu -- jamais avant,
+        # sinon rattachement_id_actif ne serait pas encore disponible.
+        # Memes donnees recuperees exactement qu'avant ce correctif, seul
+        # l'ordre d'attente change (aucun changement de fraicheur des
+        # donnees).
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            f_mode_actif = executor.submit(obtenir_mode_actif, conversation_id, user_id) if conversation_id else None
+            f_comportements_etudiant = executor.submit(lister_comportements_etudiant, agent_id, user_id)
+            mode_actif = f_mode_actif.result() if f_mode_actif else None
+            comportements_etudiant_bruts = f_comportements_etudiant.result()
+
+        # rattachement_id_actif est None si conversation_id est absent, si
+        # aucun mode actif n'a encore été choisi, ou si user_id n'a qu'un
+        # seul rattachement (pas d'ambiguïté dans ce dernier cas, voir
+        # codes_partage.py::lister_comportements_recus qui gère alors tout
+        # seul le repli sur l'unique rattachement).
         rattachement_id_actif = mode_actif.get("rattachement_id") if mode_actif else None
-        # Notions du programme pertinentes (09/09/2026, demande Bourama) :
-        # calculees ICI, deterministiquement, a CHAQUE message d'un eleve
-        # rattache a un code, corrige le bug "la consultation du
-        # programme n'est jamais obligatoire, c'est une consigne de
-        # comportement que le LLM peut simplement ne pas suivre" (voir
-        # avancement_notions_ia.py::notions_pertinentes_pour_eleve). Ne
-        # depend d'aucun choix du LLM, contrairement a l'outil MCP
-        # consulter_avancement_notion garde en option secondaire. Meme
-        # rattachement_id_actif que pour les skills juste au-dessus,
-        # aucune requete supplementaire pour le resoudre.
-        notions_programme_pertinentes = notions_pertinentes_pour_eleve(user_id, message_utilisateur, rattachement_id_actif)
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            f_notions = executor.submit(notions_pertinentes_pour_eleve, user_id, message_utilisateur, rattachement_id_actif)
+            f_comportements_recus = executor.submit(lister_comportements_recus, user_id, rattachement_id_actif)
+            notions_programme_pertinentes = f_notions.result()
+            comportements_recus = f_comportements_recus.result()
+
         tous_comportements = (
-            [c for c in lister_comportements_etudiant(agent_id, user_id) if c.get("actif", True)]
-            + lister_comportements_recus(user_id, rattachement_id_actif)
+            [c for c in comportements_etudiant_bruts if c.get("actif", True)]
+            + comportements_recus
         )
         candidats_niveau1, candidats_chapitre = separer_comportements_par_niveau(tous_comportements)
         retenus_niveau1 = choisir_comportements_pertinents(message_utilisateur, candidats_niveau1)
@@ -580,11 +590,15 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             return _router_outils(message_utilisateur, outils_disponibles_agent, historique)
 
         def _tache_prompt_optimiste():
+            # Catalogue brut recupere UNE SEULE FOIS ici (11/09/2026) et
+            # renvoye avec le reste -- reutilise plus bas pour
+            # demander_outils au lieu d'etre redemande.
             outil_force_contexte_seul = _fusionner_outils(None, outils_forces_contexte + outils_retenus_precedents)
-            outils_mcp, table_routage = lister_tous_les_outils(get_secret, user_id, agent_id, outil_force_contexte_seul, conversation_id)
+            catalogue_complet, table_routage_complet = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id, conversation_id)
+            outils_mcp, table_routage = filtrer_catalogue_par_outil_force(catalogue_complet, table_routage_complet, outil_force_contexte_seul)
             outil_force_verifie_optimiste = [o["function"]["name"] for o in outils_mcp] if outil_force_contexte_seul else None
             system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie_optimiste, sans_enseignant, comportements_etudiant, mes_programmes, notions_programme_pertinentes)
-            return outils_mcp, table_routage, system_final
+            return outils_mcp, table_routage, system_final, catalogue_complet, table_routage_complet
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
             f_routeur = executor.submit(_tache_routeur)
@@ -610,7 +624,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         # (voir commentaire PERF 10/08 juste au-dessus).
         outils_suggeres_routeur = f_routeur.result()
         outils_suggeres = _fusionner_outils(outils_suggeres_routeur, outils_forces_contexte) or []
-        outils_mcp, table_routage, system_final = f_optimiste.result()
+        outils_mcp, table_routage, system_final, catalogue_complet, table_routage_complet = f_optimiste.result()
         outil_force_verifie = None
 
         # PERF (10/08) : premier point où quelque chose serait révélé à
@@ -653,11 +667,16 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 # comme avant ce correctif.
                 outil_force = _fusionner_outils(outils_suggeres, outils_retenus_precedents)
                 outils_mcp = table_routage = system_final = None
+                # Catalogue optimiste invalide lui aussi (calculé avec le
+                # mauvais outil_force) : jeté pour forcer sa reconstruction
+                # ci-dessous avec le bon filtre.
+                catalogue_complet = table_routage_complet = None
             else:
                 yield {"type": "outils_suggeres", "outils": outils_suggeres}
                 return
     else:
         outils_mcp = table_routage = system_final = None  # recalculés ci-dessous dans tous les autres cas
+        catalogue_complet = table_routage_complet = None
         if not (image_url or images_base64):
             # Routeur général court-circuité ici (outil déjà forcé manuellement,
             # bouton "Aucun" cliqué, ou pas de message) -- les outils de
@@ -682,8 +701,20 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             # plus bas) -- inutile d'interroger les serveurs MCP pour rien.
             outils_mcp, table_routage = [], {}
             outil_force_verifie = outil_force
+        elif catalogue_complet is not None:
+            # Catalogue deja recupere plus haut (chemin routeur, prompt
+            # optimiste toujours valide) -- reutilise tel quel, aucun
+            # nouvel appel a lister_outils_autorises_pour_agent.
+            outils_mcp, table_routage = filtrer_catalogue_par_outil_force(catalogue_complet, table_routage_complet, outil_force)
+            outil_force_verifie = [o["function"]["name"] for o in outils_mcp] if outil_force else outil_force
         else:
-            outils_mcp, table_routage = lister_tous_les_outils(get_secret, user_id, agent_id, outil_force, conversation_id)
+            # Catalogue pas encore recupere ce tour-ci (chemin normal,
+            # routeur desactive ou court-circuite) : recupere UNE SEULE
+            # FOIS ici, reutilise plus bas pour demander_outils au lieu
+            # d'etre redemande (11/09/2026, meme correctif que la branche
+            # routeur juste au-dessus).
+            catalogue_complet, table_routage_complet = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id, conversation_id)
+            outils_mcp, table_routage = filtrer_catalogue_par_outil_force(catalogue_complet, table_routage_complet, outil_force)
             outil_force_verifie = [o["function"]["name"] for o in outils_mcp] if outil_force else outil_force
         system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie, sans_enseignant, comportements_etudiant, mes_programmes, notions_programme_pertinentes)
 
@@ -721,8 +752,14 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     # garder_outils, au meme point de convergence -- voir
     # _preparer_demander_outils pour le catalogue complet + sa table de
     # routage necessaires au branchement reel dans _agent_groq
-    # (core/boucle_agent.py).
-    outils_mcp, catalogue_complet, table_routage_complet = _preparer_demander_outils(user_id, agent_id, outils_mcp, conversation_id)
+    # (core/boucle_agent.py). Saute pour un message image/video (11/09/2026) :
+    # catalogue_complet vaut alors toujours None (jamais recupere plus haut,
+    # voir bloc "if system_final is None" ci-dessus), et de toute facon le
+    # chemin Gemini vision plus bas dans chat() n'utilise jamais outils_mcp --
+    # avant ce fix, un catalogue complet etait quand meme alle chercher pour
+    # rien a chaque message avec image jointe.
+    if catalogue_complet is not None:
+        outils_mcp = _preparer_demander_outils(outils_mcp, catalogue_complet, table_routage_complet)
 
     if localisation and localisation.get("latitude") is not None and localisation.get("longitude") is not None:
         # Contexte "système/environnement" (2026-07-20) : position GPS
@@ -814,8 +851,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=GOOGLE_MODEL, meta_utilisateur=meta_utilisateur)
             if ids_historique:
                 yield {"type": "meta", **ids_historique}
-            _mettre_a_jour_resume_si_besoin(user_id)
-            _mettre_a_jour_profil_utilisateur_si_besoin(user_id, agent_id)
+            _finaliser_memoire_en_arriere_plan(user_id, agent_id)
         except Exception as e:
             logging.error(f"ERREUR GEMINI (image): {e}")
             if not reponse_accumulee:
@@ -842,8 +878,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             )
             if ids_historique:
                 yield {"type": "meta", **ids_historique}
-            _mettre_a_jour_resume_si_besoin(user_id)
-            _mettre_a_jour_profil_utilisateur_si_besoin(user_id, agent_id)
+            _finaliser_memoire_en_arriere_plan(user_id, agent_id)
         except Exception as e:
             logging.error(f"ERREUR MODELE PREMIUM ({modele_force}) : {e}")
             if not reponse_accumulee:
@@ -905,8 +940,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=DEEPSEEK_PRIMARY, meta_assistant=meta_assistant)
                 if ids_historique:
                     yield {"type": "meta", **ids_historique}
-                _mettre_a_jour_resume_si_besoin(user_id)
-                _mettre_a_jour_profil_utilisateur_si_besoin(user_id, agent_id)
+                _finaliser_memoire_en_arriere_plan(user_id, agent_id)
                 return
             except Exception as e:
                 if not _est_timeout(e):
@@ -929,8 +963,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=GROQ_PRIMARY, meta_assistant=meta_assistant)
             if ids_historique:
                 yield {"type": "meta", **ids_historique}
-            _mettre_a_jour_resume_si_besoin(user_id)
-            _mettre_a_jour_profil_utilisateur_si_besoin(user_id, agent_id)
+            _finaliser_memoire_en_arriere_plan(user_id, agent_id)
             return
         except Exception as e:
             if not _est_timeout(e):
@@ -979,8 +1012,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                     meta_a_envoyer["modele_qualite_reduite"] = True
                 if meta_a_envoyer:
                     yield {"type": "meta", **meta_a_envoyer}
-                _mettre_a_jour_resume_si_besoin(user_id)
-                _mettre_a_jour_profil_utilisateur_si_besoin(user_id, agent_id)
+                _finaliser_memoire_en_arriere_plan(user_id, agent_id)
                 return
             except Exception as e:
                 if not _est_timeout(e):
@@ -1092,8 +1124,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=GOOGLE_MODEL)
             if ids_historique:
                 yield {"type": "meta", **ids_historique}
-            _mettre_a_jour_resume_si_besoin(user_id)
-            _mettre_a_jour_profil_utilisateur_si_besoin(user_id, agent_id)
+            _finaliser_memoire_en_arriere_plan(user_id, agent_id)
             return
         except Exception as e:
             if not _est_timeout(e):

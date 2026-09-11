@@ -2,9 +2,10 @@
 # trop longs). Sauvegarde d'un echange (message + reponse) et mise a jour
 # periodique du resume memoire de l'utilisateur.
 import logging
+import threading
 from groq import Groq
 from constantes_agent import get_secret, supabase, MODELE_RESUME, SEUIL_RESUME_MESSAGES, DELAI_MAX_PAR_APPEL
-from profils_agents import _charger_resume_memoire
+from profils_agents import _charger_resume_memoire, _mettre_a_jour_profil_utilisateur_si_besoin
 
 def _sauvegarder_echange(user_id, agent_id, message_utilisateur, reponse_finale, conversation_id=None, modele=None, meta_utilisateur=None, meta_assistant=None):
     """
@@ -200,3 +201,32 @@ def _mettre_a_jour_resume_si_besoin(user_id):
         logging.error(f"ERREUR mise à jour résumé mémoire : {e}")
 
 
+def _finaliser_memoire_en_arriere_plan(user_id, agent_id):
+    """
+    Lance _mettre_a_jour_resume_si_besoin et _mettre_a_jour_profil_utilisateur_si_besoin
+    en tache de fond, SANS attendre leur resultat (11/09/2026, demande
+    Bourama : "rien qui retarde ne serait-ce que d'une milliseconde la
+    reponse de l'IA"). Ces deux mises a jour ne concernent jamais la
+    reponse deja affichee a l'instant meme -- elles preparent seulement la
+    memoire pour les PROCHAINS messages. Avant ce fix, chat() attendait
+    ces deux appels (une lecture en base systematique, parfois un appel
+    Groq complet en plus) avant de considerer l'echange termine, ce qui
+    retardait la disponibilite des identifiants de message (evenement
+    "meta", necessaires aux boutons like/dislike) sans aucune raison lice
+    a CE message-ci.
+
+    Fire-and-forget assume : toute erreur reste loguee a l'interieur des
+    deux fonctions elles-memes (deja le cas avant ce fix), jamais remontee
+    ici ni a l'appelant.
+    """
+    def _tache():
+        try:
+            _mettre_a_jour_resume_si_besoin(user_id)
+        except Exception as e:
+            logging.error(f"ERREUR tache de fond (résumé mémoire) : {e}")
+        try:
+            _mettre_a_jour_profil_utilisateur_si_besoin(user_id, agent_id)
+        except Exception as e:
+            logging.error(f"ERREUR tache de fond (profil utilisateur) : {e}")
+
+    threading.Thread(target=_tache, daemon=True).start()

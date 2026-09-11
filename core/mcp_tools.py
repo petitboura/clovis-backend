@@ -309,37 +309,36 @@ def lister_outils_autorises_pour_agent(get_secret, user_id=None, agent_id=None, 
     return outils_pour_llm, table_routage
 
 
-def lister_tous_les_outils(get_secret, user_id=None, agent_id=None, outil_force=None, conversation_id=None):
+def filtrer_catalogue_par_outil_force(outils_pour_llm, table_routage, outil_force=None):
     """
-    Reprend lister_outils_autorises_pour_agent() (catalogue brut pour cet
-    agent) puis applique le filtre "bouton Outils" ci-dessous. Signature
-    et comportement inchangés pour tous les appelants existants (nouveau
-    paramètre optionnel conversation_id, 08/09/2026, mode actif).
-    """
-    outils_pour_llm, table_routage = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id, conversation_id)
+    Applique le filtre "bouton Outils" (voir plus bas) à un catalogue déjà
+    récupéré, sans repasser par lister_outils_autorises_pour_agent().
 
-    # Mode "bouton Outils" (2026-07-25, GLOBAL -- décision définitive de
-    # Bourama, initialement testé sur l'agent nucleos seul puis étendu à
-    # tous). Objectif : réduire la conso token (schéma de ~20 outils
-    # envoyé à chaque message, identifié comme le plus gros poste).
-    # AUCUN outil envoyé par défaut, sur AUCUN agent, sauf sélection
-    # explicite d'UN outil par le frontend (bouton Outils, voir
-    # BarreDeSaisie.tsx). Effet de bord assumé et voulu : l'IA perd son
-    # autonomie d'appel d'outil implicite partout (ex. chercher_fichier
-    # automatique quand on redemande un fichier envoyé, tavily_search
-    # automatique sur une question d'actualité) tant que rien n'est
-    # sélectionné.
-    # Mode "bouton Outils" (2026-07-25, GLOBAL -- décision définitive de
-    # Bourama, initialement testé sur l'agent nucleos seul puis étendu à
-    # tous, puis passé à la MULTI-sélection le 26/07). Objectif : réduire
-    # la conso token (schéma de ~20 outils envoyé à chaque message,
-    # identifié comme le plus gros poste). AUCUN outil envoyé par défaut,
-    # sur AUCUN agent, sauf sélection explicite d'un ou plusieurs outils
-    # par le frontend (bouton Outils, voir BarreDeSaisie.tsx). Effet de
-    # bord assumé et voulu : l'IA perd son autonomie d'appel d'outil
-    # implicite partout (ex. chercher_fichier automatique quand on
-    # redemande un fichier envoyé, tavily_search automatique sur une
-    # question d'actualité) tant que rien n'est sélectionné.
+    Extrait de lister_tous_les_outils() le 11/09/2026 (demande Bourama :
+    "tout ce qui peut se faire une fois, pas à chaque message") -- avant
+    ce fix, main.py appelait lister_tous_les_outils() PUIS
+    _preparer_demander_outils(), qui rappelait chacun de son côté
+    lister_outils_autorises_pour_agent() séparément pour le même message :
+    le catalogue (déjà en cache 24h) était bien récupéré une seule fois au
+    sens réseau, mais l'accès de l'utilisateur à chaque service externe
+    nécessitant un compte connecté (Notion, Google Drive -- voir
+    obtenir_token_valide) était revérifié EN BASE deux fois par message au
+    lieu d'une. main.py appelle maintenant lister_outils_autorises_pour_agent()
+    une seule fois et réutilise son résultat ici pour construire
+    outils_mcp, au lieu de le redemander.
+
+    Mode "bouton Outils" (2026-07-25, GLOBAL -- décision définitive de
+    Bourama, initialement testé sur l'agent nucleos seul puis étendu à
+    tous, puis passé à la MULTI-sélection le 26/07). Objectif : réduire
+    la conso token (schéma de ~20 outils envoyé à chaque message,
+    identifié comme le plus gros poste). AUCUN outil envoyé par défaut,
+    sur AUCUN agent, sauf sélection explicite d'un ou plusieurs outils
+    par le frontend (bouton Outils, voir BarreDeSaisie.tsx). Effet de
+    bord assumé et voulu : l'IA perd son autonomie d'appel d'outil
+    implicite partout (ex. chercher_fichier automatique quand on
+    redemande un fichier envoyé, tavily_search automatique sur une
+    question d'actualité) tant que rien n'est sélectionné.
+    """
     outils_forces = set(outil_force or [])
     if outils_forces:
         outils_pour_llm = [o for o in outils_pour_llm if o["function"]["name"] in outils_forces]
@@ -350,6 +349,24 @@ def lister_tous_les_outils(get_secret, user_id=None, agent_id=None, outil_force=
 
     logging.info(f"Outils envoyés au LLM ce tour-ci : {[o['function']['name'] for o in outils_pour_llm]}")
     return outils_pour_llm, table_routage
+
+
+def lister_tous_les_outils(get_secret, user_id=None, agent_id=None, outil_force=None, conversation_id=None):
+    """
+    Reprend lister_outils_autorises_pour_agent() (catalogue brut pour cet
+    agent) puis applique le filtre "bouton Outils" (voir
+    filtrer_catalogue_par_outil_force ci-dessus). Signature et
+    comportement inchangés pour tous les appelants existants (nouveau
+    paramètre optionnel conversation_id, 08/09/2026, mode actif).
+
+    A conserver pour les appelants qui n'ont pas déjà le catalogue brut
+    sous la main (voir core/main.py, chemin routeur automatique) --
+    quand il est déjà disponible, préférer appeler
+    filtrer_catalogue_par_outil_force() directement pour éviter un
+    second appel à lister_outils_autorises_pour_agent().
+    """
+    outils_pour_llm, table_routage = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id, conversation_id)
+    return filtrer_catalogue_par_outil_force(outils_pour_llm, table_routage, outil_force)
 
 
 def appeler_outil(nom_outil, arguments, table_routage):

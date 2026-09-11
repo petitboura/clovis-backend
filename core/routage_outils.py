@@ -316,7 +316,7 @@ def _outils_deja_en_main(outils_mcp):
     return {o["function"]["name"] for o in (outils_mcp or [])}
 
 
-def _preparer_demander_outils(user_id, agent_id, outils_mcp, conversation_id=None):
+def _preparer_demander_outils(outils_mcp, catalogue_complet, table_routage_complet):
     """
     A appeler UNE SEULE FOIS dans main.py, au meme point de convergence
     que _outil_garder_outils (une fois outils_mcp definitivement etabli
@@ -326,18 +326,20 @@ def _preparer_demander_outils(user_id, agent_id, outils_mcp, conversation_id=Non
     toujours etre propose, quel que soit l'etat du tour -- ne suit plus
     la regle de garder_outils).
 
-    Recupere aussi le catalogue complet et sa table de routage via
-    lister_outils_autorises_pour_agent -- deja mis en cache 24h par
-    serveur (voir mcp_tools.py), donc pas de nouvel appel reseau dans le
-    cas courant, juste "piocher dedans" comme voulu par Bourama, aucune
-    nouvelle source de donnees creee ici.
+    Modifie le 11/09/2026 (demande Bourama, chasse aux doublons de
+    travail par message) : catalogue_complet/table_routage_complet sont
+    maintenant fournis par l'appelant, deja recuperes une seule fois plus
+    haut dans main.py (via lister_outils_autorises_pour_agent, cache 24h
+    par serveur) pour construire outils_mcp -- au lieu d'etre redemandes
+    ici par un second appel a la meme fonction. Le catalogue lui-meme ne
+    change pas (toujours celui deja en cache), seul le nombre de fois ou
+    on va le chercher passe de deux a une fois par message. Pour un
+    utilisateur connecte a un service necessitant son compte (Notion,
+    Google Drive), evite aussi de revalider son acces deux fois de suite.
 
-    Renvoie (outils_mcp, catalogue_complet, table_routage_complet), avec
-    demander_outils toujours ajoute a outils_mcp.
+    Renvoie outils_mcp, avec demander_outils toujours ajoute.
     """
-    catalogue_complet, table_routage_complet = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id, conversation_id)
-    outils_mcp = (outils_mcp or []) + [_outil_demander_outils()]
-    return outils_mcp, catalogue_complet, table_routage_complet
+    return (outils_mcp or []) + [_outil_demander_outils()]
 
 
 def _catalogue_pour_demander_outils(user_id, agent_id, outils_mcp, conversation_id=None):

@@ -48,9 +48,49 @@ import os
 import secrets
 import string
 import sys
+import time
 
 from supabase import create_client, ClientOptions
 from client_http_supabase import nouveau_client_http_supabase
+
+# Cache court (11/09/2026, demande explicite Bourama) : les skills reçus
+# par code (prof -> élève) étaient volontairement lus EN DIRECT à chaque
+# message (voir le commentaire "jamais figée" plus bas sur
+# lister_comportements_recus, décision antérieure) -- mémorisés
+# maintenant 2 minutes, comme le reste du contexte de chat, sur demande
+# explicite de Bourama qui revient sur cette décision. Invalidé
+# immédiatement côté élève (entrer_code/retirer_rattachement) et côté
+# prof pour les changements les plus courants (comportements attachés à
+# un code, code désactivé ou supprimé -- voir
+# _invalider_cache_recus_pour_code). Reste un TTL de secours de 2 minutes
+# pour les cas plus rares non couverts explicitement (ex: le prof modifie
+# le TEXTE d'un skill déjà partagé sans toucher au code lui-même).
+_DUREE_CACHE_SECONDES = 2 * 60
+_cache_comportements_recus = {}  # (receveur_id, rattachement_id) -> {"valeur": list, "expire_a": ts}
+
+
+def _invalider_cache_recus(receveur_id: str, rattachement_id: str | None = None) -> None:
+    _cache_comportements_recus.pop((receveur_id, rattachement_id), None)
+    _cache_comportements_recus.pop((receveur_id, None), None)
+
+
+def _invalider_cache_recus_pour_code(code_id: str) -> None:
+    """Invalide le cache de TOUS les receveurs de ce code (11/09/2026) --
+    utilisé quand un prof change quelque chose côté code (comportements
+    attachés, désactivation, suppression), puisqu'un seul geste prof peut
+    affecter plusieurs élèves à la fois."""
+    try:
+        rattachements = (
+            supabase.table("rattachements_codes")
+            .select("id, receveur_id")
+            .eq("code_id", code_id)
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (invalidation cache reçus pour code {code_id}) : {e}")
+        return
+    for r in (rattachements.data or []):
+        _invalider_cache_recus(r["receveur_id"], r["id"])
 
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien  # noqa: E402
@@ -195,6 +235,7 @@ def _remplacer_comportements_du_code(code_id: str, proprietaire_id: str, comport
             ).execute()
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (liaison comportements <-> code {code_id}) : {e}")
+    _invalider_cache_recus_pour_code(code_id)
 
 
 # --- Propagation des dossiers partagés (02/09/2026) -----------------------
@@ -586,10 +627,13 @@ def activer_desactiver_code(code_id: str, proprietaire_id: str, actif: bool) -> 
         .eq("proprietaire_id", proprietaire_id)
         .execute()
     )
+    if res.data:
+        _invalider_cache_recus_pour_code(code_id)
     return res.data[0] if res.data else None
 
 
 def supprimer_code(code_id: str, proprietaire_id: str) -> bool:
+    _invalider_cache_recus_pour_code(code_id)
     res = (
         supabase.table("codes_partage")
         .delete()
@@ -661,6 +705,7 @@ def entrer_code(code: str, receveur_id: str) -> dict | None:
     except Exception as e:
         logging.error(f"ERREUR creation notification entree code {code_id} pour {receveur_id} : {e}")
 
+    _invalider_cache_recus(receveur_id)
     return res.data[0]
 
 
@@ -763,6 +808,8 @@ def retirer_rattachement(rattachement_id: str, receveur_id: str) -> bool:
         .eq("receveur_id", receveur_id)
         .execute()
     )
+    if res.data:
+        _invalider_cache_recus(receveur_id, rattachement_id)
     return bool(res.data)
 
 
@@ -839,10 +886,13 @@ def lister_comportements_recus(receveur_id: str, rattachement_id: str | None = N
     id = 'recu:<comportement_id>' (18/08/2026 -- avant : 'recu:<code_id>',
     changé car un code peut désormais porter plusieurs comportements ;
     comportement_id est l'uuid réel dans comportements_etudiants, jamais
-    de collision possible avec le préfixe 'recu:'). Description lue EN
-    DIRECT sur comportements_etudiants -- référence vivante, jamais figée
-    au moment de l'entrée du code. Si le même comportement est reçu via
-    plusieurs codes actifs à la fois, il n'apparaît qu'une fois.
+    de collision possible avec le préfixe 'recu:'). Description lue sur
+    comportements_etudiants, mémorisée 2 minutes (11/09/2026, demande
+    explicite Bourama -- revient sur le choix antérieur "jamais figée",
+    voir _invalider_cache_recus/_invalider_cache_recus_pour_code
+    ci-dessus pour les cas où le cache est vidé immédiatement). Si le
+    même comportement est reçu via plusieurs codes actifs à la fois, il
+    n'apparaît qu'une fois.
 
     `rattachement_id` (08/09/2026, mode actif -- demande Bourama, corrige
     le mélange des skills de plusieurs profs à la fois) : si fourni (mode
@@ -855,6 +905,12 @@ def lister_comportements_recus(receveur_id: str, rattachement_id: str | None = N
     -- décision explicite de Bourama, jamais de mélange silencieux. Si
     receveur_id n'a qu'UN SEUL rattachement, aucune ambiguïté possible :
     ce rattachement est utilisé automatiquement, mode actif ou non."""
+    maintenant = time.time()
+    cle = (receveur_id, rattachement_id)
+    entree = _cache_comportements_recus.get(cle)
+    if entree is not None and entree["expire_a"] > maintenant:
+        return entree["valeur"]
+
     rattachements = lister_mes_rattachements(receveur_id)
     if rattachement_id:
         rattachements = [r for r in rattachements if r["rattachement_id"] == rattachement_id]
@@ -876,7 +932,7 @@ def lister_comportements_recus(receveur_id: str, rattachement_id: str | None = N
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (descriptions comportements reçus {list(par_comportement.keys())}) : {e}")
         return []
-    return [
+    resultat = [
         {
             "id": f"recu:{l['id']}",
             "nom": l.get("nom") or "",
@@ -884,6 +940,8 @@ def lister_comportements_recus(receveur_id: str, rattachement_id: str | None = N
         }
         for l in (lignes.data or [])
     ]
+    _cache_comportements_recus[cle] = {"valeur": resultat, "expire_a": maintenant + _DUREE_CACHE_SECONDES}
+    return resultat
 
 
 def obtenir_comportement_skill_recu(receveur_id: str, id_recu: str) -> str | None:

@@ -35,11 +35,26 @@ import json
 import logging
 import os
 import re
+import time
 import unicodedata
 
 from groq import Groq
 from supabase import create_client, ClientOptions
 from client_http_supabase import nouveau_client_http_supabase
+
+# Cache court (11/09/2026, demande Bourama : "pas à chaque message si ça
+# peut être évité") : "Mes comportements" ne change que quand l'étudiant
+# ajoute/modifie/supprime/active-désactive/attache un skill lui-même
+# (voir les fonctions d'écriture plus bas, qui invalident ce cache
+# immédiatement) -- pas de raison de relire 2 à 4 requêtes en base à
+# chaque message pour la même liste. TTL de secours si jamais une écriture
+# passait par un chemin non couvert ci-dessous.
+_DUREE_CACHE_SECONDES = 2 * 60
+_cache_comportements = {}  # (agent_id, etudiant_id) -> {"valeur": list, "expire_a": ts}
+
+
+def _invalider_cache_comportements(agent_id: str, etudiant_id: str) -> None:
+    _cache_comportements.pop((agent_id, etudiant_id), None)
 
 
 def get_secret(key):
@@ -223,6 +238,12 @@ def lister_comportements(agent_id: str, etudiant_id: str) -> list[dict]:
     CHAPITRE -- résolus en 2 requêtes groupées (chapitres puis matieres),
     jamais une requête par ligne, pour ne pas exploser en N+1 sur les
     dizaines de skills d'audit par chapitre."""
+    maintenant = time.time()
+    cle = (agent_id, etudiant_id)
+    entree = _cache_comportements.get(cle)
+    if entree is not None and entree["expire_a"] > maintenant:
+        return entree["valeur"]
+
     try:
         res = (
             supabase.table("comportements_etudiants")
@@ -299,6 +320,7 @@ def lister_comportements(agent_id: str, etudiant_id: str) -> list[dict]:
                 "matiere_nom": matiere_nom,
             }
         )
+    _cache_comportements[cle] = {"valeur": resultat, "expire_a": maintenant + _DUREE_CACHE_SECONDES}
     return resultat
 
 
@@ -528,6 +550,7 @@ def ajouter_comportement(
     }
     res = supabase.table("comportements_etudiants").insert(ligne_a_inserer).execute()
     ligne = res.data[0]
+    _invalider_cache_comportements(agent_id, etudiant_id)
     return {
         "id": ligne["id"],
         "texte": ligne["texte"],
@@ -585,6 +608,7 @@ def importer_comportement_depuis_skill_md(
     }
     res = supabase.table("comportements_etudiants").insert(ligne_a_inserer).execute()
     ligne = res.data[0]
+    _invalider_cache_comportements(agent_id, etudiant_id)
     return {
         "id": ligne["id"],
         "texte": ligne["texte"],
@@ -631,6 +655,7 @@ def modifier_comportement(
     if not res.data:
         return None
     ligne = res.data[0]
+    _invalider_cache_comportements(agent_id, etudiant_id)
     return {
         "id": ligne["id"],
         "texte": ligne["texte"],
@@ -666,6 +691,7 @@ def attacher_comportement(
     if not res.data:
         return None
     ligne = res.data[0]
+    _invalider_cache_comportements(agent_id, etudiant_id)
     return {
         "id": ligne["id"],
         "texte": ligne["texte"],
@@ -711,6 +737,8 @@ def supprimer_comportement(agent_id: str, etudiant_id: str, comportement_id: str
         .eq("etudiant_id", etudiant_id)
         .execute()
     )
+    if res.data:
+        _invalider_cache_comportements(agent_id, etudiant_id)
     return bool(res.data)
 
 
@@ -736,6 +764,7 @@ def activer_desactiver_comportement(agent_id: str, etudiant_id: str, comportemen
     if not res.data:
         return None
     ligne = res.data[0]
+    _invalider_cache_comportements(agent_id, etudiant_id)
     return {
         "id": ligne["id"],
         "texte": ligne["texte"],
@@ -940,4 +969,5 @@ def activer_comportement_public(comportement_public_id: str, etudiant_id: str) -
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (compteur activations comportement public {comportement_public_id}) : {e}")
 
+    _invalider_cache_comportements(AGENT_ID_ESPACE, etudiant_id)
     return nouvelle

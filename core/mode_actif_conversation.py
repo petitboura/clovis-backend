@@ -13,14 +13,32 @@ dans historique_conversations), donc pas de colonne existante où
 accrocher cette information.
 """
 import logging
+import time
 
 from api.auth import supabase
+
+# Cache court (11/09/2026, demande Bourama : "pas à chaque message si ça
+# peut être évité") : le mode actif d'une conversation ne change que
+# lorsque l'utilisateur le change lui-même explicitement (definir_mode_actif
+# ci-dessous), jamais entre deux messages du même échange -- pas besoin de
+# relire la base à chaque message pour la même conversation. Invalidé
+# immédiatement dès qu'un changement est écrit (voir definir_mode_actif),
+# TTL de secours sinon. LIMITE CONNUE (même limite que le cache 24h des
+# outils MCP, voir core/mcp_tools.py) : cache en mémoire par process --
+# si Railway fait tourner plusieurs instances, un changement fait via une
+# instance n'invalide pas le cache des autres avant l'expiration du TTL.
+_DUREE_CACHE_SECONDES = 5 * 60
+_cache_mode_actif = {}  # conversation_id -> {"valeur": dict | None, "expire_a": ts}
 
 
 def obtenir_mode_actif(conversation_id: str, user_id: str) -> dict | None:
     """Rattachement actuellement actif pour cette conversation, ou None
     si l'utilisateur n'a encore rien choisi (pas de défaut implicite --
     Point 3 : c'est un choix explicite de l'utilisateur)."""
+    maintenant = time.time()
+    entree = _cache_mode_actif.get(conversation_id)
+    if entree is not None and entree["expire_a"] > maintenant:
+        return entree["valeur"]
     try:
         res = (
             supabase.table("conversation_mode_actif")
@@ -33,7 +51,9 @@ def obtenir_mode_actif(conversation_id: str, user_id: str) -> dict | None:
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (lecture mode actif {conversation_id}) : {e}")
         return None
-    return res.data if res else None
+    valeur = res.data if res else None
+    _cache_mode_actif[conversation_id] = {"valeur": valeur, "expire_a": maintenant + _DUREE_CACHE_SECONDES}
+    return valeur
 
 
 def _rattachement_appartient_a(rattachement_id: str, user_id: str) -> bool:
@@ -77,4 +97,8 @@ def definir_mode_actif(conversation_id: str, user_id: str, rattachement_id: str 
     except Exception as e:
         logging.error(f"ERREUR SUPABASE (définition mode actif {conversation_id}) : {e}")
         raise
+    # Cache invalidé immédiatement (11/09/2026) : le prochain message de
+    # cette conversation doit voir le nouveau mode tout de suite, jamais
+    # attendre l'expiration du cache court d'obtenir_mode_actif ci-dessus.
+    _cache_mode_actif.pop(conversation_id, None)
     return res.data[0] if res.data else ligne

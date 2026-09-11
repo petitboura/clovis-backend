@@ -46,6 +46,7 @@ import string
 import hashlib
 import base64
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
@@ -286,6 +287,12 @@ def finaliser_connexion_notion(code, state):
         logging.error(f"ERREUR ECRITURE connexions_notion : {e}")
         return False, "Connexion Notion impossible (erreur interne au stockage)."
 
+    # Cache invalidé (11/09/2026) : sans ça, un "None" mis en cache par un
+    # obtenir_token_valide appelé juste avant cette connexion resterait
+    # servi jusqu'à 2 minutes, comme si Notion n'était toujours pas
+    # connecté alors que ça vient d'être fait.
+    _cache_token.pop(user_id, None)
+
     return True, tokens.get("workspace_name") or "ton espace Notion"
 
 
@@ -338,6 +345,18 @@ def _rafraichir(connexion):
     return tokens["access_token"]
 
 
+# Cache très court (11/09/2026, demande Bourama : "pas à chaque message
+# si ça peut être évité") : obtenir_token_valide est appelée à chaque
+# message pour un utilisateur connecté à Notion (voir registre_outils.py),
+# alors que le token lui-même ne change qu'au rafraîchissement (voir
+# MARGE_RAFRAICHISSEMENT ci-dessus, 5 minutes) ou à une nouvelle connexion.
+# TTL volontairement bien plus court que cette marge (2 minutes < 5
+# minutes) : un token servi depuis ce cache est donc TOUJOURS encore loin
+# de son heure de rafraîchissement, jamais un token sur le point d'expirer.
+_DUREE_CACHE_SECONDES = 2 * 60
+_cache_token = {}  # user_id -> {"valeur": str | None, "expire_a": ts}
+
+
 def obtenir_token_valide(user_id):
     """
     Retourne un access_token Notion utilisable pour ce compte, valable
@@ -345,10 +364,17 @@ def obtenir_token_valide(user_id):
     rafraichissant si besoin. Retourne None si l'utilisateur n'a jamais
     connecte son Notion, ou si la connexion est morte.
     Appelee a chaque message (voir registre_outils.py), pas seulement a la
-    connexion, pour ne jamais utiliser un token perime.
+    connexion, pour ne jamais utiliser un token perime -- mise en cache
+    2 minutes (voir ci-dessus) pour eviter de revalider en base a chaque
+    message.
     """
     if not user_id:
         return None
+
+    maintenant = time.time()
+    entree = _cache_token.get(user_id)
+    if entree is not None and entree["expire_a"] > maintenant:
+        return entree["valeur"]
 
     ligne = (
         supabase.table("connexions_notion")
@@ -357,14 +383,18 @@ def obtenir_token_valide(user_id):
         .execute()
     )
     if not ligne.data:
+        _cache_token[user_id] = {"valeur": None, "expire_a": maintenant + _DUREE_CACHE_SECONDES}
         return None
 
     connexion = ligne.data[0]
     expire_le = datetime.fromisoformat(connexion["expires_at"])
     if datetime.now(timezone.utc) + MARGE_RAFRAICHISSEMENT < expire_le:
-        return connexion["access_token"]
+        token = connexion["access_token"]
+    else:
+        token = _rafraichir(connexion)
 
-    return _rafraichir(connexion)
+    _cache_token[user_id] = {"valeur": token, "expire_a": maintenant + _DUREE_CACHE_SECONDES}
+    return token
 
 
 def est_connecte(user_id):
