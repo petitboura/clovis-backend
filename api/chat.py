@@ -63,9 +63,11 @@ class EnvoyerMessagePayload(BaseModel):
     longueur_reponse: Literal["courte", "moyenne", "longue"] = "moyenne"
     # Image jointe au message (URL publique renvoyée par
     # POST /api/uploads/image-chat, voir uploads.py). Quand présente,
-    # core/main.py:chat() route directement vers Gemini (seul modèle
-    # multimodal de la cascade) au lieu du cascade Groq habituel — voir
-    # le commentaire au-dessus de la branche image_url dans chat().
+    # core/main.py:chat() la fait d'abord décrire/transcrire par Gemini
+    # (seul modèle multimodal de la cascade), puis injecte cette
+    # description dans le message avant de continuer normalement vers le
+    # grand modèle habituel (chantier "image -> grand modele", 11/09/2026)
+    # -- voir le commentaire au-dessus de la branche image_url dans chat().
     image_url: Optional[str] = None
     # Position GPS transmise explicitement par l'étudiant via un bouton
     # dédié (jamais capturée automatiquement) -- voir core/main.py:chat(),
