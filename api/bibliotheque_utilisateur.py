@@ -32,7 +32,7 @@ from api.journal import journaliser
 from core.erreurs import erreur_api
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "core"))
-from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien, lister_fichiers, supprimer_fichier  # noqa: E402
+from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien, lister_fichiers, obtenir_fichier, supprimer_fichier  # noqa: E402
 from file_attente_vectorisation import (  # noqa: E402
     necessite_vectorisation_fichier_privee,
     necessite_vectorisation_note,
@@ -383,6 +383,20 @@ def lister(utilisateur=Depends(utilisateur_courant)):
     # volontairement différent : une pièce jointe de conversation n'est
     # pas un document que l'IA doit ressortir comme si tu l'avais rangé.
     return lister_fichiers("utilisateur", user_id=utilisateur.id)
+
+
+@router.get("/{fichier_id}/consultation")
+def consulter(fichier_id: str, utilisateur=Depends(utilisateur_courant)):
+    """11/09/2026, demande Bourama : lien de partage direct pour un
+    fichier perso, lecture seule, ouvert par N'IMPORTE QUEL utilisateur
+    connecté (pas seulement le propriétaire), aucune vérification de
+    propriété volontairement. N'ajoute rien chez celui qui consulte,
+    même principe que la consultation d'une entrée de la bibliothèque
+    publique (voir api/bibliotheque_publique.py)."""
+    fichier = obtenir_fichier(fichier_id)
+    if fichier is None:
+        raise erreur_api(404, "FICHIER_INTROUVABLE")
+    return fichier
 
 
 @router.post("/{fichier_id}/reessayer-vectorisation", status_code=204)

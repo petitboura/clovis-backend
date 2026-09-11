@@ -28,12 +28,14 @@ from core.dossiers_bibliotheque import (
     lister_dossiers,
     lister_dossiers_du_fichier,
     lister_fichiers_ids_dossier,
+    obtenir_dossier,
     ranger_fichier,
     renommer_dossier,
     retirer_fichier,
     supprimer_dossier,
 )
 from core.codes_partage import propager_fichier_range_dossier, lister_dossiers_recus
+from core.bibliotheque_fichiers import obtenir_fichiers_par_ids
 
 logging.basicConfig(level=logging.INFO)
 
@@ -77,6 +79,21 @@ def lister(utilisateur=Depends(utilisateur_courant)):
         d["fichier_ids"] = lister_fichiers_ids_dossier(d["id"])
         d["recu_de"] = recus.get(d["id"])
     return dossiers
+
+
+@router.get("/{dossier_id}/consultation")
+def consulter(dossier_id: str, utilisateur=Depends(utilisateur_courant)):
+    """11/09/2026, demande Bourama : lien de partage direct pour un
+    dossier perso, lecture seule, ouvert par N'IMPORTE QUEL utilisateur
+    connecté (pas seulement le propriétaire), aucune vérification de
+    propriété volontairement. N'ajoute rien chez celui qui consulte,
+    même principe que api/bibliotheque_utilisateur.py::consulter."""
+    dossier = obtenir_dossier(dossier_id)
+    if dossier is None:
+        raise erreur_api(404, "DOSSIER_INTROUVABLE")
+    fichier_ids = lister_fichiers_ids_dossier(dossier_id)
+    dossier["fichiers"] = obtenir_fichiers_par_ids(fichier_ids)
+    return dossier
 
 
 @router.post("", status_code=201)
