@@ -396,6 +396,29 @@ def obtenir_comportement_skill(agent_id: str, etudiant_id: str, comportement_id:
     return res.data.get("skill_md")
 
 
+def obtenir_comportement_pour_consultation(agent_id: str, comportement_id: str) -> dict | None:
+    """Nom/description/skill_md d'UN comportement perso, SANS filtre
+    étudiant_id, utilisé par la consultation en lecture seule via lien
+    de partage direct (11/09/2026, demande Bourama : chaque skill perso a
+    désormais son propre lien, ouvert par n'importe quel utilisateur
+    connecté, sans que ça l'ajoute chez lui). Distinct de
+    obtenir_comportement_skill ci-dessus, qui vérifie la propriété (usage
+    interne : outil consulter_comportement, édition)."""
+    try:
+        res = (
+            supabase.table("comportements_etudiants")
+            .select("nom, description, skill_md")
+            .eq("id", comportement_id)
+            .eq("agent_id", agent_id)
+            .maybe_single()
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (consultation comportement {comportement_id}) : {e}")
+        return None
+    return res.data if res and res.data else None
+
+
 def modifier_skill_comportement(agent_id: str, etudiant_id: str, comportement_id: str, skill_md: str) -> dict | None:
     """
     18/08/2026, demande Bourama ("les deux : édite le texte, l'impacte,

@@ -284,6 +284,38 @@ def lister_fichiers(
     return {"fichiers": reponse.data or [], "total": total}
 
 
+def obtenir_fichier(fichier_id: str) -> dict | None:
+    """Un fichier de la bibliothèque perso par son id, SANS filtre
+    propriétaire, utilisé par la consultation en lecture seule via
+    lien de partage direct (11/09/2026, demande Bourama : chaque fichier
+    a désormais son propre lien, ouvert par n'importe quel utilisateur
+    connecté, sans que ça l'ajoute chez lui). Ne renvoie que les champs
+    nécessaires à l'affichage, jamais user_id/chemin_stockage."""
+    res = (
+        supabase.table("fichiers_uploades")
+        .select("id, nom_fichier, description, type_mime, taille_octets, url_publique")
+        .eq("id", fichier_id)
+        .maybe_single()
+        .execute()
+    )
+    return res.data if res else None
+
+
+def obtenir_fichiers_par_ids(fichier_ids: list[str]) -> list[dict]:
+    """Plusieurs fichiers par leurs ids, mêmes champs que obtenir_fichier
+    ci-dessus, utilisé pour afficher le contenu d'un dossier consulté
+    via lien (core/dossiers_bibliotheque.py::obtenir_dossier_consultation)."""
+    if not fichier_ids:
+        return []
+    res = (
+        supabase.table("fichiers_uploades")
+        .select("id, nom_fichier, description, type_mime, taille_octets, url_publique")
+        .in_("id", fichier_ids)
+        .execute()
+    )
+    return res.data or []
+
+
 def supprimer_fichier(fichier_id: str) -> None:
     """
     Supprime un fichier de la bibliothèque : ligne en base ET objet
