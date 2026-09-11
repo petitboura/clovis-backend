@@ -1,12 +1,37 @@
-# Refonte du système de signalements pédagogiques — état au 10/09/2026
+# Refonte du système de signalements pédagogiques — état au 11/09/2026
 
 Ce document est sur la branche `refonte-signalements-10-09` (backend **et**
-frontend, même nom de branche dans les deux dépôts), volontairement séparée
-de `main` : `main` a énormément bougé en parallèle sur un tout autre chantier
-pendant que cette refonte était en cours, cette branche n'a **pas** été
-rebasée/fusionnée dessus. Personne n'a encore regardé si ça se marie
-proprement avec le travail fait sur `main` entre-temps (notamment la
-désactivation du routeur automatique d'outils, `routage_outils.py`).
+frontend, même nom de branche dans les deux dépôts).
+
+## Mise à jour 11/09/2026
+
+- **Rebasée sur `main`** (les deux dépôts) : backend sans aucun conflit,
+  frontend sans conflit non plus (2 fichiers se recoupaient --
+  `ChatIA.tsx`, `lib/api.ts` -- mais les changements ne touchaient pas les
+  mêmes lignes). Vérifié après coup : `signalerPedagogique` toujours bien
+  câblé dans `ChatIA.tsx`, `npx tsc --noEmit` propre côté frontend, tout
+  `core/*.py` + `api/*.py` compile côté backend.
+- **Injection automatique** matière/notion branchée (le point qui manquait
+  du système hybride) : `core/signalements.py::signalements_pertinents_pour_injection`,
+  appelée dans `core/main.py` juste après le calcul des notions pertinentes
+  (même `code_id` actif, aucune requête sémantique en plus), injectée dans
+  le prompt système par `construction_system_prompt.py` (nouveau bloc
+  "NOTES DU PROF SUR DES SIGNALEMENTS PASSÉS").
+- **Nouvel outil élève** `consulter_signalements_pertinents` (option
+  secondaire, même pattern que `consulter_avancement_notion`) : la fonction
+  `consulter_par_notion` existait déjà dans `core/signalements.py` mais
+  n'était appelée nulle part, donc inutilisable par le LLM.
+- **Trou trouvé dans la migration** : le code utilisait `notion_id` partout
+  (`rattacher_signalement`, `consulter_par_notion`...) mais la colonne
+  n'était jamais créée. Ajoutée dans
+  `migrations/2026_09_10_refonte_signalements.sql`, plus 3 index pour les
+  requêtes d'injection qui tournent maintenant à chaque message d'élève
+  rattaché à un code.
+- **Décision Bourama (11/09)** : la cascade de supervision (Partie 10)
+  disparaît entièrement, pas de survie en signal passif -- cohérent avec ce
+  que cette branche faisait déjà.
+- **Supabase pas touché** cette session (demande explicite de Bourama) : la
+  migration ci-dessus est écrite et prête, mais **pas appliquée**.
 
 ## Contexte de la refonte
 
@@ -85,19 +110,12 @@ branche est réellement fusionnée/déployée -- pas avant.
 
 ## Pas encore fait
 
-- **Rebase/fusion avec `main`** : cette branche part de l'ancien `main`
-  (08/09), pas du nouveau (10/09, autre chantier). Pas tentée volontairement
-  cette session. À faire avant merge réel.
-- **Injection automatique** matière/notion active dans le system prompt (le
-  côté "auto" du système hybride demandé — la consultation à la demande par
-  le LLM, elle, est déjà câblée via l'outil `consulter_signalement`)
+- **Appliquer la migration à Supabase** (et déployer) -- volontairement pas
+  fait cette session, attend le feu vert explicite de Bourama (voir incident
+  ci-dessus : ne plus jamais le faire pour une branche pas encore déployée).
 - **Lien conversation ↔ signalement** : `conversation_discussion_id` existe
   en base mais n'est jamais renseigné (le frontend ne connaît l'id d'une
   conversation qu'après son premier message). Ça marche quand même : l'id du
   signalement est repris tel quel par le modèle depuis le texte pré-rempli.
   Mais pas de "reprendre la discussion précédente" pour l'instant — un
   nouveau clic sur "Discuter" ouvre toujours une nouvelle conversation.
-- Compatibilité avec la désactivation du routeur automatique d'outils faite
-  sur `main` (commit `722ac5a`) : pas vérifiée, les deux chantiers touchent
-  des fichiers communs (`routage_outils.py`, `mcp_tools.py`,
-  `serveur_mcp_espace.py`)
