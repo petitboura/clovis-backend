@@ -6,7 +6,6 @@ Lancement local : uvicorn api.main:app --reload --port 8000
 
 import asyncio
 import logging
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -320,7 +319,7 @@ async def _boucle_reessai_echecs():
         await asyncio.sleep(5 * 60)
 
 
-@asynccontextmanager
+
 async def _boucle_vectorisation_documents_agent():
     """
     Vectorise en arrière-plan les sections de la base de connaissance
