@@ -689,8 +689,16 @@ app.include_router(comportements_etudiants_router)
 #   emplacements_bibliotheque_programme_router, plugins_router,
 #   plugins_programmes_router
 app.include_router(comportements_publics_router)
-app.include_router(bibliotheque_publique_router)
+# Ordre important : dossiers_catalogue_public_router doit etre inclus
+# AVANT bibliotheque_publique_router. Les deux partagent le prefixe
+# "/api/bibliotheque-publique" et bibliotheque_publique_router expose un
+# catch-all GET /{entree_id} (un seul segment) qui, inclus en premier,
+# interceptait GET /api/bibliotheque-publique/dossiers avec
+# entree_id="dossiers" avant que le router dedie aux dossiers ne recoive
+# la requete -- Supabase rejetait alors "dossiers" comme UUID invalide
+# (500). Bug remonte par Bourama le 12/09/2026 (onglet Dossiers vide).
 app.include_router(dossiers_catalogue_public_router)
+app.include_router(bibliotheque_publique_router)
 app.include_router(signalements_router)
 app.include_router(signalements_pedagogiques_router)
 app.include_router(audit_hebdomadaire_corrections_router)
