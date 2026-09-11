@@ -27,7 +27,6 @@ from core.outils_generation_commun import (
     mcp_generation,
     Context,
     _supabase_memoire,
-    _SUPABASE_URL,
     TYPES_EMPLACEMENT_BIBLIOTHEQUE,
     _libelle_emplacement,
 )
@@ -201,23 +200,13 @@ def gerer_base_connaissance(
       pas une reformulation, le contenu tel qu'il est stocké, mot pour
       mot) d'un article, identifié par son `nom` exact. À utiliser quand
       la question porte sur l'ensemble d'un article plutôt que sur un
-      point précis (ex : "montre-moi l'article Bibliothèque", "affiche
-      le fichier tel qu'il est"), en complément de "chercher" qui ne
-      renvoie que des passages. Quand tu restitues ce résultat à
-      l'utilisateur, recopie-le intégralement et tel quel (verbatim), ne
-      le résume pas, ne le reformule pas, ne le raccourcis pas. Si `nom`
-      est inconnu, utilise d'abord "chercher" pour identifier le bon
-      nom, ou "lister_articles" pour voir les noms disponibles.
-      Paramètre : `nom`.
-    - "obtenir_fichier" : renvoie le FICHIER original (pas son texte
-      recopié) d'un article, sous forme d'un lien vers le fichier tel
-      qu'il a été déposé. À utiliser quand tu juges que le fichier
-      lui-même aide réellement la réponse (l'utilisateur ne sait
-      généralement pas qu'il existe, donc ne le demandera pas
-      explicitement), pas systématiquement à chaque question. Pas juste
-      lire son contenu (pour ça, "lire_article"). Si `nom` est inconnu,
-      utilise "lister_articles" pour voir les noms disponibles.
-      Paramètre : `nom`.
+      point précis (ex : "montre-moi l'article Bibliothèque"), en
+      complément de "chercher" qui ne renvoie que des passages. Quand tu
+      restitues ce résultat à l'utilisateur, recopie-le intégralement et
+      tel quel (verbatim), ne le résume pas, ne le reformule pas, ne le
+      raccourcis pas. Si `nom` est inconnu, utilise d'abord "chercher"
+      pour identifier le bon nom, ou "lister_articles" pour voir les
+      noms disponibles. Paramètre : `nom`.
     """
     requete = ctx.request_context.request
     agent_id = requete.query_params.get("agent_id")
@@ -269,27 +258,9 @@ def gerer_base_connaissance(
             logging.error(f"ERREUR gerer_base_connaissance (lire_article) : {e}")
             return "Erreur : la lecture de l'article a échoué, réessaie."
 
-    if action == "obtenir_fichier":
-        try:
-            res = (
-                _supabase_memoire.table("documents")
-                .select("nom")
-                .eq("agent_id", agent_id)
-                .eq("nom", nom)
-                .limit(1)
-                .execute()
-            )
-            if not res.data:
-                return f"Aucun article nommé '{nom}' trouvé dans la base de connaissances."
-            url = f"{_SUPABASE_URL}/storage/v1/object/public/documents-agents/{agent_id}/{nom}"
-            return f"Fichier : {url}"
-        except Exception as e:
-            logging.error(f"ERREUR gerer_base_connaissance (obtenir_fichier) : {e}")
-            return "Erreur : la récupération du fichier a échoué, réessaie."
-
     return (
         f"Erreur : action '{action}' inconnue. Actions valides : chercher, "
-        "lister_articles, lire_article, obtenir_fichier."
+        "lister_articles, lire_article."
     )
 
 

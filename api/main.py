@@ -92,6 +92,10 @@ from core.file_attente_description_skills import (
     traiter_file_attente_une_fois as traiter_file_attente_description_une_fois,
     relancer_echecs_a_froid as relancer_echecs_a_froid_description,
 )
+# Base de connaissance agent (table `documents`) : sections écrites
+# directement (nom + contenu), embedding calculé en arrière-plan -- voir
+# docstring de core/vectorisation_documents_agent.py.
+from core.vectorisation_documents_agent import traiter_documents_a_vectoriser_une_fois
 # from core.audit_programme import executer_audits_hebdomadaires  -- désactivé, voir _desactive_programme/
 from core.serveur_mcp_github import mcp_github
 from core.serveur_mcp_public import mcp_public
@@ -317,6 +321,22 @@ async def _boucle_reessai_echecs():
 
 
 @asynccontextmanager
+async def _boucle_vectorisation_documents_agent():
+    """
+    Vectorise en arrière-plan les sections de la base de connaissance
+    agent (table `documents`) écrites sans embedding -- voir docstring de
+    core/vectorisation_documents_agent.py. Même rythme que les autres
+    files (2s tant qu'il y a du travail, 5s sinon).
+    """
+    while True:
+        try:
+            traites = await to_thread.run_sync(traiter_documents_a_vectoriser_une_fois)
+        except Exception as e:
+            logging.error(f"ERREUR boucle vectorisation documents agent : {e}")
+            traites = 0
+        await asyncio.sleep(2 if traites > 0 else 5)
+
+
 async def _lifespan(app: FastAPI):
     # Toutes les routes API sont en `def` sync (Supabase, Groq, Gemini :
     # SDKs synchrones) -- FastAPI les exécute correctement dans le
@@ -372,6 +392,7 @@ async def _lifespan(app: FastAPI):
         tache_description_skills = asyncio.create_task(_boucle_description_skills())
         tache_reessai_echecs_description = asyncio.create_task(_boucle_reessai_echecs_description())
         tache_audit_corrections = asyncio.create_task(_boucle_planificateur_audit_corrections())
+        tache_vectorisation_documents_agent = asyncio.create_task(_boucle_vectorisation_documents_agent())
         yield
         if tache_planificateur:
             tache_planificateur.cancel()
@@ -388,6 +409,7 @@ async def _lifespan(app: FastAPI):
         tache_description_skills.cancel()
         tache_reessai_echecs_description.cancel()
         tache_audit_corrections.cancel()
+        tache_vectorisation_documents_agent.cancel()
 
 
 app = FastAPI(title="Clovis API", version="0.1.0", lifespan=_lifespan)

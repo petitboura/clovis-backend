@@ -30,7 +30,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", "indexers"))
 from creation_agent import generer_id_depuis_nom, extraire_id_notion, composer_system_prompt  # noqa: E402
 from index_notion import parcourir_et_indexer  # noqa: E402
 from index_documents import indexer_texte, indexer_document, supprimer_chunks_existants  # noqa: E402
-from storage import upload_document, list_documents, delete_document, get_document_url  # noqa: E402
+from storage import upload_document, list_documents, delete_document  # noqa: E402
 from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien, lister_fichiers, supprimer_fichier  # noqa: E402
 from mcp_tools import lister_outils_autorises_pour_agent  # noqa: E402
 from core.erreurs import erreur_api
@@ -1153,180 +1153,12 @@ def ajouter_administrateur(
     return lister_administrateurs(agent_id, utilisateur)
 
 
-@router.post("/{agent_id}/documents", status_code=201)
-async def uploader_document(
-    agent_id: str,
-    request: Request,
-    fichier: UploadFile = File(...),
-    utilisateur=Depends(utilisateur_courant),
-):
-    """
-    Ajoutée le 2026-07-12 suite à un bug remonté par Bourama : le nouveau formulaire
-    de création (étape D.6 du pivot social) n'avait aucun moyen d'ajouter un
-    PDF, `POST /api/agents` ne le gère pas lui-même (voir docstring en
-    tête de ce fichier). Appelé APRÈS `POST /api/agents` : l'agent doit
-    déjà exister, on a besoin de son id pour indexer le document dessus.
-
-    Réutilise telle quelle la logique déjà en place côté Streamlit
-    (`indexers/storage.py:upload_document` +
-    `indexers/index_documents.py:indexer_document`) — pas de duplication.
-    Corrigé le 26/07/2026 : `indexers/storage.py` écrivait dans un bucket
-    legacy ("IA pour etudiants") au lieu de "documents-agents", donc TOUS
-    les documents uploadés via cet endpoint atterrissaient au mauvais
-    endroit depuis le début.
-
-    Vérifie la propriété de l'agent (même exigence que
-    `mettre_a_jour_vitrine`).
-    """
-    if fichier.content_type != "application/pdf":
-        raise erreur_api(400, "SEULS_LES_FICHIERS_PDF_SONT_ACCEPTES")
-
-    try:
-        res = (
-            supabase.table("agents")
-            .select("id, owner_id")
-            .eq("id", agent_id)
-            .maybe_single()
-            .execute()
-        )
-    except Exception as e:
-        logging.error(f"ERREUR SUPABASE (lecture agent {agent_id} avant upload document) : {e}")
-        raise erreur_api(500, "IMPOSSIBLE_D_AJOUTER_CE_DOCUMENT_POUR")
-
-    if not res or not res.data:
-        raise erreur_api(404, "AGENT_INTROUVABLE")
-    if not peut_gerer_base_connaissances(utilisateur.id, res.data["owner_id"], agent_id):
-        raise erreur_api(403, "PAS_LE_DROIT_SUR_CET_AGENT")
-
-    contenu = await fichier.read()
-    if len(contenu) == 0:
-        raise erreur_api(400, "FICHIER_VIDE")
-
-    nom_original = fichier.filename or "document.pdf"
-    nom_stockage = f"{agent_id}__{nom_original}"
-
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        tmp.write(contenu)
-        chemin_temp = tmp.name
-
-    try:
-        upload_document(chemin_temp, nom_stockage)
-        indexer_document(chemin_temp, nom_stockage, agent_id)
-    except Exception as e:
-        logging.error(f"ERREUR indexation PDF (agent_id={agent_id}, fichier={nom_original}) : {e}")
-        raise erreur_api(500, "AGENT_CREE_MAIS_INDEXATION_ECHEC", nom=nom_original)
-    finally:
-        try:
-            os.remove(chemin_temp)
-        except OSError:
-            pass
-
-    journaliser(
-        action="document.ajoute",
-        user_id=utilisateur.id,
-        cible_type="agent",
-        cible_id=agent_id,
-        details={"nom_stockage": nom_stockage, "nom_original": nom_original},
-        request=request,
-    )
-
-    return {"nom": nom_original, "statut": "indexé"}
-
-
-@router.get("/{agent_id}/documents")
-def lister_documents(agent_id: str, utilisateur=Depends(utilisateur_courant)):
-    """
-    Ajouté le 2026-07-12, même contexte que `modifier_agent` (édition
-    complète d'un agent, demandée par Bourama). Réutilise
-    `indexers/storage.py:list_documents` telle quelle (liste TOUT le
-    bucket, pas de filtre côté Supabase Storage par préfixe) puis filtre
-    en Python sur `{agent_id}__` — même approche que
-    `l'ancienne interface Streamlit` fait déjà, pas une nouvelle logique.
-    """
-    try:
-        res = (
-            supabase.table("agents")
-            .select("owner_id")
-            .eq("id", agent_id)
-            .maybe_single()
-            .execute()
-        )
-    except Exception as e:
-        logging.error(f"ERREUR SUPABASE (lecture agent {agent_id} avant liste documents) : {e}")
-        raise erreur_api(500, "IMPOSSIBLE_DE_LISTER_LES_DOCUMENTS_POUR")
-
-    if not res or not res.data:
-        raise erreur_api(404, "AGENT_INTROUVABLE")
-    if not peut_gerer_base_connaissances(utilisateur.id, res.data["owner_id"], agent_id):
-        raise erreur_api(403, "PAS_LE_DROIT_SUR_CET_AGENT")
-
-    try:
-        tous_les_fichiers = list_documents()
-    except Exception as e:
-        logging.error(f"ERREUR SUPABASE STORAGE (liste documents, agent_id={agent_id}) : {e}")
-        raise erreur_api(500, "IMPOSSIBLE_DE_LISTER_LES_DOCUMENTS_POUR")
-
-    prefixe = f"{agent_id}__"
-    fichiers_agent = [f for f in tous_les_fichiers if f.startswith(prefixe)]
-
-    return [
-        {
-            "nom_stockage": f,
-            "nom_affiche": f[len(prefixe):],
-            "url": get_document_url(f),
-        }
-        for f in fichiers_agent
-    ]
-
-
-@router.delete("/{agent_id}/documents/{nom_stockage}", status_code=204)
-def supprimer_document(agent_id: str, nom_stockage: str, request: Request, utilisateur=Depends(utilisateur_courant)):
-    """
-    Ajouté le 2026-07-12, même contexte. Vérifie que `nom_stockage`
-    commence bien par `{agent_id}__` (pas juste que l'agent appartient à
-    l'utilisateur) : sinon un propriétaire d'un agent A pourrait passer
-    le nom de stockage d'un document de l'agent B et le supprimer, tant
-    que A lui appartient. Supprime aussi les chunks vectorisés associés
-    (`supprimer_chunks_existants`), sinon le RAG continuerait à retrouver
-    le contenu d'un PDF qui n'existe plus dans le stockage — même
-    précaution que `l'ancienne interface Streamlit`.
-    """
-    try:
-        res = (
-            supabase.table("agents")
-            .select("owner_id")
-            .eq("id", agent_id)
-            .maybe_single()
-            .execute()
-        )
-    except Exception as e:
-        logging.error(f"ERREUR SUPABASE (lecture agent {agent_id} avant suppression document) : {e}")
-        raise erreur_api(500, "IMPOSSIBLE_DE_SUPPRIMER_CE_DOCUMENT_POUR")
-
-    if not res or not res.data:
-        raise erreur_api(404, "AGENT_INTROUVABLE")
-    if not peut_gerer_base_connaissances(utilisateur.id, res.data["owner_id"], agent_id):
-        raise erreur_api(403, "PAS_LE_DROIT_SUR_CET_AGENT")
-
-    if not nom_stockage.startswith(f"{agent_id}__"):
-        raise erreur_api(403, "CE_DOCUMENT_N_APPARTIENT_PAS_A")
-
-    try:
-        delete_document(nom_stockage)
-        supprimer_chunks_existants(agent_id, nom_stockage)
-    except Exception as e:
-        logging.error(f"ERREUR suppression document {nom_stockage} (agent_id={agent_id}) : {e}")
-        raise erreur_api(500, "IMPOSSIBLE_DE_SUPPRIMER_CE_DOCUMENT")
-
-    journaliser(
-        action="document.supprime",
-        user_id=utilisateur.id,
-        cible_type="agent",
-        cible_id=agent_id,
-        details={"nom_stockage": nom_stockage},
-        request=request,
-    )
-
+# Anciens endpoints POST/GET/DELETE /{agent_id}/documents (upload PDF pour
+# la base de connaissance) supprimés (demande Bourama) : plus aucune UI ne
+# les appelait. Les sections de la base de connaissance (table `documents`)
+# sont désormais écrites directement (nom + contenu), voir
+# core/outils_comportements_connaissance.py:gerer_base_connaissance et
+# core/vectorisation_documents_agent.py pour le calcul de l'embedding.
 
 TAILLE_MAX_BIBLIOTHEQUE_OCTETS = 50 * 1024 * 1024  # 50 Mo
 
