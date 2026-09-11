@@ -63,7 +63,7 @@ logging.basicConfig(level=logging.INFO)
 def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, agent_id=None, conversation_id=None, longueur_reponse="moyenne", image_url=None, localisation=None, fuseau_horaire=None, images_base64=None, recherche_forcee=False, outil_force=None, ignorer_suggestion_outils=False, modele_force=None, sans_enseignant=False, natif=False):
     """
     Generateur d'evenements. Chaque element produit est un dictionnaire :
-    - {"type": "statut", "texte": "..."}         -> un outil MCP est en cours d'utilisation
+    - {"type": "statut", "texte": "..."}         -> un outil MCP est en cours d'utilisation (ou, depuis le 11/09/2026, Gemini en train de lire une image/video jointe)
     - {"type": "statut_termine", "texte": "..."} -> cet outil a fini (ou a ete annule)
     - {"type": "outil_resultat", "nom_outil": "...", "nom_lisible": "...", "resultat": "..."}
       -> ce que CET outil a concretement execute/retourne (tronque a 3000 caracteres pour
@@ -894,6 +894,15 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 "erreur": "aperçu non conservé après rechargement",
             })
         try:
+            # ETAPE 6 (11/09/2026, demande Bourama) : visuel pour l'eleve
+            # pendant la latence ajoutee par ce chantier -- meme mecanisme
+            # SSE statut/statut_termine deja utilise pour les outils
+            # (StatutOutil.tsx cote frontend, rien de nouveau a creer),
+            # meme style de libelle ("... " / "effectuee" / "a echoue").
+            # Les etapes suivantes ("reflechit" puis le texte de reponse)
+            # sont deja couvertes par l'existant (IndicateurReflexion,
+            # streaming normal) une fois cette bulle disparue.
+            yield {"type": "statut", "texte": "Lecture de l'image..."}
             client_google = genai.Client(api_key=get_secret("GOOGLE_API_KEY"))
             response = client_google.models.generate_content_stream(
                 model=GOOGLE_MODEL,
@@ -907,6 +916,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                     description_accumulee.append(chunk.text)
             description_generee = "".join(description_accumulee)
             logging.info(f"Description GEMINI (image) générée : {len(description_generee)} caractères")
+            yield {"type": "statut_termine", "texte": "Lecture de l'image effectuée"}
         except Exception as e:
             # ETAPE 3 (11/09/2026, demande Bourama) : la description echoue
             # -- on continue quand meme vers le grand modele (pas d'arret
@@ -916,6 +926,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             # bloc juste en dessous.
             description_echec = True
             logging.error(f"ERREUR GEMINI (image): {e}")
+            yield {"type": "statut_termine", "texte": "Lecture de l'image a échoué"}
 
         # ETAPE 2 (11/09/2026) : la description remplace/complete
         # message_pour_modele (en gardant la question d'origine de
