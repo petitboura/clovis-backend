@@ -834,14 +834,16 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             "parts": _construire_parts_gemini(message_pour_modele, images),
         })
 
-        # ETAPE 1 (11/09/2026, chantier "image -> grand modele", demande
-        # Bourama) : Gemini ne repond plus a l'etudiant sur ce chemin, il
-        # decrit/transcrit fidelement l'image ou la video en texte. Cette
-        # description est capturee en interne uniquement pour l'instant --
-        # rien n'est encore branche sur le flux normal (etape 2) ni sauvegarde
-        # dans l'historique (etape 4), rien n'est encore renvoye a l'etudiant :
-        # c'est attendu a ce stade, le reste suit dans les etapes suivantes,
-        # toujours sur cette meme branche.
+        # ETAPES 1 et 2 (11/09/2026, chantier "image -> grand modele",
+        # demande Bourama) : Gemini ne repond plus a l'etudiant sur ce
+        # chemin, il decrit/transcrit fidelement l'image ou la video en
+        # texte (etape 1). Cette description est ensuite injectee dans
+        # message_pour_modele/messages_base, qui alimentent la cascade
+        # normale plus bas -- le grand modele est desormais consulte pour
+        # ce message, avec tous ses outils (etape 2, voir plus bas).
+        # Restent a traiter : gestion d'echec definitive (etape 3),
+        # historique (etape 4), meta_utilisateur (etape 5), cout/latence
+        # (etape 6) -- toujours sur cette meme branche.
         instruction_description_gemini = (
             "Tu es un outil de vision qui vient en appui d'un assistant "
             "pedagogique, tu ne t'adresses jamais directement a l'eleve. "
@@ -856,6 +858,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         )
 
         description_accumulee = []
+        description_generee = ""
         meta_utilisateur = {"pieces_jointes": []}
         if image_url:
             meta_utilisateur["pieces_jointes"].append({
@@ -890,14 +893,27 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             description_generee = "".join(description_accumulee)
             logging.info(f"Description GEMINI (image) générée : {len(description_generee)} caractères")
         except Exception as e:
+            # ETAPE 3 (gestion d'echec definitive) pas encore traitee ici --
+            # a discuter avec Bourama. Pour l'instant, description_generee
+            # reste a "" (voir plus haut) : la question d'origine de
+            # l'eleve continue quand meme vers le grand modele juste en
+            # dessous, sans description d'image, plutot que de tout arreter.
             logging.error(f"ERREUR GEMINI (image): {e}")
-        # ETAPE 1 uniquement : rien de plus a ce stade (voir commentaire
-        # au-dessus) -- pas de branchement sur messages_base/grand modele
-        # (etape 2), pas de gestion d'echec definitive (etape 3), pas de
-        # sauvegarde historique (etape 4). Le `return` ci-dessous est donc
-        # volontairement conserve tel quel pour l'instant, la branche
-        # n'etant pas encore fonctionnelle de bout en bout.
-        return
+
+        # ETAPE 2 (11/09/2026) : la description remplace/complete
+        # message_pour_modele (en gardant la question d'origine de
+        # l'eleve), et c'est cette variable qui alimente messages_base
+        # utilise par toute la cascade normale plus bas -- exactement
+        # comme s'il n'y avait jamais eu d'image. Plus de `return` ici :
+        # le code continue son chemin normal vers le grand modele.
+        if description_generee:
+            message_pour_modele = (
+                f"{message_pour_modele}\n\n"
+                "[Contenu de l'image ou de la vidéo jointe par l'élève, "
+                "décrit/transcrit par un outil de vision]\n"
+                f"{description_generee}"
+            )
+            messages_base[-1]["content"] = message_pour_modele
 
     if modele_force:
         # Modele premium (Claude/GPT/Gemini/DeepSeek), voir docstring de
