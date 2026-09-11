@@ -208,13 +208,16 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     modele_id premium (Claude/GPT/Gemini/DeepSeek) choisi par l'utilisateur
     pour CE message, deja revalide cote appelant (api/chat.py) contre les
     modeles reellement debloques de l'agent -- ce module ne refait PAS
-    cette verification, il fait confiance a l'appelant. Ignore si un
-    image_url/images_base64 est present (la vision reste reservee au
-    chemin Gemini existant plus bas). LIMITE CONNUE : ce chemin ne passe
-    PAS par le cascade Groq ni par les outils MCP (pas de RAG, Wolfram,
-    Notion, recherche web...) -- reponse texte seule, comme le chemin
-    vision Gemini juste en dessous. A etendre en v2 si le tool-calling
-    multi-fournisseurs est prioritaire.
+    cette verification, il fait confiance a l'appelant. LIMITE CONNUE : ce
+    chemin ne passe PAS par le cascade Groq ni par les outils MCP (pas de
+    RAG, Wolfram, Notion, recherche web...) -- reponse texte seule. A
+    etendre en v2 si le tool-calling multi-fournisseurs est prioritaire.
+    DEPUIS le chantier "image -> grand modele" (11/09/2026) : si une
+    image/video est presente EN PLUS d'un modele_force, elle est d'abord
+    decrite par Gemini (voir plus bas) puis injectee dans le message avant
+    d'arriver ici -- modele_force n'est donc plus ignore dans ce cas comme
+    avant, il recoit la description au lieu de recevoir l'image elle-meme
+    (generer_reponse_premium ne fait pas de vision).
     """
     if reprise is not None and reprise.get("type") == "continuer_agent":
         # Reprise apres "limite_outils_atteinte" ou "repetition_detectee"
@@ -805,6 +808,14 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     messages_base += historique
     messages_base.append({"role": "user", "content": message_pour_modele})
 
+    # ETAPE 5 (11/09/2026) : meta_utilisateur (piece jointe pour affichage
+    # frontend + desormais la description elle-meme, voir plus bas) doit
+    # pouvoir atteindre TOUS les points de sauvegarde de la cascade plus
+    # bas (DeepSeek/Groq/fallbacks/Gemini), pas seulement l'ancien retour
+    # anticipe du chemin image -- d'ou la definition ici, avant la
+    # branche image, a None par defaut pour un message texte classique.
+    meta_utilisateur = None
+
     if image_url or images_base64:
         # Chemin dédié image(s) : voir docstring ci-dessus. Pas de cascade
         # multi-modeles ici, Gemini est le seul maillon capable de traiter
@@ -834,15 +845,18 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             "parts": _construire_parts_gemini(message_pour_modele, images),
         })
 
-        # ETAPES 1 et 2 (11/09/2026, chantier "image -> grand modele",
+        # ETAPES 1 a 5 (11/09/2026, chantier "image -> grand modele",
         # demande Bourama) : Gemini ne repond plus a l'etudiant sur ce
         # chemin, il decrit/transcrit fidelement l'image ou la video en
         # texte (etape 1). Cette description est ensuite injectee dans
         # message_pour_modele/messages_base, qui alimentent la cascade
         # normale plus bas -- le grand modele est desormais consulte pour
-        # ce message, avec tous ses outils (etape 2, voir plus bas).
-        # Restent a traiter : gestion d'echec definitive (etape 3),
-        # historique (etape 4), meta_utilisateur (etape 5), cout/latence
+        # ce message, avec tous ses outils (etape 2). Si la description
+        # echoue, le grand modele en est prevenu explicitement (etape 3).
+        # La description (ou son echec) est aussi ecrite durablement dans
+        # meta_utilisateur, jamais perdue (etape 4), et cette variable est
+        # desormais transmise a tous les points de sauvegarde de la
+        # cascade plus bas (etape 5). Reste a traiter : cout/latence
         # (etape 6) -- toujours sur cette meme branche.
         instruction_description_gemini = (
             "Tu es un outil de vision qui vient en appui d'un assistant "
@@ -917,6 +931,15 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 f"{description_generee}"
             )
             messages_base[-1]["content"] = message_pour_modele
+            # ETAPE 4 (11/09/2026, demande Bourama : "on garde comme une
+            # piece jointe, on ne la perd jamais") : la description est
+            # ecrite sur chaque piece jointe de meta_utilisateur, colonne
+            # jsonb non purgee de historique_conversations (voir
+            # persistance_echanges.py) -- persiste donc durablement, pas
+            # seulement injectee dans ce tour-ci, et reste disponible si
+            # l'eleve reparle de cette image plus tard dans la conversation.
+            for piece_jointe in meta_utilisateur["pieces_jointes"]:
+                piece_jointe["description"] = description_generee
         elif description_echec:
             # ETAPE 3 : le grand modele doit savoir qu'une piece jointe
             # existait et n'a pas pu etre lue, pas la traiter en silence
@@ -931,6 +954,10 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 "renvoyer.]"
             )
             messages_base[-1]["content"] = message_pour_modele
+            # ETAPE 4 : meme piece jointe conservee, mais avec l'echec note
+            # au lieu d'une description -- jamais perdue silencieusement.
+            for piece_jointe in meta_utilisateur["pieces_jointes"]:
+                piece_jointe["description_echec"] = True
 
     if modele_force:
         # Modele premium (Claude/GPT/Gemini/DeepSeek), voir docstring de
@@ -948,7 +975,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 yield {"type": "reponse", "texte": morceau}
             logging.info(f"Réponse via MODELE PREMIUM : {modele_force}")
             ids_historique = _sauvegarder_echange(
-                user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=modele_force
+                user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=modele_force, meta_utilisateur=meta_utilisateur
             )
             if ids_historique:
                 yield {"type": "meta", **ids_historique}
@@ -1011,7 +1038,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                     reponse_accumulee,
                     meta_assistant,
                 )
-                ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=DEEPSEEK_PRIMARY, meta_assistant=meta_assistant)
+                ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=DEEPSEEK_PRIMARY, meta_utilisateur=meta_utilisateur, meta_assistant=meta_assistant)
                 if ids_historique:
                     yield {"type": "meta", **ids_historique}
                 _finaliser_memoire_en_arriere_plan(user_id, agent_id)
@@ -1034,7 +1061,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                 reponse_accumulee,
                 meta_assistant,
             )
-            ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=GROQ_PRIMARY, meta_assistant=meta_assistant)
+            ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=GROQ_PRIMARY, meta_utilisateur=meta_utilisateur, meta_assistant=meta_assistant)
             if ids_historique:
                 yield {"type": "meta", **ids_historique}
             _finaliser_memoire_en_arriere_plan(user_id, agent_id)
@@ -1074,7 +1101,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                     reponse_accumulee,
                     meta_assistant,
                 )
-                ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=model, meta_assistant=meta_assistant)
+                ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=model, meta_utilisateur=meta_utilisateur, meta_assistant=meta_assistant)
                 # Signale au frontend quand la reponse vient d'un modele de
                 # qualite reduite (demande Bourama, 26/07) : evite que
                 # l'utilisateur juge la plateforme sur une reponse plus
@@ -1195,7 +1222,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
                     reponse_accumulee.append(chunk.text)
                     yield {"type": "reponse", "texte": chunk.text}
             logging.info("Réponse via GEMINI")
-            ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=GOOGLE_MODEL)
+            ids_historique = _sauvegarder_echange(user_id, agent_id, message_utilisateur, "".join(reponse_accumulee), conversation_id, modele=GOOGLE_MODEL, meta_utilisateur=meta_utilisateur)
             if ids_historique:
                 yield {"type": "meta", **ids_historique}
             _finaliser_memoire_en_arriere_plan(user_id, agent_id)
