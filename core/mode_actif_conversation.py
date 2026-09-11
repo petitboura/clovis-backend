@@ -30,6 +30,19 @@ from api.auth import supabase
 _DUREE_CACHE_SECONDES = 5 * 60
 _cache_mode_actif = {}  # conversation_id -> {"valeur": dict | None, "expire_a": ts}
 
+# Sentinelle (11/09/2026, demande Bourama : ajout d'un vrai "Aucun mode",
+# jusqu'ici impossible à choisir dans le sélecteur) -- distingue "aucun
+# rattachement pour cette conversation n'a jamais été choisi" (aucune ligne
+# en base, la valeur reste None) de "l'utilisateur a explicitement choisi
+# de désactiver le mode" (une ligne existe, rattachement_id vaut None dans
+# cette ligne). Sans cette distinction, les deux se confondaient toujours
+# en None au niveau des fonctions consommatrices (lister_comportements_recus,
+# resoudre_code_actif_eleve, consulter_signalements_pertinents), qui
+# retombaient alors sur le repli "un seul rattachement -> utilisé
+# automatiquement" même quand l'utilisateur venait de choisir explicitement
+# de désactiver -- c'était le bug rapporté.
+MODE_DESACTIVE = "__mode_desactive__"
+
 
 def obtenir_mode_actif(conversation_id: str, user_id: str) -> dict | None:
     """Rattachement actuellement actif pour cette conversation, ou None
@@ -54,6 +67,24 @@ def obtenir_mode_actif(conversation_id: str, user_id: str) -> dict | None:
     valeur = res.data if res else None
     _cache_mode_actif[conversation_id] = {"valeur": valeur, "expire_a": maintenant + _DUREE_CACHE_SECONDES}
     return valeur
+
+
+def rattachement_actif_pour_prompt(conversation_id: str | None, user_id: str) -> str | None:
+    """Valeur à transmettre aux fonctions qui résolvent le rattachement
+    actif d'une conversation pour l'injection dans le prompt (comportements
+    reçus, notions du programme, notes du prof) -- voir MODE_DESACTIVE
+    ci-dessus pour la distinction qu'introduit cette fonction. None si
+    conversation_id est absent ou si rien n'a encore été choisi (comportement
+    inchangé pour ces deux cas : les fonctions consommatrices gardent leur
+    repli habituel sur l'unique rattachement s'il n'y en a qu'un)."""
+    if not conversation_id:
+        return None
+    mode_actif = obtenir_mode_actif(conversation_id, user_id)
+    if mode_actif is None:
+        return None
+    if mode_actif.get("rattachement_id") is None:
+        return MODE_DESACTIVE
+    return mode_actif["rattachement_id"]
 
 
 def _rattachement_appartient_a(rattachement_id: str, user_id: str) -> bool:

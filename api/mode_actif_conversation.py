@@ -25,7 +25,13 @@ def lire(conversation_id: str, utilisateur=Depends(utilisateur_courant)):
     ligne = obtenir_mode_actif(conversation_id, utilisateur.id)
     rattachement_id = ligne["rattachement_id"] if ligne else None
     verrouille = bool(rattachement_id) and est_mineur(utilisateur.id)
-    return {"rattachement_id": rattachement_id, "verrouille": verrouille}
+    # `choisi` (11/09/2026, ajout d'un vrai "Aucun mode") : distingue pour
+    # le frontend "rien n'a jamais été choisi pour cette conversation"
+    # (ligne=None) de "l'utilisateur a explicitement choisi Aucun mode"
+    # (ligne existe, rattachement_id vaut None dedans) -- les deux
+    # renvoyaient sinon un rattachement_id=None identique, impossible à
+    # distinguer côté sélecteur.
+    return {"rattachement_id": rattachement_id, "verrouille": verrouille, "choisi": ligne is not None}
 
 
 class ModeActifPayload(BaseModel):

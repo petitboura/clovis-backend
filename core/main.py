@@ -18,7 +18,7 @@ from comportements_etudiants import (
 #   from programme_llm import lister_mes_programmes_legers
 #   from codes_partage import lister_programmes_recus_legers
 from codes_partage import lister_comportements_recus
-from mode_actif_conversation import obtenir_mode_actif
+from mode_actif_conversation import rattachement_actif_pour_prompt
 from avancement_notions_ia import notions_pertinentes_pour_eleve, resoudre_code_actif_eleve
 from signalements import signalements_pertinents_pour_injection
 from mcp_tools import lister_outils_autorises_pour_agent, filtrer_catalogue_par_outil_force, appeler_outil
@@ -425,17 +425,20 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         # l'ordre d'attente change (aucun changement de fraicheur des
         # donnees).
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            f_mode_actif = executor.submit(obtenir_mode_actif, conversation_id, user_id) if conversation_id else None
+            f_rattachement_actif = executor.submit(rattachement_actif_pour_prompt, conversation_id, user_id) if conversation_id else None
             f_comportements_etudiant = executor.submit(lister_comportements_etudiant, agent_id, user_id)
-            mode_actif = f_mode_actif.result() if f_mode_actif else None
+            rattachement_id_actif = f_rattachement_actif.result() if f_rattachement_actif else None
             comportements_etudiant_bruts = f_comportements_etudiant.result()
 
-        # rattachement_id_actif est None si conversation_id est absent, si
-        # aucun mode actif n'a encore été choisi, ou si user_id n'a qu'un
-        # seul rattachement (pas d'ambiguïté dans ce dernier cas, voir
-        # codes_partage.py::lister_comportements_recus qui gère alors tout
-        # seul le repli sur l'unique rattachement).
-        rattachement_id_actif = mode_actif.get("rattachement_id") if mode_actif else None
+        # rattachement_id_actif (voir core/mode_actif_conversation.py) vaut :
+        # - None si conversation_id est absent ou si aucun mode actif n'a
+        #   encore été choisi -- dans ce cas, un seul rattachement pour
+        #   user_id est utilisé automatiquement (pas d'ambiguïté, voir
+        #   codes_partage.py::lister_comportements_recus) ;
+        # - MODE_DESACTIVE (11/09/2026) si l'utilisateur a explicitement
+        #   choisi "Aucun mode" pour cette conversation -- dans ce cas,
+        #   jamais de repli automatique, même s'il n'y a qu'un rattachement ;
+        # - l'identifiant du rattachement choisi sinon.
         with concurrent.futures.ThreadPoolExecutor() as executor:
             f_notions = executor.submit(notions_pertinentes_pour_eleve, user_id, message_utilisateur, rattachement_id_actif)
             f_comportements_recus = executor.submit(lister_comportements_recus, user_id, rattachement_id_actif)

@@ -96,6 +96,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__)))
 from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien  # noqa: E402
 from dossiers_bibliotheque import creer_dossier, lister_dossiers, lister_fichiers_ids_dossier, ranger_fichier  # noqa: E402
 from file_attente_vectorisation import necessite_vectorisation_fichier_privee  # noqa: E402
+from mode_actif_conversation import MODE_DESACTIVE  # noqa: E402
 
 
 def get_secret(key):
@@ -905,6 +906,13 @@ def lister_comportements_recus(receveur_id: str, rattachement_id: str | None = N
     -- décision explicite de Bourama, jamais de mélange silencieux. Si
     receveur_id n'a qu'UN SEUL rattachement, aucune ambiguïté possible :
     ce rattachement est utilisé automatiquement, mode actif ou non."""
+    if rattachement_id == MODE_DESACTIVE:
+        # Mode explicitement désactivé par l'utilisateur pour cette
+        # conversation (11/09/2026) : comportement inchangé qu'il y ait un
+        # seul rattachement ou plusieurs -- aucun comportement reçu, jamais
+        # de repli automatique sur l'unique rattachement.
+        return []
+
     maintenant = time.time()
     cle = (receveur_id, rattachement_id)
     entree = _cache_comportements_recus.get(cle)

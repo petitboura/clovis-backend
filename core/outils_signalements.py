@@ -23,7 +23,7 @@ from core.signalements import (
     consulter_par_notion as _consulter_par_notion,
 )
 from core.avancement_notions_ia import resoudre_code_actif_eleve as _resoudre_code_actif_eleve
-from core.mode_actif_conversation import obtenir_mode_actif as _obtenir_mode_actif
+from core.mode_actif_conversation import rattachement_actif_pour_prompt as _rattachement_actif_pour_prompt
 from core.outils_generation_commun import mcp_generation, Context
 
 
@@ -158,10 +158,7 @@ def consulter_signalements_pertinents(ctx: Context) -> str:
         return "Erreur : impossible d'identifier l'élève ou l'agent."
 
     conversation_id = ctx.request_context.request.query_params.get("conversation_id")
-    rattachement_id_actif = None
-    if conversation_id:
-        mode_actif = _obtenir_mode_actif(conversation_id, etudiant_id)
-        rattachement_id_actif = mode_actif.get("rattachement_id") if mode_actif else None
+    rattachement_id_actif = _rattachement_actif_pour_prompt(conversation_id, etudiant_id)
 
     code = _resoudre_code_actif_eleve(etudiant_id, rattachement_id_actif)
     if code is None:

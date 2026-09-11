@@ -26,6 +26,7 @@ from core.programme_notions import (
     creer_notion,
     changer_statut_notion,
 )
+from core.mode_actif_conversation import MODE_DESACTIVE
 
 SEUIL_SIMILARITE_NOTIONS = 0.5
 MATCH_COUNT_NOTIONS = 3
@@ -334,6 +335,11 @@ def resoudre_code_actif_eleve(receveur_id: str, rattachement_id: str | None = No
     un seul rattachement existe, None si aucun, ou la LISTE des codes
     candidats si plusieurs (ambiguïté, laissée telle quelle à
     l'appelant)."""
+    if rattachement_id == MODE_DESACTIVE:
+        # Mode explicitement désactivé (11/09/2026) : jamais de repli sur
+        # l'unique rattachement même s'il n'y en a qu'un -- voir
+        # MODE_DESACTIVE dans core/mode_actif_conversation.py.
+        return None
     if rattachement_id:
         try:
             res = (
