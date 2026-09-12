@@ -28,6 +28,7 @@ from core.dossiers_bibliotheque import (
     lister_dossiers,
     lister_dossiers_du_fichier,
     lister_fichiers_ids_dossier,
+    lister_sous_dossiers,
     obtenir_dossier,
     ranger_fichier,
     renommer_dossier,
@@ -87,12 +88,19 @@ def consulter(dossier_id: str, utilisateur=Depends(utilisateur_courant)):
     dossier perso, lecture seule, ouvert par N'IMPORTE QUEL utilisateur
     connecté (pas seulement le propriétaire), aucune vérification de
     propriété volontairement. N'ajoute rien chez celui qui consulte,
-    même principe que api/bibliotheque_utilisateur.py::consulter."""
+    même principe que api/bibliotheque_utilisateur.py::consulter.
+
+    13/09/2026, demande Bourama : les sous-dossiers ne remontaient pas
+    dans ce lien de partage, seulement les fichiers directement rangés
+    dans le dossier. Ajout de sous_dossiers (id, nom uniquement, pas
+    de récursion : chaque sous-dossier est consulté séparément quand
+    on clique dessus, même logique que le reste de la bibliothèque)."""
     dossier = obtenir_dossier(dossier_id)
     if dossier is None:
         raise erreur_api(404, "DOSSIER_INTROUVABLE")
     fichier_ids = lister_fichiers_ids_dossier(dossier_id)
     dossier["fichiers"] = obtenir_fichiers_par_ids(fichier_ids)
+    dossier["sous_dossiers"] = lister_sous_dossiers(dossier_id)
     return dossier
 
 
