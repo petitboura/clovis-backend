@@ -47,6 +47,7 @@ import logging
 
 from core.avancement_notions_ia import resoudre_code_actif_eleve as _resoudre_code_actif_eleve
 from core.avancement_notions_ia import consulter_progres_notion_pour_eleve as _consulter_progres_notion_pour_eleve
+from core.avancement_notions_ia import toutes_notions_code as _toutes_notions_code
 from core.codes_partage import lister_comportements_recus as _lister_comportements_recus
 from core.mode_actif_conversation import rattachement_actif_pour_prompt as _rattachement_actif_pour_prompt
 from core.signalements import consulter_par_notion as _consulter_par_notion
@@ -56,18 +57,16 @@ from core.outils_generation_commun import mcp_generation, Context
 @mcp_generation.tool()
 def verifier_consignes_code_actif(action: str, ctx: Context, nom_notion: str = "") -> str:
     """
-    Outil SECONDAIRE (12/09/2026) : filet de sécurité pour le "mode
-    cours". Trois choses liées au code actif de cet élève sont déjà
+    Outil OBLIGATOIRE dès que le mode cours est actif (12/09/2026,
+    demande explicite Bourama -- ce n'est plus une option laissée à ton
+    jugement). Trois choses liées au code actif de cet élève sont
     injectées automatiquement dans ton prompt système à chaque message
     (les comportements/skills reçus, les notions pertinentes du
     Programme avec leur consigne/règle, et les notes du prof sur les
-    signalements) -- dans la plupart des cas tu n'as PAS besoin
-    d'appeler cet outil. Utilise-le seulement quand tu penses que
-    l'injection automatique est vide, incomplète, ou ne reflète pas un
-    changement récent (le prof vient de modifier quelque chose, ou une
-    section attendue n'apparaît pas). N'invente jamais un résultat à sa
-    place : si tu as un doute, appelle cet outil plutôt que de
-    supposer.
+    signalements), mais tant que le mode cours est actif, tu dois quand
+    même appeler cet outil pour les trois actions ci-dessous avant de
+    répondre, systématiquement, même si les blocs injectés te semblent
+    déjà complets.
 
     `action` doit être l'une de :
     - "comportements" : relit à l'instant, sans dépendre du cache,
@@ -75,10 +74,14 @@ def verifier_consignes_code_actif(action: str, ctx: Context, nom_notion: str = "
       élève (id, nom, description courte -- le texte complet de l'un
       d'eux se lit ensuite avec l'outil consulter_comportement, comme
       d'habitude). Aucun paramètre supplémentaire.
-    - "programme" : statut, règle et consigne du prof pour une notion
-      précise du programme. Nécessite `nom_notion` (description la plus
-      naturelle possible de la notion concernée, pas besoin d'un nom
-      exact -- recherche sémantique, tolère reformulation/typo).
+    - "programme" : statut, règle et consigne du prof. Si `nom_notion`
+      est fourni (description la plus naturelle possible de la notion
+      concernée, pas besoin d'un nom exact -- recherche sémantique,
+      tolère reformulation/typo), renvoie le détail de cette notion
+      précise. Si `nom_notion` est vide (cas de l'appel obligatoire
+      générique, sans notion précise en tête), renvoie la liste de
+      toutes les notions "à venir" du code actif qui ont une règle ou
+      une consigne configurée par le prof.
     - "signalements" : notes du prof sur des signalements passés,
       pertinentes pour le code actif de cet élève (toutes notions
       confondues). Aucun paramètre supplémentaire.
@@ -103,7 +106,25 @@ def verifier_consignes_code_actif(action: str, ctx: Context, nom_notion: str = "
     if action == "programme":
         nom_notion = (nom_notion or "").strip()
         if not nom_notion:
-            return "Erreur : précise `nom_notion` pour vérifier le Programme."
+            code = _resoudre_code_actif_eleve(etudiant_id, rattachement_id_actif)
+            if code is None:
+                return "Cet élève n'est rattaché à aucun code avec une structure de notions."
+            if isinstance(code, list):
+                return "Cet élève est rattaché à plusieurs codes, impossible de savoir lequel concerne cette question. Réponds avec ton jugement habituel."
+            try:
+                notions = _toutes_notions_code(code["id"])
+            except Exception as e:
+                logging.error(f"ERREUR verifier_consignes_code_actif (programme, liste générale) : {e}")
+                return "Aucune donnée de programme disponible, réponds avec ton jugement habituel."
+            pertinentes = [n for n in notions if n.get("statut") == "a_venir" and (n.get("regle_comportement") or n.get("consigne_llm"))]
+            if not pertinentes:
+                return "Aucune notion \"à venir\" avec une règle ou une consigne configurée par le prof en ce moment."
+            lignes = []
+            for n in pertinentes:
+                regle = f" règle=\"{n['regle_comportement']}\"" if n.get("regle_comportement") else ""
+                consigne = f" consigne=\"{n['consigne_llm']}\"" if n.get("consigne_llm") else ""
+                lignes.append(f"- \"{n['nom']}\" (à venir) --{regle}{consigne}")
+            return "Notions à venir avec règle/consigne du prof :\n" + "\n".join(lignes)
         try:
             resultat = _consulter_progres_notion_pour_eleve(etudiant_id, nom_notion, rattachement_id_actif)
         except Exception as e:

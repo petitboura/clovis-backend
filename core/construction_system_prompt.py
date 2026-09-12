@@ -50,23 +50,28 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     notions_pertinentes = notions_pertinentes or []
     signalements_pertinents = signalements_pertinents or []
 
-    # 12/09/2026, demande explicite Bourama : avant ce correctif, rien
-    # dans ce prompt ne disait explicitement au modèle s'il était "en
-    # mode cours" (un code actif pour cette conversation) ou non -- il ne
-    # pouvait que le déduire indirectement de la présence ou non des
-    # blocs ci-dessous, sans jamais pouvoir distinguer "rien à afficher"
-    # de "l'injection a peut-être raté quelque chose". Ce bloc est
-    # TOUJOURS présent (contrairement aux blocs suivants, conditionnels),
-    # justement pour lever cette ambiguïté dans les deux sens.
+    # 12/09/2026, demande explicite Bourama, DEUXIÈME passage ("il faut
+    # que le LLM sache que un mode est actif et qu'il est obligé à
+    # utiliser l'outil avant de répondre, c'est une obligation") : la
+    # première version de ce bloc ne rendait l'appel obligatoire que "si
+    # tu penses qu'une info manque", donc laissée à l'appréciation du
+    # modèle -- ce n'est plus le cas, l'appel est désormais SYSTÉMATIQUE
+    # dès que le mode cours est actif, quel que soit le message.
+    # Volontairement PAS un tool_choice="required" côté API (retiré le
+    # 05/09/2026 pour cette raison précise, voir core/boucle_agent.py) :
+    # la garantie d'appel reste portée par le prompt, pas par l'API, pour
+    # ne pas bloquer la prose/réflexion du modèle avant son appel d'outil.
+    # Ce bloc est TOUJOURS présent (contrairement aux blocs suivants,
+    # conditionnels), pour que le modèle sache dans tous les cas s'il est
+    # en mode cours ou non.
     if code_actif:
         system_final += (
-            "\n\nMODE COURS : ACTIF pour cette conversation (un code est rattaché). Les comportements/"
-            "skills reçus, les notions du programme et les notes du prof, listés ci-dessous s'ils "
-            "existent, sont déjà à jour au moment de l'injection. Si tu penses qu'une information "
-            "attendue manque ou semble périmée (le prof vient de faire un changement, une section est "
-            "vide alors que la question porte clairement sur cette matière), appelle l'outil "
-            "verifier_consignes_code_actif (action=\"comportements\", \"programme\" ou \"signalements\") "
-            "avant de répondre, plutôt que de supposer qu'il n'y a rien."
+            "\n\nMODE COURS : ACTIF pour cette conversation (un code est rattaché). OBLIGATION, sans "
+            "exception : avant de répondre à CE message, appelle l'outil verifier_consignes_code_actif "
+            "pour les trois actions \"comportements\", \"programme\" et \"signalements\", même si les "
+            "blocs correspondants ci-dessous semblent déjà complets ou vides, même si tu penses ne pas en "
+            "avoir besoin pour cette question précise. Ce n'est pas une option laissée à ton jugement : "
+            "tant que le mode cours est actif, c'est un passage obligatoire avant toute réponse."
         )
     else:
         system_final += "\n\nMODE COURS : inactif pour cette conversation (aucun code rattaché ou aucun mode choisi)."

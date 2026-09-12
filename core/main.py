@@ -525,6 +525,14 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     outils_forces_contexte = []
     if comportements_etudiant:
         outils_forces_contexte.append("gerer_comportement")
+    if code_id_actif:
+        # 12/09/2026, demande explicite Bourama, obligation d'appel : si
+        # l'outil n'est pas dans outils_forces_contexte, rien ne garantit
+        # qu'il soit dans la liste envoyée à Groq ce tour-ci (le routeur
+        # ne le suggère que s'il le juge pertinent) -- or le prompt
+        # <outils_actifs>/MODE COURS lui dit d'appeler un outil qui, sans
+        # cette ligne, pourrait tout simplement ne pas lui être proposé.
+        outils_forces_contexte.append("verifier_consignes_code_actif")
     # Outils toujours actifs pour Clovis (04/09/2026, demande Bourama) :
     # "sa source de connaissance dès qu'il connaît pas ou ne comprend
     # pas" -- doivent être disponibles au grand modèle à CHAQUE message,
