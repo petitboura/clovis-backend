@@ -28,9 +28,14 @@ plus aucun moyen de le declencher. Liste exacte et forme des
 verite a tenir a jour si de nouveaux types sont ajoutes.
 
 Reste volontairement HORS de ce lot : les actions de session DND/volume
-(etat initial capture en memoire cote app, deja identifie comme fragile
-si l'app est tuee pendant une session active), a trancher separement
-avec Bourama.
+ont ete branchees le 09/09/2026 (voir core/outils_concentration.py,
+gerer_session_concentration) -- le probleme de fragilite evoque
+ci-dessus (etat initial garde en memoire) est resolu differemment :
+la session est desormais bornee par une duree, et l'auto-arret est
+gere par une alarme systeme cote telephone (survit a un kill de
+process), pas par ce module. Android uniquement pour l'instant (bug
+connu cote iOS, plugin different, voir clovis-frontend/
+EspaceControleSession.tsx).
 """
 
 import logging

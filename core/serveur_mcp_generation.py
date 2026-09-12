@@ -77,5 +77,7 @@ import core.outils_comportements_connaissance  # noqa: F401
 import core.outils_comportements_publics  # noqa: F401
 import core.outils_mobile  # noqa: F401
 import core.outils_signalements  # noqa: F401
+import core.outils_concentration  # noqa: F401
+import core.outils_corrections_pedagogiques  # noqa: F401
 import core.outils_avancement_notions  # noqa: F401
 import core.outils_verification_code_actif  # noqa: F401
