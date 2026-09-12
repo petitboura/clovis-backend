@@ -532,6 +532,13 @@ REGISTRE_AFFICHAGE_OUTILS = {
     "gerer_avancement_notions": {"label": "Avancement du programme", "icone": "ListChecks", "onglet": None},
     "consulter_avancement_notion": {"label": "Consultation de l'avancement", "icone": "BookOpen", "onglet": None},
 
+    # --- Vérification "mode cours" (12/09/2026) --- outil unique qui
+    # absorbe consulter_avancement_notion et consulter_signalements_pertinents
+    # (les deux entrées ci-dessus/ci-dessous sont gardées pour l'affichage
+    # correct des anciens messages déjà en base, jamais réutilisées pour
+    # de nouveaux appels).
+    "verifier_consignes_code_actif": {"label": "Vérification du code actif", "icone": "ShieldCheck", "onglet": None},
+
     # --- Actions sur le téléphone de l'étudiant (26/08/2026) ---
     # onglet=None, même logique que les blocs "Programme adaptatif"/
     # "Bibliothèque" plus haut : outils que le modèle appelle lui-même en

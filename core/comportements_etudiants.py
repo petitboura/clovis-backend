@@ -41,6 +41,7 @@ import unicodedata
 from groq import Groq
 from supabase import create_client, ClientOptions
 from client_http_supabase import nouveau_client_http_supabase
+from codes_partage import invalider_cache_recus_pour_comportement as _invalider_cache_recus_pour_comportement
 
 # Cache court (11/09/2026, demande Bourama : "pas à chaque message si ça
 # peut être évité") : "Mes comportements" ne change que quand l'étudiant
@@ -464,6 +465,12 @@ def modifier_skill_comportement(agent_id: str, etudiant_id: str, comportement_id
     if not res.data:
         return None
     ligne = res.data[0]
+    # 12/09/2026, correction bug : cette fonction n'invalidait aucun cache
+    # avant (ni le propriétaire, ni les élèves receveurs), contrairement à
+    # toutes les autres fonctions d'écriture de ce fichier -- voir
+    # core/codes_partage.py::invalider_cache_recus_pour_comportement.
+    _invalider_cache_comportements(agent_id, etudiant_id)
+    _invalider_cache_recus_pour_comportement(comportement_id)
     return {
         "id": ligne["id"],
         "texte": ligne["texte"],
@@ -679,6 +686,7 @@ def modifier_comportement(
         return None
     ligne = res.data[0]
     _invalider_cache_comportements(agent_id, etudiant_id)
+    _invalider_cache_recus_pour_comportement(comportement_id)
     return {
         "id": ligne["id"],
         "texte": ligne["texte"],

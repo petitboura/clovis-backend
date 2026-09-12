@@ -434,6 +434,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     comportements_etudiant = []
     notions_programme_pertinentes = []
     signalements_pertinents = []
+    code_id_actif = None
     if user_id and message_utilisateur:
         # Perf (11/09/2026, demande Bourama : "tout ce qui peut se faire en
         # parallele plutot qu'a la suite, allez go") : ces 4 petites
@@ -641,7 +642,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             catalogue_complet, table_routage_complet = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id, conversation_id)
             outils_mcp, table_routage = filtrer_catalogue_par_outil_force(catalogue_complet, table_routage_complet, outil_force_contexte_seul)
             outil_force_verifie_optimiste = [o["function"]["name"] for o in outils_mcp] if outil_force_contexte_seul else None
-            system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie_optimiste, sans_enseignant, comportements_etudiant, mes_programmes, notions_programme_pertinentes, signalements_pertinents)
+            system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie_optimiste, sans_enseignant, comportements_etudiant, mes_programmes, notions_programme_pertinentes, signalements_pertinents, code_id_actif is not None)
             return outils_mcp, table_routage, system_final, catalogue_complet, table_routage_complet
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -760,7 +761,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
             catalogue_complet, table_routage_complet = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id, conversation_id)
             outils_mcp, table_routage = filtrer_catalogue_par_outil_force(catalogue_complet, table_routage_complet, outil_force)
             outil_force_verifie = [o["function"]["name"] for o in outils_mcp] if outil_force else outil_force
-        system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie, sans_enseignant, comportements_etudiant, mes_programmes, notions_programme_pertinentes, signalements_pertinents)
+        system_final = _construire_system_prompt(message_utilisateur, agent_id, user_id, longueur_reponse, fuseau_horaire, recherche_forcee, outil_force_verifie, sans_enseignant, comportements_etudiant, mes_programmes, notions_programme_pertinentes, signalements_pertinents, code_id_actif is not None)
 
         # PERF (10/08) : second (et dernier) point de vérification --
         # couvre tous les chemins qui ne passent PAS par le premier

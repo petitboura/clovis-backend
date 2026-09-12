@@ -20,10 +20,7 @@ from core.signalements import (
     obtenir_signalement as _obtenir_signalement,
     enregistrer_note as _enregistrer_note,
     rattacher_signalement as _rattacher_signalement,
-    consulter_par_notion as _consulter_par_notion,
 )
-from core.avancement_notions_ia import resoudre_code_actif_eleve as _resoudre_code_actif_eleve
-from core.mode_actif_conversation import rattachement_actif_pour_prompt as _rattachement_actif_pour_prompt
 from core.outils_generation_commun import mcp_generation, Context
 
 
@@ -133,45 +130,9 @@ def rattacher_signalement_notion(
         return "Ce signalement est introuvable ou ne t'appartient pas."
     return "Signalement rattaché."
 
+# consulter_signalements_pertinents (10/09/2026) retirée le 12/09/2026 :
+# absorbée dans core/outils_verification_code_actif.py::
+# verifier_consignes_code_actif (action="signalements"), demande
+# explicite Bourama d'un seul outil avec plusieurs actions plutôt que
+# plusieurs outils de vérification séparés.
 
-@mcp_generation.tool()
-def consulter_signalements_pertinents(ctx: Context) -> str:
-    """
-    Outil SECONDAIRE (10/09/2026, refonte du système de signalements) :
-    les notes du prof sur les signalements passés, pertinentes pour la
-    matière/notion active de cette conversation, sont déjà injectées
-    automatiquement dans ton prompt système à chaque message (voir
-    signalements_pertinents_pour_injection) -- dans la plupart des cas
-    tu n'as PAS besoin d'appeler cet outil. Utilise-le seulement si tu
-    penses qu'une note pertinente n'est pas apparue dans cette liste
-    automatique (par exemple une note rattachée à la matière mais pas
-    à la notion précise dont vous parlez là, ou l'inverse).
-
-    Aucun paramètre : relit simplement, avec la même portée
-    (matière/notion active de CETTE conversation) que l'injection
-    automatique -- n'invente jamais une matière ou une notion
-    différente de celle réellement active.
-    """
-    etudiant_id = ctx.request_context.request.query_params.get("user_id")
-    agent_id = ctx.request_context.request.query_params.get("agent_id")
-    if not etudiant_id or not agent_id:
-        return "Erreur : impossible d'identifier l'élève ou l'agent."
-
-    conversation_id = ctx.request_context.request.query_params.get("conversation_id")
-    rattachement_id_actif = _rattachement_actif_pour_prompt(conversation_id, etudiant_id)
-
-    code = _resoudre_code_actif_eleve(etudiant_id, rattachement_id_actif)
-    if code is None:
-        return "Cet élève n'est rattaché à aucune matière -- aucune note à consulter."
-    if isinstance(code, list):
-        return "Cet élève est rattaché à plusieurs matières sans mode actif choisi, impossible de savoir laquelle consulter."
-
-    lignes = _consulter_par_notion(agent_id, etudiant_id, code["id"], None)
-    if not lignes:
-        return "Aucune note du prof disponible pour cette matière."
-
-    parties = []
-    for l in lignes:
-        probleme = f" (problème observé : \"{l['probleme_observe']}\")" if l.get("probleme_observe") else ""
-        parties.append(f"- {l['correction_texte']}{probleme}")
-    return "\n".join(parties)
