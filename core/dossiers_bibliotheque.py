@@ -74,6 +74,21 @@ def lister_dossiers(user_id: str) -> list:
     )
 
 
+def obtenir_dossier(dossier_id: str) -> dict | None:
+    """Un dossier par son id, SANS filtre propriétaire, utilisé par la
+    consultation en lecture seule via lien de partage direct (11/09/2026,
+    demande Bourama). Distinct de _proprietaire_dossier (qui ne renvoie
+    que le user_id, pour les vérifications d'accès en écriture)."""
+    res = (
+        supabase.table("dossiers_bibliotheque")
+        .select("id, nom, dossier_parent_id")
+        .eq("id", dossier_id)
+        .maybe_single()
+        .execute()
+    )
+    return res.data if res else None
+
+
 def lister_fichiers_ids_dossier(dossier_id: str) -> list:
     """Renvoie la liste des fichier_id directement rattachés à ce dossier (pas les sous-dossiers)."""
     res = supabase.table("fichiers_dossiers_bibliotheque").select("fichier_id").eq("dossier_id", dossier_id).execute()

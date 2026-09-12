@@ -29,7 +29,14 @@ from registre_outils import REGISTRE_AFFICHAGE_OUTILS
 _LIBELLES_POUR_RECHERCHE_OUTILS = {
     nom: entree["label"] for nom, entree in REGISTRE_AFFICHAGE_OUTILS.items() if entree.get("label")
 }
-from filtre_texte_streaming import _finaliser_fragment_texte, _nouvel_etat_filtre_texte, _traiter_fragment_texte
+from filtre_texte_streaming import (
+    _finaliser_fragment_texte,
+    _nouvel_etat_filtre_texte,
+    _traiter_fragment_texte,
+    _finaliser_fragment_raisonnement,
+    _nouvel_etat_filtre_raisonnement,
+    _traiter_fragment_raisonnement,
+)
 from profils_agents import _nom_lisible_appel, _nom_lisible
 
 def _evenement_confirmation(attente, messages_agent, outils_mcp, table_routage, modele=GROQ_PRIMARY, reasoning_effort=None, agent_nom=None):
@@ -134,15 +141,24 @@ def _generer_conclusion_forcee(client_groq, messages_agent, outils_mcp, modele, 
         **kwargs_reasoning,
     )
     etat_filtre = _nouvel_etat_filtre_texte()
+    etat_raisonnement = _nouvel_etat_filtre_raisonnement()
     for chunk in completion:
         delta = chunk.choices[0].delta
         raisonnement = getattr(delta, "reasoning", None)
         if raisonnement:
-            yield {"type": "raisonnement", "texte": raisonnement}
+            for evenement in _traiter_fragment_raisonnement(etat_raisonnement, raisonnement, messages_agent):
+                yield evenement
         token = delta.content or ""
         if token:
+            # Le texte de reponse demarre : le segment de raisonnement en
+            # cours (s'il y en a un) est termine, voir filtre_texte_streaming.py.
+            for evenement in _finaliser_fragment_raisonnement(etat_raisonnement):
+                yield evenement
+            etat_raisonnement = _nouvel_etat_filtre_raisonnement()
             for evenement in _traiter_fragment_texte(etat_filtre, token, messages_agent):
                 yield evenement
+    for evenement in _finaliser_fragment_raisonnement(etat_raisonnement):
+        yield evenement
     for evenement in _finaliser_fragment_texte(etat_filtre, messages_agent):
         yield evenement
     if etat_filtre["tool_code_detecte"]:
@@ -317,6 +333,7 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
         # ET apres le bloc reste visible, au lieu de tout basculer en
         # "raisonnement" des la detection et jusqu'a la fin du passage.
         etat_filtre = _nouvel_etat_filtre_texte()
+        etat_raisonnement = _nouvel_etat_filtre_raisonnement()
         dernier_finish_reason = None
         dernier_usage = None
 
@@ -335,9 +352,15 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
 
             raisonnement = getattr(delta, "reasoning", None)
             if raisonnement:
-                yield {"type": "raisonnement", "texte": raisonnement}
+                for evenement in _traiter_fragment_raisonnement(etat_raisonnement, raisonnement, messages_agent):
+                    yield evenement
 
             if delta.content:
+                # Le texte de reponse demarre : le segment de raisonnement en
+                # cours (s'il y en a un) est termine, voir filtre_texte_streaming.py.
+                for evenement in _finaliser_fragment_raisonnement(etat_raisonnement):
+                    yield evenement
+                etat_raisonnement = _nouvel_etat_filtre_raisonnement()
                 reponse_directe = True
                 for evenement in _traiter_fragment_texte(etat_filtre, delta.content, messages_agent):
                     yield evenement
@@ -362,6 +385,8 @@ def _agent_groq(client_groq, messages_agent, outils_mcp, table_routage,
         elif dernier_finish_reason and dernier_finish_reason != "stop":
             logging.info(f"Fin de flux {modele} avec finish_reason={dernier_finish_reason} (usage : {dernier_usage})")
 
+        for evenement in _finaliser_fragment_raisonnement(etat_raisonnement):
+            yield evenement
         for evenement in _finaliser_fragment_texte(etat_filtre, messages_agent):
             yield evenement
 

@@ -92,6 +92,30 @@ def _invalider_cache_recus_pour_code(code_id: str) -> None:
     for r in (rattachements.data or []):
         _invalider_cache_recus(r["receveur_id"], r["id"])
 
+def invalider_cache_recus_pour_comportement(comportement_id: str) -> None:
+    """Invalide le cache des élèves qui ont reçu CE comportement précis
+    via un ou plusieurs codes (12/09/2026, correction bug : quand un prof
+    modifiait le CONTENU d'un comportement déjà attaché à un code
+    -- via modifier_comportement ou modifier_skill_comportement dans
+    core/comportements_etudiants.py -- rien n'invalidait
+    _cache_comportements_recus côté élève, donc le nouveau texte mettait
+    jusqu'à 2 minutes à apparaître dans le chat. À appeler depuis TOUTE
+    fonction qui change le contenu d'un comportement déjà partageable,
+    en plus de _invalider_cache_comportements côté propriétaire."""
+    try:
+        liaisons = (
+            supabase.table("codes_partage_comportements")
+            .select("code_id")
+            .eq("comportement_id", comportement_id)
+            .execute()
+        )
+    except Exception as e:
+        logging.error(f"ERREUR SUPABASE (recherche codes pour comportement {comportement_id}) : {e}")
+        return
+    for l in (liaisons.data or []):
+        _invalider_cache_recus_pour_code(l["code_id"])
+
+
 sys.path.append(os.path.join(os.path.dirname(__file__)))
 from bibliotheque_fichiers import enregistrer_fichier, enregistrer_lien  # noqa: E402
 from dossiers_bibliotheque import creer_dossier, lister_dossiers, lister_fichiers_ids_dossier, ranger_fichier  # noqa: E402
@@ -875,7 +899,7 @@ def lister_dossiers_recus(receveur_id: str) -> dict[str, str]:
     }
 
 
-def lister_comportements_recus(receveur_id: str, rattachement_id: str | None = None) -> list[dict]:
+def lister_comportements_recus(receveur_id: str, rattachement_id: str | None = None, ignorer_cache: bool = False) -> list[dict]:
     """Comportements reçus via un ou plusieurs codes actifs, forme
     {id, description} compatible avec
     core/comportements_etudiants.py::lister_comportements (même clés
@@ -905,7 +929,14 @@ def lister_comportements_recus(receveur_id: str, rattachement_id: str | None = N
     plusieurs profs) : renvoie une liste vide plutôt que de tout mélanger
     -- décision explicite de Bourama, jamais de mélange silencieux. Si
     receveur_id n'a qu'UN SEUL rattachement, aucune ambiguïté possible :
-    ce rattachement est utilisé automatiquement, mode actif ou non."""
+    ce rattachement est utilisé automatiquement, mode actif ou non.
+
+    `ignorer_cache` (12/09/2026, outil de vérification à la demande) :
+    si True, saute complètement le cache 2 minutes ci-dessus (ni lu, ni
+    réécrit) et relit tout de suite depuis Supabase. Utilisé uniquement
+    par l'outil MCP de vérification quand le modèle pense que
+    l'injection automatique est périmée -- ne jamais passer True par
+    défaut, sinon ça annule l'intérêt du cache."""
     if rattachement_id == MODE_DESACTIVE:
         # Mode explicitement désactivé par l'utilisateur pour cette
         # conversation (11/09/2026) : comportement inchangé qu'il y ait un
@@ -915,9 +946,10 @@ def lister_comportements_recus(receveur_id: str, rattachement_id: str | None = N
 
     maintenant = time.time()
     cle = (receveur_id, rattachement_id)
-    entree = _cache_comportements_recus.get(cle)
-    if entree is not None and entree["expire_a"] > maintenant:
-        return entree["valeur"]
+    if not ignorer_cache:
+        entree = _cache_comportements_recus.get(cle)
+        if entree is not None and entree["expire_a"] > maintenant:
+            return entree["valeur"]
 
     rattachements = lister_mes_rattachements(receveur_id)
     if rattachement_id:
@@ -948,7 +980,8 @@ def lister_comportements_recus(receveur_id: str, rattachement_id: str | None = N
         }
         for l in (lignes.data or [])
     ]
-    _cache_comportements_recus[cle] = {"valeur": resultat, "expire_a": maintenant + _DUREE_CACHE_SECONDES}
+    if not ignorer_cache:
+        _cache_comportements_recus[cle] = {"valeur": resultat, "expire_a": maintenant + _DUREE_CACHE_SECONDES}
     return resultat
 
 

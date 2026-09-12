@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 from configuration import get_system_prompt
 from profils_agents import INSTRUCTIONS_FORMATS_AFFICHAGE, INSTRUCTIONS_ARBITRAGE_CALCUL, REGLE_CONTEXTE_INVISIBLE, INSTRUCTIONS_LONGUEUR_REPONSE
 
-def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longueur_reponse="moyenne", fuseau_horaire=None, recherche_forcee=False, outil_force=None, sans_enseignant=False, comportements_etudiant=None, mes_programmes=None, notions_pertinentes=None, signalements_pertinents=None):
+def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longueur_reponse="moyenne", fuseau_horaire=None, recherche_forcee=False, outil_force=None, sans_enseignant=False, comportements_etudiant=None, mes_programmes=None, notions_pertinentes=None, signalements_pertinents=None, code_actif=False):
     # Restauré le 14/08 (voir commentaire des constantes plus haut) : la
     # page Notion de l'agent (get_system_prompt) ne doit plus contenir QUE
     # la personnalité/le comportement propre à l'agent -- les 3 blocs fixes
@@ -49,6 +49,27 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
     mes_programmes = mes_programmes or []
     notions_pertinentes = notions_pertinentes or []
     signalements_pertinents = signalements_pertinents or []
+
+    # 12/09/2026, demande explicite Bourama : avant ce correctif, rien
+    # dans ce prompt ne disait explicitement au modèle s'il était "en
+    # mode cours" (un code actif pour cette conversation) ou non -- il ne
+    # pouvait que le déduire indirectement de la présence ou non des
+    # blocs ci-dessous, sans jamais pouvoir distinguer "rien à afficher"
+    # de "l'injection a peut-être raté quelque chose". Ce bloc est
+    # TOUJOURS présent (contrairement aux blocs suivants, conditionnels),
+    # justement pour lever cette ambiguïté dans les deux sens.
+    if code_actif:
+        system_final += (
+            "\n\nMODE COURS : ACTIF pour cette conversation (un code est rattaché). Les comportements/"
+            "skills reçus, les notions du programme et les notes du prof, listés ci-dessous s'ils "
+            "existent, sont déjà à jour au moment de l'injection. Si tu penses qu'une information "
+            "attendue manque ou semble périmée (le prof vient de faire un changement, une section est "
+            "vide alors que la question porte clairement sur cette matière), appelle l'outil "
+            "verifier_consignes_code_actif (action=\"comportements\", \"programme\" ou \"signalements\") "
+            "avant de répondre, plutôt que de supposer qu'il n'y a rien."
+        )
+    else:
+        system_final += "\n\nMODE COURS : inactif pour cette conversation (aucun code rattaché ou aucun mode choisi)."
 
     if comportements_etudiant:
         candidats = "\n".join(

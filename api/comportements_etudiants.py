@@ -54,6 +54,7 @@ from core.comportements_etudiants import (
     attacher_comportement,
     supprimer_comportement,
     obtenir_comportement_skill,
+    obtenir_comportement_pour_consultation,
     modifier_skill_comportement,
     activer_desactiver_comportement,
     publier_comportement_public,
@@ -193,8 +194,28 @@ class SkillComportement(BaseModel):
     skill_md: str
 
 
+class ComportementConsultation(BaseModel):
+    nom: str
+    description: str
+    skill_md: str
+
+
 class SkillPayload(BaseModel):
     skill_md: str
+
+
+@router.get("/{comportement_id}/consultation", response_model=ComportementConsultation)
+def consulter_mon_comportement(agent_id: str, comportement_id: str, utilisateur=Depends(utilisateur_courant)):
+    """11/09/2026, demande Bourama : lien de partage direct pour un
+    skill perso, lecture seule, ouvert par N'IMPORTE QUEL utilisateur
+    connecté (pas seulement le propriétaire), aucune vérification de
+    propriété volontairement. N'ajoute rien chez celui qui consulte,
+    même principe que la consultation d'un skill publique (voir
+    api/comportements_publics.py)."""
+    resultat = obtenir_comportement_pour_consultation(agent_id, comportement_id)
+    if resultat is None:
+        raise erreur_api(404, "COMPORTEMENT_INTROUVABLE")
+    return resultat
 
 
 @router.get("/{comportement_id}/skill", response_model=SkillComportement)

@@ -37,6 +37,10 @@ uniquement un déplacement de code :
   - outils_avancement_notions.py : avancement des notions (Partie 1) en
     langage naturel + règle de comportement (Partie 3, chantier
     "confiance pédagogique")
+  - outils_verification_code_actif.py : outil unique de vérification
+    "mode cours" (12/09/2026, demande Bourama) -- filet de sécurité en
+    plus de l'injection automatique, absorbe les anciens
+    consulter_avancement_notion et consulter_signalements_pertinents
 """
 
 # RAPPEL NON NEGOCIABLE (Bourama, 18/08) -- POUR NE PAS OUBLIER :
@@ -76,3 +80,4 @@ import core.outils_signalements  # noqa: F401
 import core.outils_concentration  # noqa: F401
 import core.outils_corrections_pedagogiques  # noqa: F401
 import core.outils_avancement_notions  # noqa: F401
+import core.outils_verification_code_actif  # noqa: F401

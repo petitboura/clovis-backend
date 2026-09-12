@@ -376,8 +376,8 @@ def resoudre_code_actif_eleve(receveur_id: str, rattachement_id: str | None = No
 
 
 def consulter_progres_notion_pour_eleve(receveur_id: str, nom_notion: str, rattachement_id: str | None = None):
-    """Point d'entree cote eleve pour l'outil MCP consulter_avancement_notion,
-    garde comme option secondaire (09/09/2026, demande Bourama) en plus
+    """Point d'entree cote eleve pour l'outil MCP verifier_consignes_code_actif
+    (action="programme"), garde comme option secondaire (09/09/2026, demande Bourama) en plus
     de l'injection automatique de notions_pertinentes_pour_eleve. Resout
     le code actif de l'eleve (`rattachement_id`, mode actif de la
     conversation si fourni, sinon repli sur l'ancienne resolution, voir
@@ -419,7 +419,7 @@ def notions_pertinentes_pour_eleve(receveur_id: str, message: str, rattachement_
     c'est une consigne de comportement que le LLM peut simplement ne pas
     suivre"). Calculee de facon DETERMINISTE a chaque message d'un
     eleve (voir core/main.py), independamment de tout choix du LLM,
-    contrairement a l'outil MCP consulter_avancement_notion qui reste
+    contrairement a l'outil MCP verifier_consignes_code_actif (action="programme") qui reste
     une option secondaire (voir consulter_progres_notion_pour_eleve).
 
     Renvoie jusqu'a MATCH_COUNT_NOTIONS candidats (nom, statut, regle

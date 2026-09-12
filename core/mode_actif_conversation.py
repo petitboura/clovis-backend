@@ -37,7 +37,7 @@ _cache_mode_actif = {}  # conversation_id -> {"valeur": dict | None, "expire_a":
 # de désactiver le mode" (une ligne existe, rattachement_id vaut None dans
 # cette ligne). Sans cette distinction, les deux se confondaient toujours
 # en None au niveau des fonctions consommatrices (lister_comportements_recus,
-# resoudre_code_actif_eleve, consulter_signalements_pertinents), qui
+# resoudre_code_actif_eleve, verifier_consignes_code_actif), qui
 # retombaient alors sur le repli "un seul rattachement -> utilisé
 # automatiquement" même quand l'utilisateur venait de choisir explicitement
 # de désactiver -- c'était le bug rapporté.

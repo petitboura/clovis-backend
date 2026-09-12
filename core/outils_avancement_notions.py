@@ -19,11 +19,9 @@ from core.avancement_notions_ia import (
     definir_regle_comportement,
     definir_consigne_llm,
     formatter_arborescence,
-    consulter_progres_notion_pour_eleve,
     toutes_notions_code,
 )
 from core.codes_partage import lister_mes_codes as _lister_mes_codes
-from core.mode_actif_conversation import obtenir_mode_actif as _obtenir_mode_actif
 
 from core.outils_generation_commun import mcp_generation, Context
 
@@ -192,84 +190,9 @@ def gerer_avancement_notions(
         "definir_consigne_llm."
     )
 
+# consulter_avancement_notion (09/09/2026) retirée le 12/09/2026 :
+# absorbée dans core/outils_verification_code_actif.py::
+# verifier_consignes_code_actif (action="programme"), demande explicite
+# Bourama d'un seul outil avec plusieurs actions plutôt que plusieurs
+# outils de vérification séparés.
 
-@mcp_generation.tool()
-def consulter_avancement_notion(nom_notion: str, ctx: Context) -> str:
-    """
-    Outil SECONDAIRE (09/09/2026) : les notions du programme les plus
-    pertinentes pour ce message sont déjà recherchées et injectées
-    automatiquement dans ton prompt système à chaque message (recherche
-    sémantique, voir notions_pertinentes_pour_eleve), donc dans la
-    plupart des cas tu n'as PAS besoin d'appeler cet outil. Utilise-le
-    seulement si tu penses qu'une notion précise et pertinente n'est pas
-    apparue dans cette liste automatique.
-
-    `nom_notion` n'a plus besoin d'être un nom exact : la recherche est
-    désormais sémantique (09/09/2026, tolère une reformulation, une
-    faute de frappe ou un synonyme), passe la description la plus
-    naturelle possible de la notion concernée par la question.
-
-    Le résultat renvoyé peut être :
-    - Un statut "acquis" ou "en_cours" : réponds normalement, mais si
-      une consigne est indiquée, respecte-la quand même (elle
-      s'applique quel que soit le statut).
-    - Un statut "a_venir" avec une règle "bloquer" : n'aide PAS l'élève
-      sur cette notion précise, explique-lui que son prof ne l'a pas
-      encore vue en classe et que tu ne peux pas l'anticiper.
-    - Un statut "a_venir" avec une règle "contourner" : aide l'élève
-      SANS utiliser cette notion ni la méthode qui s'y rattache, reste
-      strictement dans ce qui a déjà été vu en classe.
-    - Un statut "a_venir" avec une règle "signaler" (ou aucune règle
-      définie à aucun niveau) : aide l'élève normalement, mais
-      mentionne-lui que cette notion n'a pas encore été vue en classe.
-    - Si une consigne est indiquée (en plus du statut/de la règle) :
-      c'est un texte libre écrit par le prof, à respecter à la lettre
-      pour cette notion, en plus du reste.
-    - Une notion introuvable, ou aucun/plusieurs codes actifs pour cet
-      élève : aucune donnée fiable, réponds simplement avec ton
-      jugement habituel, sans mentionner cet outil à l'élève.
-    """
-    utilisateur_id = ctx.request_context.request.query_params.get("user_id")
-    if not utilisateur_id:
-        return "Erreur : impossible d'identifier l'élève."
-    # Mode actif (08/09/2026, demande Bourama) : avant ce fix, cette
-    # consultation devinait seule le code de l'élève et abandonnait dès
-    # qu'il en avait plusieurs, sans jamais regarder le mode actif choisi
-    # pour cette conversation -- voir
-    # core/avancement_notions_ia.py::resoudre_code_actif_eleve.
-    # conversation_id vient du query param ajouté par
-    # registre_outils.py::_url_generation (même mécanisme que pour
-    # gerer_document_bibliotheque).
-    conversation_id = ctx.request_context.request.query_params.get("conversation_id")
-    rattachement_id_actif = None
-    if conversation_id:
-        mode_actif = _obtenir_mode_actif(conversation_id, utilisateur_id)
-        rattachement_id_actif = mode_actif.get("rattachement_id") if mode_actif else None
-    try:
-        resultat = consulter_progres_notion_pour_eleve(utilisateur_id, nom_notion, rattachement_id_actif)
-    except Exception as e:
-        logging.error(f"ERREUR consulter_avancement_notion : {e}")
-        return "Aucune donnée de programme disponible, réponds avec ton jugement habituel."
-
-    erreur = resultat.get("erreur")
-    if erreur == "aucun_code":
-        return "Cet élève n'est rattaché à aucun code avec une structure de notions."
-    if erreur == "code_ambigu":
-        return (
-            "Cet élève est rattaché à plusieurs codes, impossible de savoir lequel "
-            "concerne cette question. Réponds avec ton jugement habituel."
-        )
-    if erreur == "notion_introuvable":
-        return f"Aucune notion suffisamment proche de \"{nom_notion}\" trouvée dans le programme de cet élève."
-
-    nom_trouve = resultat.get("nom_trouve", nom_notion)
-    statut = resultat["statut"]
-    regle = resultat.get("regle")
-    consigne = resultat.get("consigne")
-    suffixe_consigne = f" Consigne à respecter pour cette notion : \"{consigne}\"." if consigne else ""
-
-    if statut != "a_venir":
-        return f"Notion \"{nom_trouve}\" : statut \"{statut}\" (déjà vue en classe), réponds normalement.{suffixe_consigne}"
-    if regle:
-        return f"Notion \"{nom_trouve}\" : pas encore vue en classe (statut \"a_venir\"), règle configurée : \"{regle}\".{suffixe_consigne}"
-    return f"Notion \"{nom_trouve}\" : pas encore vue en classe (statut \"a_venir\"), aucune règle configurée, aide l'élève en le signalant.{suffixe_consigne}"
