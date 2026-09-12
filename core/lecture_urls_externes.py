@@ -284,7 +284,7 @@ def _lire_url(url, user_id=None):
         return None
 
 
-def _enrichir_message_avec_urls(message, user_id=None):
+def _enrichir_message_avec_urls(message, user_id=None, urls_a_ignorer=None):
     """
     Détecte les liens collés dans le message utilisateur, récupère leur
     contenu, et l'ajoute en contexte APRÈS le message original (jamais à la
@@ -297,8 +297,21 @@ def _enrichir_message_avec_urls(message, user_id=None):
     `user_id` (2026-07-22) : transmis à _lire_url -> _lire_github pour
     utiliser le token GitHub de la personne si elle a connecté son compte
     (accès aux dépôts privés) -- voir connexions/oauth_generique.py.
+
+    `urls_a_ignorer` (12/09/2026, correctif Bourama) : URLs d'image déjà
+    connues et traitées à part par Gemini (voir chat(), image_url/
+    image_urls) -- jamais aussi tentées ici comme une page web generique.
+    Avant ce correctif, ces URLs finissaient dans le texte du message (via
+    "[Image jointe : URL]", ajouté côté frontend) et étaient interceptées
+    ici, échouant systematiquement (une image n'est pas une page HTML) et
+    polluant les logs pour rien -- que la description Gemini reussisse ou
+    non par ailleurs. Comparaison par prefixe (pas egalite stricte) car le
+    lien detecte dans le texte peut porter un caractere de ponctuation
+    collé juste après (ex: le "]" fermant de "[Image jointe : URL]").
     """
     urls = REGEX_URL.findall(message)
+    if urls_a_ignorer:
+        urls = [u for u in urls if not any(u.startswith(connue) for connue in urls_a_ignorer)]
     if not urls:
         return message
 

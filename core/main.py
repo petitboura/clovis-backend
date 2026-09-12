@@ -60,7 +60,7 @@ logging.basicConfig(level=logging.INFO)
 # present en prod malgre le fix deja present sur main.
 
 
-def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, agent_id=None, conversation_id=None, longueur_reponse="moyenne", image_url=None, localisation=None, fuseau_horaire=None, images_base64=None, recherche_forcee=False, outil_force=None, ignorer_suggestion_outils=False, modele_force=None, sans_enseignant=False, natif=False):
+def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, agent_id=None, conversation_id=None, longueur_reponse="moyenne", image_url=None, image_urls=None, localisation=None, fuseau_horaire=None, images_base64=None, recherche_forcee=False, outil_force=None, ignorer_suggestion_outils=False, modele_force=None, sans_enseignant=False, natif=False):
     """
     Generateur d'evenements. Chaque element produit est un dictionnaire :
     - {"type": "statut", "texte": "..."}         -> un outil MCP est en cours d'utilisation (ou, depuis le 11/09/2026, Gemini en train de lire une image/video jointe)
@@ -167,6 +167,19 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     Gemini echoue sur ce chemin, on renvoie MESSAGE_ERREUR direct (pas de
     retry cascade complet comme pour le texte : un seul modele disponible).
 
+    `image_urls` (optionnel, 12/09/2026, correctif Bourama) : liste de
+    plusieurs images jointes au MEME message (voir
+    api/uploads.py:uploader_image_chat, appele plusieurs fois cote
+    frontend). Avant ce correctif, ChatIA.tsx envoyait deja ce champ mais
+    l'API ne le lisait jamais (seul `image_url` singulier existait cote
+    backend) -- toute image passait donc a cote du chemin Gemini et
+    finissait interceptee par _enrichir_message_avec_urls (lecture de
+    liens web generiques), qui echoue sur une URL d'image. Desormais
+    combinee avec `image_url` (garde par compatibilite, rare en pratique)
+    et `images_base64` : TOUTES les images de ces trois sources sont
+    envoyees ensemble a Gemini dans le meme message, une seule description
+    couvrant tout ce qui a ete joint.
+
     `localisation` (optionnel, 2026-07-20) : dict {"latitude":..., "longitude":...}
     transmis explicitement par l'utilisateur (bouton dedie, jamais automatique).
     Injecte en fin de prompt systeme, jamais traite comme un fait dit par
@@ -181,8 +194,8 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     `images_base64` (optionnel, 2026-07-20) : liste de frames JPEG en
     base64, extraites d'une vidéo uploadée (voir
     api/uploads.py:uploader_video_chat et core/video.py:_extraire_frames_video).
-    Combinable avec image_url (rare en pratique) -- toutes les images sont
-    envoyées à Gemini dans le MÊME message. Le son de la vidéo n'est PAS
+    Combinable avec image_url/image_urls (rare en pratique) -- toutes les
+    images sont envoyées à Gemini dans le MÊME message. Le son de la vidéo n'est PAS
     envoyé ici : il est transcrit à part (Whisper) et injecté comme texte
     dans message_utilisateur par le frontend, avant l'appel à chat().
 
@@ -219,6 +232,14 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     avant, il recoit la description au lieu de recevoir l'image elle-meme
     (generer_reponse_premium ne fait pas de vision).
     """
+    # Correctif 12/09/2026 (Bourama) : fusion de image_url (singulier,
+    # historique) et image_urls (liste, ce que ChatIA.tsx envoie reellement
+    # depuis le support multi-fichiers du 17/08) en une seule liste
+    # normalisee, utilisee partout plus bas a la place de image_url seul.
+    # Un doublon possible si jamais les deux etaient envoyes ensemble par
+    # erreur est ecarte (dict.fromkeys prefere a set() pour garder l'ordre).
+    toutes_les_urls_images = list(dict.fromkeys(([image_url] if image_url else []) + (image_urls or [])))
+
     if reprise is not None and reprise.get("type") == "continuer_agent":
         # Reprise apres "limite_outils_atteinte" ou "repetition_detectee"
         # (02/09/2026) : pas d'appel en attente ici (contrairement a la
@@ -582,7 +603,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     #   où ça ne change rien).
     outils_suggeres = []
     routeur_auto = False
-    if not ROUTEUR_OUTILS_AUTO_DESACTIVE and not outil_force and not ignorer_suggestion_outils and message_utilisateur and not image_url and not images_base64:
+    if not ROUTEUR_OUTILS_AUTO_DESACTIVE and not outil_force and not ignorer_suggestion_outils and message_utilisateur and not toutes_les_urls_images and not images_base64:
         def _tache_routeur():
             outils_disponibles_agent, _ = lister_outils_autorises_pour_agent(get_secret, user_id, agent_id, conversation_id)
             # Notion + GitHub exclus du CATALOGUE envoyé au routeur automatique
@@ -700,7 +721,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     else:
         outils_mcp = table_routage = system_final = None  # recalculés ci-dessous dans tous les autres cas
         catalogue_complet = table_routage_complet = None
-        if not (image_url or images_base64):
+        if not (toutes_les_urls_images or images_base64):
             # Routeur général court-circuité ici (outil déjà forcé manuellement,
             # bouton "Aucun" cliqué, ou pas de message) -- les outils de
             # contexte (comportement/programme) doivent quand même être
@@ -719,7 +740,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     # halluciner un faux appel (bloc TOOL_CODE) plutôt que d'utiliser un
     # vrai outil absent de son schéma technique réel.
     if system_final is None:
-        if image_url or images_base64:
+        if toutes_les_urls_images or images_base64:
             # Chemin image = Gemini, aucun outil MCP jamais utilisé ici (voir
             # plus bas) -- inutile d'interroger les serveurs MCP pour rien.
             outils_mcp, table_routage = [], {}
@@ -802,7 +823,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     # ICI, sur le message pour le modèle uniquement -- message_utilisateur
     # (brut, sans le contenu des liens) reste ce qui est sauvegardé dans
     # l'historique via _sauvegarder_echange plus bas.
-    message_pour_modele = _enrichir_message_avec_urls(message_utilisateur, user_id)
+    message_pour_modele = _enrichir_message_avec_urls(message_utilisateur, user_id, urls_a_ignorer=toutes_les_urls_images)
 
     messages_base = [{"role": "system", "content": system_final}]
     messages_base += historique
@@ -816,7 +837,7 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
     # branche image, a None par defaut pour un message texte classique.
     meta_utilisateur = None
 
-    if image_url or images_base64:
+    if toutes_les_urls_images or images_base64:
         # Chemin dédié image(s) : voir docstring ci-dessus. Pas de cascade
         # multi-modeles ici, Gemini est le seul maillon capable de traiter
         # de la vision -- s'il echoue, il n'y a pas de second recours
@@ -825,16 +846,31 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         # dans api/uploads.py:uploader_video_chat -- même mécanique que
         # l'image simple, juste plusieurs inline_data au lieu d'un seul.
         images = []
-        if image_url:
+        # Correctif 12/09/2026 (Bourama) : plusieurs images possibles
+        # maintenant (toutes_les_urls_images). Chaque URL est telechargee
+        # independamment -- si l'une echoue, on continue avec les autres
+        # (log de l'echec) plutot que d'abandonner tout le message ; on ne
+        # renvoie une erreur bloquante que si AUCUNE image (URL ou base64)
+        # n'a pu etre recuperee au final.
+        urls_en_echec = []
+        for une_url in toutes_les_urls_images:
             try:
-                images.append(_telecharger_image(image_url))
+                images.append(_telecharger_image(une_url))
             except Exception as e:
-                logging.error(f"ERREUR TELECHARGEMENT IMAGE ({image_url}): {e}")
-                yield {"type": "reponse", "texte": "Désolé, je n'ai pas pu récupérer l'image envoyée. Réessaie."}
-                return
+                logging.error(f"ERREUR TELECHARGEMENT IMAGE ({une_url}): {e}")
+                urls_en_echec.append(une_url)
         if images_base64:
             for image_b64 in images_base64:
                 images.append((base64.b64decode(image_b64), "image/jpeg"))
+
+        if not images:
+            # Aucune image recuperable au final (toutes les URLs ont
+            # echoue, et pas de frames video en secours) -- meme message
+            # d'erreur bloquant qu'avant le correctif, une seule image en
+            # echec.
+            logging.error(f"ERREUR TELECHARGEMENT IMAGE(S) -- aucune image recuperee sur {len(toutes_les_urls_images)} URL(s) : {urls_en_echec}")
+            yield {"type": "reponse", "texte": "Désolé, je n'ai pas pu récupérer l'image envoyée. Réessaie."}
+            return
 
         gemini_messages = [
             {"role": "user" if m["role"] != "assistant" else "model", "parts": [{"text": m["content"]}]}
@@ -875,11 +911,17 @@ def chat(message_utilisateur=None, historique=None, user_id=None, reprise=None, 
         description_generee = ""
         description_echec = False
         meta_utilisateur = {"pieces_jointes": []}
-        if image_url:
+        # Correctif 12/09/2026 : une entree par image reellement recuperee
+        # (celles en echec de telechargement ne sont pas presentees comme
+        # une piece jointe valide a l'eleve), plus l'ordre d'origine des
+        # URLs est garde tel quel.
+        for une_url in toutes_les_urls_images:
+            if une_url in urls_en_echec:
+                continue
             meta_utilisateur["pieces_jointes"].append({
-                "nom": image_url.split("/")[-1].split("?")[0] or "image",
+                "nom": une_url.split("/")[-1].split("?")[0] or "image",
                 "type": "image",
-                "previewUrl": image_url,
+                "previewUrl": une_url,
             })
         if images_base64:
             # Pas d'URL persistante disponible ici (frames extraites a la

@@ -69,6 +69,13 @@ class EnvoyerMessagePayload(BaseModel):
     # grand modèle habituel (chantier "image -> grand modele", 11/09/2026)
     # -- voir le commentaire au-dessus de la branche image_url dans chat().
     image_url: Optional[str] = None
+    # Correctif 12/09/2026 (Bourama) : plusieurs images jointes au MEME
+    # message (ChatIA.tsx envoie ce champ depuis le support multi-fichiers
+    # du 17/08, mais il n'existait pas encore ici -- toute image finissait
+    # donc silencieusement ignorée par Pydantic et jamais decrite par
+    # Gemini). Combinee avec image_url (garde par compatibilite) dans
+    # core/main.py:chat().
+    image_urls: Optional[List[str]] = None
     # Position GPS transmise explicitement par l'étudiant via un bouton
     # dédié (jamais capturée automatiquement) -- voir core/main.py:chat(),
     # paramètre localisation, injecté en contexte de prompt système.
@@ -189,6 +196,7 @@ def _evenements_sse(payload: EnvoyerMessagePayload, user_id: Optional[str]):
                 conversation_id=payload.conversation_id,
                 longueur_reponse=payload.longueur_reponse,
                 image_url=payload.image_url,
+                image_urls=payload.image_urls,
                 localisation=payload.localisation.model_dump() if payload.localisation else None,
                 fuseau_horaire=payload.fuseau_horaire,
                 images_base64=payload.images_base64,
