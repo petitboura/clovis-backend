@@ -357,6 +357,98 @@ def _finaliser_fragment_texte(etat, messages_agent):
             evenements.append({"type": "reponse", "texte": etat["buffer"]})
         etat["buffer"] = ""
     return evenements
+
+
+# ── Filtrage du raisonnement natif (delta.reasoning) ────────────────────
+# Ajoute le 12/09/2026 (demande Bourama). Independant du filtrage ci-dessus
+# (qui porte sur delta.content, le texte de reponse) : ici on filtre
+# delta.reasoning, le champ de raisonnement natif renvoye par les modeles
+# avec reasoning_effort (voir MODELES_AVEC_REASONING_EFFORT). Bourama a
+# distingue deux natures possibles pour un segment de raisonnement, jamais
+# melangees dans un meme segment (confirme par lui) :
+# - une vraie reflexion du modele -> a garder, affichee dans la bulle
+#   "Raisonnement de Clovis" comme aujourd'hui
+# - une simple "ingestion" de contenu deja recu (lien, resultat d'outil
+#   recopie) plutot qu'un raisonnement construit -> a ne JAMAIS afficher,
+#   meme masquee/repliee -- doit disparaitre entierement de ce que voit
+#   l'utilisateur
+# Critere de detection (Bourama, 12/09) : un segment est "ingestion" des
+# qu'il contient, n'importe ou dans son texte, SOIT un lien http/https
+# (recopie ou non -- contrairement a _debut_provient_d_un_resultat_outil,
+# aucune exception pour un lien nu ici : un lien dans le raisonnement est
+# toujours un signe d'ingestion, jamais de vraie reflexion), SOIT une
+# recopie quasi mot pour mot d'un resultat d'outil recu juste avant
+# (reutilise _debut_provient_d_un_resultat_outil ci-dessus).
+
+
+def _raisonnement_ressemble_a_ingestion(buffer: str, messages_agent) -> bool:
+    if "http://" in buffer or "https://" in buffer:
+        return True
+    return _debut_provient_d_un_resultat_outil(buffer, messages_agent)
+
+
+def _nouvel_etat_filtre_raisonnement():
+    """Etat initial pour _traiter_fragment_raisonnement /
+    _finaliser_fragment_raisonnement. Un etat par SEGMENT de raisonnement
+    (reinitialise a chaque nouveau round de streaming Groq -- meme duree
+    de vie que etat_filtre -- ET des qu'un segment se termine, voir
+    boucle_agent.py)."""
+    return {
+        "buffer": "",           # texte de raisonnement en attente de decision
+        "classification": None,  # None (pas encore tranche), "ingestion" ou "genuine"
+    }
+
+
+def _traiter_fragment_raisonnement(etat, fragment, messages_agent):
+    """Traite un nouveau fragment de delta.reasoning. Retourne la liste
+    des evenements a yield (au plus un {"type": "raisonnement", ...}).
+    Mute `etat` en place.
+
+    Meme compromis que _traiter_fragment_texte pour le texte de reponse :
+    ni tout attendre (perd l'effet "live"), ni tout streamer puis effacer
+    apres coup (la bulle apparaitrait puis disparaitrait) -- on bufferise
+    par petits blocs (SEUIL_VERIF_JSON/RESERVE_SUFFIXE, reutilises tels
+    quels) et on ne decide qu'une fois avoir vu assez de texte pour
+    trancher en confiance. Une fois classe "ingestion", plus rien de ce
+    segment ne sort jamais (le buffer est vide et abandonne)."""
+    if etat["classification"] == "ingestion":
+        return []
+
+    etat["buffer"] += fragment
+
+    if etat["classification"] is None:
+        if _raisonnement_ressemble_a_ingestion(etat["buffer"], messages_agent):
+            etat["classification"] = "ingestion"
+            etat["buffer"] = ""
+            return []
+        if len(etat["buffer"]) < SEUIL_VERIF_JSON + RESERVE_SUFFIXE:
+            return []  # pas encore assez de texte pour trancher en confiance
+        etat["classification"] = "genuine"
+
+    position_max = len(etat["buffer"]) - RESERVE_SUFFIXE
+    if position_max <= 0:
+        return []
+    position_flush = _position_sure_pour_flush(etat["buffer"], position_max)
+    a_flusher = etat["buffer"][:position_flush]
+    etat["buffer"] = etat["buffer"][position_flush:]
+    if not a_flusher:
+        return []
+    return [{"type": "raisonnement", "texte": a_flusher}]
+
+
+def _finaliser_fragment_raisonnement(etat):
+    """A appeler des que le segment de raisonnement se termine (delta.content
+    redemarre, ou fin du flux) : vide le reliquat de `etat`. Si le segment
+    a ete classe "ingestion", le reliquat est abandonne silencieusement --
+    rien n'est jamais envoye au frontend pour un segment "ingestion"."""
+    if etat["classification"] == "ingestion":
+        etat["buffer"] = ""
+        return []
+    if etat["buffer"]:
+        texte = etat["buffer"]
+        etat["buffer"] = ""
+        return [{"type": "raisonnement", "texte": texte}]
+    return []
 # Nouvel outil = ajouter une ligne dans REGISTRE_AFFICHAGE_OUTILS
 # (core/registre_outils.py), rien à faire ici -- ni dans le frontend
 # (voir api/outils_registre.py, expose ce meme registre en JSON).
