@@ -318,7 +318,7 @@ def formatter_arborescence(notions: list[dict]) -> str:
     return "\n".join(lignes)
 
 
-def resoudre_code_actif_eleve(receveur_id: str, rattachement_id: str | None = None) -> dict | None | list[dict]:
+def resoudre_code_actif_eleve(receveur_id: str, rattachement_id: str | None = None) -> dict | None:
     """Retrouve le code sur lequel receveur_id est rattache.
 
     `rattachement_id` (08/09/2026, mode actif -- demande Bourama, corrige
@@ -331,48 +331,35 @@ def resoudre_code_actif_eleve(receveur_id: str, rattachement_id: str | None = No
     par un autre rattachement.
 
     Sans `rattachement_id` (mode actif pas choisi, ou pas de conversation
-    connue) : comportement inchangé -- renvoie le code (dict id/nom) si
-    un seul rattachement existe, None si aucun, ou la LISTE des codes
-    candidats si plusieurs (ambiguïté, laissée telle quelle à
-    l'appelant)."""
-    if rattachement_id == MODE_DESACTIVE:
-        # Mode explicitement désactivé (11/09/2026) : jamais de repli sur
-        # l'unique rattachement même s'il n'y en a qu'un -- voir
-        # MODE_DESACTIVE dans core/mode_actif_conversation.py.
+    connue) : traité EXACTEMENT comme MODE_DESACTIVE depuis le 13/09/2026
+    (demande explicite Bourama, revient sur le comportement antérieur qui
+    repliait sur l'unique rattachement s'il n'y en avait qu'un) -- None
+    systématiquement, jamais de repli automatique, même sans ambiguïté
+    possible."""
+    if rattachement_id is None or rattachement_id == MODE_DESACTIVE:
+        # Mode pas encore choisi OU explicitement désactivé (13/09/2026,
+        # demande Bourama) : les deux traités pareil désormais -- jamais
+        # de repli sur l'unique rattachement même s'il n'y en a qu'un.
         return None
-    if rattachement_id:
-        try:
-            res = (
-                supabase.table("rattachements_codes")
-                .select("codes_partage(id, nom, code)")
-                .eq("id", rattachement_id)
-                .eq("receveur_id", receveur_id)
-                .maybe_single()
-                .execute()
-            )
-        except Exception as e:
-            logging.error(f"ERREUR SUPABASE (resolution code actif via mode actif, rattachement {rattachement_id}) : {e}")
-            return None
-        if not res or not res.data or not res.data.get("codes_partage"):
-            return None
-        return res.data["codes_partage"]
+    # A partir d'ici, rattachement_id est forcement fourni (le early-return
+    # ci-dessus couvre None et MODE_DESACTIVE) -- plus besoin de branche
+    # "sans rattachement_id" (13/09/2026, retiree avec le repli automatique
+    # qu'elle servait).
     try:
         res = (
             supabase.table("rattachements_codes")
-            .select("code_id, codes_partage(id, nom, code)")
+            .select("codes_partage(id, nom, code)")
+            .eq("id", rattachement_id)
             .eq("receveur_id", receveur_id)
+            .maybe_single()
             .execute()
         )
     except Exception as e:
-        logging.error(f"ERREUR SUPABASE (resolution code actif eleve {receveur_id}) : {e}")
+        logging.error(f"ERREUR SUPABASE (resolution code actif via mode actif, rattachement {rattachement_id}) : {e}")
         return None
-    lignes = res.data or []
-    codes = [ligne["codes_partage"] for ligne in lignes if ligne.get("codes_partage")]
-    if not codes:
+    if not res or not res.data or not res.data.get("codes_partage"):
         return None
-    if len(codes) == 1:
-        return codes[0]
-    return codes
+    return res.data["codes_partage"]
 
 
 def consulter_progres_notion_pour_eleve(receveur_id: str, nom_notion: str, rattachement_id: str | None = None):

@@ -802,27 +802,29 @@ def profs_autorises_recherche_bibliotheque(receveur_id: str, rattachement_id: st
     le mode actif de la conversation (08/09/2026, demande Bourama --
     même principe que lister_comportements_recus pour les skills).
 
-    Renvoie None si AUCUN filtre ne doit être appliqué (0 ou 1
-    rattachement pour receveur_id : pas d'ambiguïté possible, comportement
-    inchangé, tous les documents personnels + celui de cet unique prof
-    éventuel restent cherchés comme avant). Renvoie une LISTE sinon :
+    Renvoie None si AUCUN filtre ne doit être appliqué (0 rattachement
+    pour receveur_id : rien à filtrer de toute façon, tous les documents
+    personnels restent cherchés comme avant). Renvoie une LISTE sinon :
     - `rattachement_id` fourni (mode actif choisi) : liste à un seul id,
       celui du prof propriétaire de ce rattachement.
-    - `rattachement_id` absent mais plusieurs rattachements existent
-      (mode actif pas encore choisi, ambiguïté réelle) : liste VIDE --
-      aucun document de prof inclus, seulement les documents personnels
-      de receveur_id, jamais un mélange silencieux entre plusieurs profs.
+    - `rattachement_id` absent (None ou MODE_DESACTIVE, mode pas encore
+      choisi ou explicitement désactivé) et AU MOINS un rattachement
+      existe : liste VIDE -- aucun document de prof inclus, seulement les
+      documents personnels de receveur_id (13/09/2026, demande explicite
+      Bourama, revient sur le repli automatique du 08/09 : même avec un
+      seul rattachement possible, un mode pas choisi ne doit jamais
+      appliquer silencieusement le document de ce prof).
 
     Le tri personnel/prof se fait ensuite côté appelant en comparant
     `uploade_par` à receveur_id lui-même (toujours inclus) et à cette
     liste (voir core/bibliotheque_rag.py)."""
     rattachements = lister_mes_rattachements(receveur_id)
-    if rattachement_id:
+    if rattachement_id and rattachement_id != MODE_DESACTIVE:
         trouve = next((r for r in rattachements if r["rattachement_id"] == rattachement_id), None)
         return [trouve["proprietaire_id"]] if trouve else []
-    if len(rattachements) > 1:
-        return []
-    return None
+    if not rattachements:
+        return None
+    return []
 
 
 def retirer_rattachement(rattachement_id: str, receveur_id: str) -> bool:
@@ -924,12 +926,13 @@ def lister_comportements_recus(receveur_id: str, rattachement_id: str | None = N
     actif choisi pour cette conversation, voir
     core/mode_actif_conversation.py), ne renvoie QUE les comportements de
     CE rattachement précis, jamais mélangés avec ceux des autres codes de
-    receveur_id. Si non fourni et que receveur_id a PLUSIEURS
-    rattachements (mode actif pas encore choisi, ambiguïté réelle entre
-    plusieurs profs) : renvoie une liste vide plutôt que de tout mélanger
-    -- décision explicite de Bourama, jamais de mélange silencieux. Si
-    receveur_id n'a qu'UN SEUL rattachement, aucune ambiguïté possible :
-    ce rattachement est utilisé automatiquement, mode actif ou non.
+    receveur_id. Si absent (None, mode pas encore choisi pour cette
+    conversation) : traité EXACTEMENT comme MODE_DESACTIVE ci-dessous
+    depuis le 13/09/2026 (demande explicite Bourama, revient sur la
+    décision du 08/09) -- plus de repli automatique sur l'unique
+    rattachement quand receveur_id n'en a qu'un seul. Un sélecteur de
+    mode affiché comme "rien choisi" ne doit jamais appliquer un mode en
+    silence, même sans ambiguïté possible.
 
     `ignorer_cache` (12/09/2026, outil de vérification à la demande) :
     si True, saute complètement le cache 2 minutes ci-dessus (ni lu, ni
@@ -937,11 +940,11 @@ def lister_comportements_recus(receveur_id: str, rattachement_id: str | None = N
     par l'outil MCP de vérification quand le modèle pense que
     l'injection automatique est périmée -- ne jamais passer True par
     défaut, sinon ça annule l'intérêt du cache."""
-    if rattachement_id == MODE_DESACTIVE:
-        # Mode explicitement désactivé par l'utilisateur pour cette
-        # conversation (11/09/2026) : comportement inchangé qu'il y ait un
-        # seul rattachement ou plusieurs -- aucun comportement reçu, jamais
-        # de repli automatique sur l'unique rattachement.
+    if rattachement_id is None or rattachement_id == MODE_DESACTIVE:
+        # Mode pas encore choisi OU explicitement désactivé (13/09/2026,
+        # demande Bourama) : les deux traités pareil désormais -- aucun
+        # comportement reçu, jamais de repli automatique sur l'unique
+        # rattachement, qu'il y en ait un seul ou plusieurs.
         return []
 
     maintenant = time.time()
@@ -952,10 +955,7 @@ def lister_comportements_recus(receveur_id: str, rattachement_id: str | None = N
             return entree["valeur"]
 
     rattachements = lister_mes_rattachements(receveur_id)
-    if rattachement_id:
-        rattachements = [r for r in rattachements if r["rattachement_id"] == rattachement_id]
-    elif len(rattachements) > 1:
-        return []
+    rattachements = [r for r in rattachements if r["rattachement_id"] == rattachement_id]
     par_comportement: dict[str, str] = {}  # comportement_id -> nom du propriétaire (premier trouvé)
     for r in rattachements:
         for c in r["comportements"]:
