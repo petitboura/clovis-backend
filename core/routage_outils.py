@@ -199,7 +199,17 @@ def _outil_demander_outils():
                 "clairement -- adapte-toi alors plutot que de rester "
                 "bloque en silence. A utiliser seulement quand tu es "
                 "reellement bloque par l'absence d'un outil, pas "
-                "systematiquement au debut de chaque tache."
+                "systematiquement au debut de chaque tache. "
+                "PRIORITE (12/09/2026, demande Bourama) : decris d'abord "
+                "l'outil precis dont tu as besoin pour la tache demandee "
+                "(ex: envoyer un message, gerer un document, un skill, "
+                "chercher sur le web). N'utilise gerer_base_connaissance "
+                "qu'en dernier recours, apres au maximum 2 recherches "
+                "d'outils precis infructueuses -- sauf si la question "
+                "porte clairement sur Clovis ou l'application elle-meme "
+                "(fonctionnement, bug, fonctionnalite), auquel cas "
+                "demande directement gerer_base_connaissance des la "
+                "premiere recherche."
             ),
             "parameters": {
                 "type": "object",

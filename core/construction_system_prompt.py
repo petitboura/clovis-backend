@@ -194,6 +194,15 @@ def _construire_system_prompt(message_utilisateur, agent_id, user_id=None, longu
             "nom_outil(...), nom_outil{...}, call:nom_outil{...}). Les blocs "
             "d'affichage mermaid/chart/carte/widget/geometrie restent disponibles : "
             "ce sont des formats de sortie, pas des outils.\n"
+            "ORDRE DE RECHERCHE (12/09/2026, demande Bourama) : quand tu appelles "
+            "demander_outils, décris d'abord le besoin le plus précis possible pour "
+            "trouver l'outil exact qui répond à la demande (ex: envoyer un message, "
+            "gérer un document, consulter un skill). N'appelle gerer_base_connaissance "
+            "qu'en dernier recours, après au maximum 2 recherches d'outils précis "
+            "infructueuses, sauf si la question porte clairement sur Clovis ou "
+            "l'application elle-même (fonctionnement, bug, fonctionnalité) : dans ce "
+            "cas, appelle gerer_base_connaissance directement dès la première "
+            "recherche.\n"
             "</outils>"
         )
 
