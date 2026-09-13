@@ -65,8 +65,8 @@ def peut_retirer_contenu(dossier_id: str, user_id: str) -> bool:
 
 def creer_dossier(
     user_id: str, nom: str, statut: str = "contribution_libre", dossier_parent_id: str = None,
-    pays: str = None, niveau: str = None, categorie: str = None,
-    classe: str = None, specialite: str = None, description: str = "",
+    pays: list[str] | None = None, niveau: list[str] | None = None, categorie: list[str] | None = None,
+    classe: list[str] | None = None, specialite: list[str] | None = None, description: str = "",
 ) -> dict:
     insertion = supabase.table("dossiers_catalogue_public").insert({
         "cree_par": user_id,
@@ -81,18 +81,44 @@ def creer_dossier(
         # 02/09/2026, demande Bourama : 3 filtres optionnels, cochables
         # aussi à la publication d'un DOSSIER (pas seulement un fichier),
         # voir core/listes_bibliotheque_publique.py.
-        "pays": pays,
-        "niveau": niveau,
-        "categorie": categorie,
+        # 13/09/2026, demande Bourama : chaque filtre accepte désormais
+        # PLUSIEURS valeurs pour un dossier (uniquement -- un fichier
+        # garde une seule valeur, inchangé). Colonnes text[] côté
+        # Supabase, voir migrations/2026_09_13_filtres_dossiers_
+        # catalogue_public_multi.sql.
+        "pays": pays or [],
+        "niveau": niveau or [],
+        "categorie": categorie or [],
         # 04/09/2026, demande Bourama : 2 filtres supplémentaires, même principe.
-        "classe": classe,
-        "specialite": specialite,
+        "classe": classe or [],
+        "specialite": specialite or [],
     }).execute()
     return insertion.data[0]
 
 
 def renommer_dossier(dossier_id: str, nouveau_nom: str) -> None:
     supabase.table("dossiers_catalogue_public").update({"nom": nouveau_nom}).eq("id", dossier_id).execute()
+
+
+def modifier_filtres_dossier(
+    dossier_id: str,
+    pays: list[str] | None = None, niveau: list[str] | None = None, categorie: list[str] | None = None,
+    classe: list[str] | None = None, specialite: list[str] | None = None,
+) -> None:
+    """
+    13/09/2026, demande Bourama : les 5 filtres d'un dossier n'étaient
+    modifiables nulle part jusqu'ici (seul renommer_dossier existait) --
+    permet désormais de les changer après coup, réservé au créateur du
+    dossier (même règle que renommer_dossier, voir api/dossiers_
+    catalogue_public.py pour la vérification cree_par).
+    """
+    supabase.table("dossiers_catalogue_public").update({
+        "pays": pays or [],
+        "niveau": niveau or [],
+        "categorie": categorie or [],
+        "classe": classe or [],
+        "specialite": specialite or [],
+    }).eq("id", dossier_id).execute()
 
 
 def lister_dossiers(pays_prioritaire: str | None = None) -> list:
@@ -115,7 +141,10 @@ def lister_dossiers(pays_prioritaire: str | None = None) -> list:
         .data
     )
     if pays_prioritaire:
-        dossiers.sort(key=lambda d: 0 if d.get("pays") == pays_prioritaire else 1)
+        # 13/09/2026 : "pays" est désormais une liste (plusieurs valeurs
+        # possibles par dossier) -- on regarde si le pays prioritaire en
+        # fait partie, au lieu d'une égalité stricte.
+        dossiers.sort(key=lambda d: 0 if pays_prioritaire in (d.get("pays") or []) else 1)
     return dossiers
 
 

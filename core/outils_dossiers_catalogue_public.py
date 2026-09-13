@@ -154,8 +154,11 @@ def gerer_dossier_catalogue_public(
                 nb_fichiers = len(_lister_fichiers_ids_dossier(d["id"]))
             except Exception:
                 nb_fichiers = 0
+            # 13/09/2026 : chaque filtre est désormais une liste (un
+            # dossier peut avoir plusieurs valeurs) -- affichage joint
+            # par "/" plutôt que la représentation Python brute d'une liste.
             filtres = ", ".join(
-                f"{cle}={d[cle]}" for cle in ("pays", "niveau", "categorie", "classe", "specialite") if d.get(cle)
+                f"{cle}={'/'.join(d[cle])}" for cle in ("pays", "niveau", "categorie", "classe", "specialite") if d.get(cle)
             )
             ligne = f"- {chemin} [id: {d['id']}] (statut: {d['statut']}, {nb_fichiers} fichier(s) direct(s))"
             if filtres:
@@ -210,9 +213,16 @@ def gerer_dossier_catalogue_public(
         try:
             dossier = _creer_dossier(
                 user_id, nom_val, statut=statut_val, dossier_parent_id=parent_id,
-                pays=(pays or "").strip() or None, niveau=(niveau or "").strip() or None,
-                categorie=(categorie or "").strip() or None, classe=(classe or "").strip() or None,
-                specialite=(specialite or "").strip() or None, description=(description or "").strip(),
+                # 13/09/2026 : creer_dossier attend désormais une liste par
+                # filtre (un dossier peut avoir plusieurs valeurs) -- cet
+                # outil ne propose qu'une seule valeur à la fois, on
+                # l'enveloppe simplement dans une liste d'un élément.
+                pays=[(pays or "").strip()] if (pays or "").strip() else [],
+                niveau=[(niveau or "").strip()] if (niveau or "").strip() else [],
+                categorie=[(categorie or "").strip()] if (categorie or "").strip() else [],
+                classe=[(classe or "").strip()] if (classe or "").strip() else [],
+                specialite=[(specialite or "").strip()] if (specialite or "").strip() else [],
+                description=(description or "").strip(),
             )
         except Exception as e:
             logging.error(f"ERREUR gerer_dossier_catalogue_public (creer) : {e}")

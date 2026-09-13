@@ -19,6 +19,7 @@ from core.dossiers_catalogue_public import (
     lister_demandes_en_attente,
     lister_dossiers,
     lister_fichiers_ids_dossier,
+    modifier_filtres_dossier,
     peut_ajouter_contenu,
     peut_retirer_contenu,
     ranger_fichier,
@@ -34,7 +35,7 @@ from core.dossiers_publics_attaches import (
     propager_fichier_public_range_dossier,
 )
 from core.geolocalisation_pays import pays_utilisateur
-from core.listes_bibliotheque_publique import normaliser_et_enregistrer
+from core.listes_bibliotheque_publique import normaliser_et_enregistrer, normaliser_et_enregistrer_liste
 
 router = APIRouter(prefix="/api/bibliotheque-publique/dossiers", tags=["dossiers-catalogue-public"])
 
@@ -44,15 +45,25 @@ class CreerDossierPayload(BaseModel):
     description: str = ""
     statut: str = "contribution_libre"
     dossier_parent_id: str | None = None
-    pays: str = ""
-    niveau: str = ""
-    categorie: str = ""
-    classe: str = ""
-    specialite: str = ""
+    # 13/09/2026, demande Bourama : un dossier (uniquement) accepte
+    # désormais plusieurs valeurs par filtre au lieu d'une seule.
+    pays: list[str] = []
+    niveau: list[str] = []
+    categorie: list[str] = []
+    classe: list[str] = []
+    specialite: list[str] = []
 
 
 class RenommerDossierPayload(BaseModel):
     nom: str
+
+
+class ModifierFiltresDossierPayload(BaseModel):
+    pays: list[str] = []
+    niveau: list[str] = []
+    categorie: list[str] = []
+    classe: list[str] = []
+    specialite: list[str] = []
 
 
 class RangerFichierPayload(BaseModel):
@@ -91,11 +102,11 @@ def creer(payload: CreerDossierPayload, utilisateur=Depends(utilisateur_courant)
     nom = (payload.nom or "").strip() or "Nouveau dossier"
     return creer_dossier(
         utilisateur.id, nom, payload.statut, payload.dossier_parent_id,
-        pays=normaliser_et_enregistrer("pays", payload.pays),
-        niveau=normaliser_et_enregistrer("niveau", payload.niveau),
-        categorie=normaliser_et_enregistrer("categorie", payload.categorie),
-        classe=normaliser_et_enregistrer("classe", payload.classe),
-        specialite=normaliser_et_enregistrer("specialite", payload.specialite),
+        pays=normaliser_et_enregistrer_liste("pays", payload.pays),
+        niveau=normaliser_et_enregistrer_liste("niveau", payload.niveau),
+        categorie=normaliser_et_enregistrer_liste("categorie", payload.categorie),
+        classe=normaliser_et_enregistrer_liste("classe", payload.classe),
+        specialite=normaliser_et_enregistrer_liste("specialite", payload.specialite),
         # 08/09/2026, demande Bourama : dossiers = même logique que les fichiers, description optionnelle.
         description=(payload.description or "").strip(),
     )
@@ -131,6 +142,26 @@ def renommer(dossier_id: str, payload: RenommerDossierPayload, utilisateur=Depen
     nouveau_nom = (payload.nom or "").strip() or "Nouveau dossier"
     renommer_dossier(dossier_id, nouveau_nom)
     return {"id": dossier_id, "nom": nouveau_nom}
+
+
+@router.patch("/{dossier_id}/filtres")
+def modifier_filtres(dossier_id: str, payload: ModifierFiltresDossierPayload, utilisateur=Depends(utilisateur_courant)):
+    # 13/09/2026, demande Bourama : les filtres n'étaient modifiables
+    # nulle part jusqu'ici -- réservé au créateur du dossier, même
+    # règle que renommer ci-dessus (403 sinon, jamais de flux "demande"
+    # pour cette action).
+    dossier = _dossier(dossier_id)
+    if not dossier:
+        raise erreur_api(404, "DOSSIER_INTROUVABLE")
+    if dossier["cree_par"] != utilisateur.id:
+        raise erreur_api(403, "CE_DOSSIER_NE_T_APPARTIENT_PAS")
+    pays = normaliser_et_enregistrer_liste("pays", payload.pays)
+    niveau = normaliser_et_enregistrer_liste("niveau", payload.niveau)
+    categorie = normaliser_et_enregistrer_liste("categorie", payload.categorie)
+    classe = normaliser_et_enregistrer_liste("classe", payload.classe)
+    specialite = normaliser_et_enregistrer_liste("specialite", payload.specialite)
+    modifier_filtres_dossier(dossier_id, pays=pays, niveau=niveau, categorie=categorie, classe=classe, specialite=specialite)
+    return {"id": dossier_id, "pays": pays, "niveau": niveau, "categorie": categorie, "classe": classe, "specialite": specialite}
 
 
 @router.delete("/{dossier_id}")

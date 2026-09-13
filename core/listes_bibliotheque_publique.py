@@ -73,3 +73,22 @@ def normaliser_et_enregistrer(champ: str, valeur: str | None) -> str | None:
     except Exception as e:
         logging.error(f"ERREUR ECRITURE {table} (valeur={valeur}) : {e}")
     return valeur
+
+
+def normaliser_et_enregistrer_liste(champ: str, valeurs: list[str] | None) -> list[str]:
+    """
+    13/09/2026, demande Bourama : un DOSSIER (pas un fichier, qui garde
+    normaliser_et_enregistrer ci-dessus, une seule valeur) peut recevoir
+    plusieurs valeurs pour un même filtre. Nettoie/déduplique (en gardant
+    l'ordre d'arrivée) et enregistre chaque valeur individuellement via
+    normaliser_et_enregistrer -- même logique "jamais bloquant, jamais de
+    liste fermée" que pour une seule valeur.
+    """
+    if not valeurs:
+        return []
+    resultat: list[str] = []
+    for v in valeurs:
+        nettoyee = normaliser_et_enregistrer(champ, v)
+        if nettoyee and nettoyee not in resultat:
+            resultat.append(nettoyee)
+    return resultat

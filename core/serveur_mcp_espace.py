@@ -982,9 +982,16 @@ def creer_dossier_catalogue_public(
     try:
         dossier = _creer_dossier_public(
             user_id, nom, statut=statut, dossier_parent_id=parent_id,
-            pays=(pays or "").strip() or None, niveau=(niveau or "").strip() or None,
-            categorie=(categorie or "").strip() or None, classe=(classe or "").strip() or None,
-            specialite=(specialite or "").strip() or None, description=(description or "").strip(),
+            # 13/09/2026 : creer_dossier attend désormais une liste par
+            # filtre (un dossier peut avoir plusieurs valeurs) -- cet
+            # outil ne propose qu'une seule valeur à la fois, on
+            # l'enveloppe simplement dans une liste d'un élément.
+            pays=[(pays or "").strip()] if (pays or "").strip() else [],
+            niveau=[(niveau or "").strip()] if (niveau or "").strip() else [],
+            categorie=[(categorie or "").strip()] if (categorie or "").strip() else [],
+            classe=[(classe or "").strip()] if (classe or "").strip() else [],
+            specialite=[(specialite or "").strip()] if (specialite or "").strip() else [],
+            description=(description or "").strip(),
         )
     except Exception as e:
         logging.error(f"ERREUR outil creer_dossier_catalogue_public : {e}")
