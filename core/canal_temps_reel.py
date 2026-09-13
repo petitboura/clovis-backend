@@ -42,6 +42,32 @@ from fastapi import WebSocket
 _connexions: dict[tuple[str, str], WebSocket] = {}
 _verrou_connexions = asyncio.Lock()
 
+# Correctif 13/09/2026, Bourama ("explorer_dossier bugue souvent",
+# confirme par les logs : "unhandled errors in a TaskGroup") : Starlette/
+# websockets n'admet pas deux envois concurrents sur le MEME WebSocket
+# depuis deux coroutines differentes -- ca arrivait des que deux
+# explorer_dossier partaient en parallele pour le meme appareil
+# (poser_question_appareil appele deux fois a la suite), ou qu'une
+# notification de fond (notifier_utilisateur, ex: fin d'une action
+# renommer/deplacer/creer) arrivait pile pendant qu'une question
+# d'exploration etait en train d'etre envoyee sur la meme connexion.
+# Un verrou par (user_id, appareil_id), tenu UNIQUEMENT le temps du
+# send_json (jamais pendant l'attente de la reponse), serialise ces
+# envois sans ralentir ni bloquer la correlation question/reponse
+# existante (toujours geree par correlation_id, inchangee ci-dessous).
+_verrous_envoi: dict[tuple[str, str], asyncio.Lock] = {}
+
+
+async def _verrou_envoi_pour(cle: tuple[str, str]) -> asyncio.Lock:
+    async with _verrou_connexions:
+        verrou = _verrous_envoi.get(cle)
+        if verrou is None:
+            verrou = asyncio.Lock()
+            _verrous_envoi[cle] = verrou
+        return verrou
+
+
+
 # Requetes en attente de reponse, indexees par identifiant de correlation
 # -- permet de ne jamais melanger deux echanges si plusieurs surviennent
 # a la suite pour le meme utilisateur.
@@ -93,6 +119,7 @@ async def deconnecter(user_id: str, appareil_id: str, websocket: WebSocket) -> N
     async with _verrou_connexions:
         if _connexions.get(cle) is websocket:
             del _connexions[cle]
+            _verrous_envoi.pop(cle, None)
 
 
 def recevoir_reponse(correlation_id: str, reponse: Any) -> None:
@@ -130,15 +157,17 @@ async def notifier_utilisateur(user_id: str, notification: dict) -> bool:
     le dernier appareil connecte.
     """
     async with _verrou_connexions:
-        websockets = [ws for (uid, _appareil_id), ws in _connexions.items() if uid == user_id]
+        connexions = [(cle, ws) for cle, ws in _connexions.items() if cle[0] == user_id]
 
-    if not websockets:
+    if not connexions:
         return False
 
     diffuse = False
-    for websocket in websockets:
+    for cle, websocket in connexions:
+        verrou = await _verrou_envoi_pour(cle)
         try:
-            await websocket.send_json({"type": "notification_nouvelle", "notification": notification})
+            async with verrou:
+                await websocket.send_json({"type": "notification_nouvelle", "notification": notification})
             diffuse = True
         except Exception as e:
             logging.error(f"ERREUR diffusion notification temps reel (user={user_id}) : {e}")
@@ -205,8 +234,10 @@ async def poser_question_appareil(
     _attentes[correlation_id] = future
 
     try:
+        verrou_envoi = await _verrou_envoi_pour((user_id, appareil_id))
         try:
-            await websocket.send_json({"id": correlation_id, "question": contenu})
+            async with verrou_envoi:
+                await websocket.send_json({"id": correlation_id, "question": contenu})
         except Exception as e:
             logging.error(f"ERREUR envoi question canal temps reel (user={user_id}, appareil={appareil_id}) : {e}")
             return None

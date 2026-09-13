@@ -386,6 +386,24 @@ def appeler_outil(nom_outil, arguments, table_routage):
         )
         logging.info(f"Résultat outil '{nom_outil}' : {len(resultat or '')} caractères")
         return resultat
+    except BaseExceptionGroup as eg:
+        # Correctif 13/09/2026, Bourama : "unhandled errors in a TaskGroup
+        # (N sub-exception(s))" est le message par defaut d'un
+        # ExceptionGroup/TaskGroup (anyio, utilise par le client MCP
+        # streamable-http) -- str(eg) seul ne montre JAMAIS la vraie cause
+        # nichee dedans, seulement ce resume vide. On deplie ici chaque
+        # sous-exception (recursivement, une ExceptionGroup peut en
+        # contenir d'autres) pour enfin voir le vrai type/message, avec
+        # exc_info pour la trace complete de l'ExceptionGroup elle-meme.
+        def _aplatir(exc):
+            if isinstance(exc, BaseExceptionGroup):
+                for sous in exc.exceptions:
+                    yield from _aplatir(sous)
+            else:
+                yield exc
+        detail = "; ".join(f"{type(sub).__name__}: {sub}" for sub in _aplatir(eg))
+        logging.error(f"ERREUR MCP appel a {nom_outil} (TaskGroup) : {detail}", exc_info=True)
+        return f"Erreur lors de l'appel a l'outil '{nom_outil}'."
     except Exception as e:
-        logging.error(f"ERREUR MCP appel a {nom_outil}: {e}")
+        logging.error(f"ERREUR MCP appel a {nom_outil}: {e}", exc_info=True)
         return f"Erreur lors de l'appel a l'outil '{nom_outil}'."
