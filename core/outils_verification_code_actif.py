@@ -48,6 +48,8 @@ import logging
 from core.avancement_notions_ia import resoudre_code_actif_eleve as _resoudre_code_actif_eleve
 from core.avancement_notions_ia import consulter_progres_notion_pour_eleve as _consulter_progres_notion_pour_eleve
 from core.avancement_notions_ia import toutes_notions_code as _toutes_notions_code
+from core.avancement_notions_ia import regle_effective_pour_notion as _regle_effective_pour_notion
+from core.avancement_notions_ia import consigne_effective_pour_notion as _consigne_effective_pour_notion
 from core.codes_partage import lister_comportements_recus as _lister_comportements_recus
 from core.mode_actif_conversation import rattachement_actif_pour_prompt as _rattachement_actif_pour_prompt
 from core.signalements import consulter_par_notion as _consulter_par_notion
@@ -116,15 +118,24 @@ def verifier_consignes_code_actif(action: str, ctx: Context, nom_notion: str = "
             except Exception as e:
                 logging.error(f"ERREUR verifier_consignes_code_actif (programme, liste générale) : {e}")
                 return "Aucune donnée de programme disponible, réponds avec ton jugement habituel."
-            pertinentes = [n for n in notions if n.get("statut") == "a_venir" and (n.get("regle_comportement") or n.get("consigne_llm"))]
+            pertinentes = []
+            for n in notions:
+                regle = _regle_effective_pour_notion(n, notions)
+                consigne = _consigne_effective_pour_notion(n, notions)
+                if regle or consigne:
+                    pertinentes.append((n, regle, consigne))
             if not pertinentes:
-                return "Aucune notion \"à venir\" avec une règle ou une consigne configurée par le prof en ce moment."
+                return "Aucune notion avec une règle ou une consigne configurée par le prof en ce moment."
             lignes = []
-            for n in pertinentes:
-                regle = f" règle=\"{n['regle_comportement']}\"" if n.get("regle_comportement") else ""
-                consigne = f" consigne=\"{n['consigne_llm']}\"" if n.get("consigne_llm") else ""
-                lignes.append(f"- \"{n['nom']}\" (à venir) --{regle}{consigne}")
-            return "Notions à venir avec règle/consigne du prof :\n" + "\n".join(lignes)
+            for n, regle, consigne in pertinentes:
+                regle_txt = f" règle si pas encore vue=\"{regle}\"" if regle else ""
+                consigne_txt = f" consigne=\"{consigne}\"" if consigne else ""
+                lignes.append(f"- \"{n['nom']}\" (statut \"{n.get('statut')}\") --{regle_txt}{consigne_txt}")
+            return (
+                "Notions avec règle/consigne du prof (statut indiqué à titre d'information, "
+                "\"acquis\"/\"en_cours\" -> réponds normalement en respectant quand même une consigne "
+                "si indiquée ; \"a_venir\" -> applique la règle) :\n" + "\n".join(lignes)
+            )
         try:
             resultat = _consulter_progres_notion_pour_eleve(etudiant_id, nom_notion, rattachement_id_actif)
         except Exception as e:
@@ -145,8 +156,9 @@ def verifier_consignes_code_actif(action: str, ctx: Context, nom_notion: str = "
         regle = resultat.get("regle")
         consigne = resultat.get("consigne")
         suffixe_consigne = f" Consigne à respecter pour cette notion : \"{consigne}\"." if consigne else ""
+        suffixe_regle_info = f" Règle du prof si pas encore vue en classe : \"{regle}\"." if regle else ""
         if statut != "a_venir":
-            return f"Notion \"{nom_trouve}\" : statut \"{statut}\" (déjà vue en classe), réponds normalement.{suffixe_consigne}"
+            return f"Notion \"{nom_trouve}\" : statut \"{statut}\" (déjà vue en classe), réponds normalement.{suffixe_regle_info}{suffixe_consigne}"
         if regle:
             return f"Notion \"{nom_trouve}\" : pas encore vue en classe (statut \"a_venir\"), règle configurée : \"{regle}\".{suffixe_consigne}"
         return f"Notion \"{nom_trouve}\" : pas encore vue en classe (statut \"a_venir\"), aucune règle configurée, aide l'élève en le signalant.{suffixe_consigne}"

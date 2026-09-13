@@ -18,7 +18,7 @@ from comportements_etudiants import (
 #   from programme_llm import lister_mes_programmes_legers
 #   from codes_partage import lister_programmes_recus_legers
 from codes_partage import lister_comportements_recus
-from mode_actif_conversation import rattachement_actif_pour_prompt
+from core.mode_actif_conversation import rattachement_actif_pour_prompt
 from avancement_notions_ia import notions_pertinentes_pour_eleve, resoudre_code_actif_eleve
 from signalements import signalements_pertinents_pour_injection
 from mcp_tools import lister_outils_autorises_pour_agent, filtrer_catalogue_par_outil_force, appeler_outil
