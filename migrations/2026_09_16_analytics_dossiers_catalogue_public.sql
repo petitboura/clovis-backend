@@ -27,3 +27,5 @@ begin
   end if;
 end;
 $$;
+
+grant execute on function incrementer_analytics_dossier_catalogue_public(uuid, text) to anon, authenticated;
